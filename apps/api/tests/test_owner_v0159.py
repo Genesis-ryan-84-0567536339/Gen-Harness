@@ -322,6 +322,41 @@ async def test_brief_id_picks_a_history_entry_and_history_is_capped(owner: Api, 
         assert r.status_code == 404 and r.json()["code"] == "NOT_FOUND", bad
 
 
+async def test_brief_is_found_even_behind_more_than_sixty_newer_conversations(owner: Api, db: Any) -> None:
+    """F-60-R11 (sau /code-review): Owner chat nhiều (61 hội thoại mới hơn) vẫn thấy bản tin, ở Tình báo lẫn Hôm nay."""
+    org, uid = await _org(db), await _owner_id(db)
+    cid = await conversation(db, org, uid, _brief_content(), title="Bản tin Gen · sáng 10/10",
+                             created_at=ago(days=3))
+    for i in range(61):
+        await conversation(db, org, uid, {"steps": [{"kind": "say", "text": f"Chat {i}"}]}, title=f"Chat {i}",
+                           created_at=ago(minutes=60 - i))
+    await db.commit()
+    d = (await owner.get("/owner/brief")).json()
+    assert d["latest"]["id"] == str(cid) and [h["id"] for h in d["history"]] == [str(cid)]
+    assert (await owner.get(f"/owner/brief?id={cid}")).json()["latest"]["id"] == str(cid)
+    assert (await owner.get("/owner/today")).json()["briefing_latest"]["to"] == f"/owner/gen?gen={cid}"
+
+
+async def test_brief_with_id_skips_the_live_collection(owner: Api, db: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """F-60-R12: xem một bản CŨ (`?id=`) không chạy `briefing.collect` — `live` null; không `id` thì vẫn có `live`."""
+    org, uid = await _org(db), await _owner_id(db)
+    cid = await conversation(db, org, uid, _brief_content(), title="Bản tin cũ")
+    await db.commit()
+    real = briefing.collect
+    calls: list[int] = []
+
+    async def counting(*a: Any, **k: Any) -> Any:
+        calls.append(1)
+        return await real(*a, **k)
+
+    monkeypatch.setattr(briefing, "collect", counting)
+    d = (await owner.get(f"/owner/brief?id={cid}")).json()
+    assert calls == [] and d["live"] is None and d["latest"]["id"] == str(cid)
+    assert set(d) == {"latest", "live", "alerts", "history", "next_at", "ai_ready", "channels_connected"}
+    live = (await owner.get("/owner/brief")).json()["live"]
+    assert calls == [1] and live["sections"] and live["at"].endswith("Z")
+
+
 async def test_brief_only_shows_own_conversations(owner: Api, client: Any, db: Any) -> None:
     org = await _org(db)
     other = await other_user(db, org)
@@ -429,7 +464,7 @@ async def test_today_and_proposals_survive_a_broken_redis(owner: Api, db: Any, r
     async def broken(*_a: Any, **_k: Any) -> Any:
         raise RedisConnectionError("mật khẩu=bí-mật-123 không nối được")
 
-    monkeypatch.setattr(gen_proposals, "load", broken)
+    monkeypatch.setattr(gen_proposals, "load_many", broken)
     with caplog.at_level("WARNING"):
         r = await owner.get("/owner/today")
         p = await owner.get("/owner/proposals")
@@ -469,6 +504,40 @@ async def test_proposals_only_valid_redis_backed_own_pending(owner: Api, db: Any
     exp = datetime.fromisoformat(p["expires_at"].replace("Z", "+00:00"))
     assert timedelta(minutes=50) < exp - datetime.now(UTC) <= timedelta(hours=1)
     assert "KHÔNG ĐƯỢC LẤY" not in r.text
+
+
+async def test_proposals_use_one_redis_round_trip_for_the_whole_list(owner: Api, db: Any, redis: Any,
+                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    """F-60-R13 (sau /code-review): trước đây 2 lượt Redis tuần tự (GET + TTL) cho MỖI đề xuất trên mỗi /owner/today."""
+    from redis.asyncio.client import Pipeline, Redis
+
+    org, uid = await _org(db), await _owner_id(db)
+    for i in range(5):
+        await proposal(db, redis, org, uid, created_at=ago(minutes=10 + i))
+    await db.commit()
+    prop_key = gen_proposals.key("")
+    direct: list[Any] = []
+    pipes: list[int] = []
+    real_exec, real_pipe = Redis.execute_command, Pipeline.execute
+
+    async def spy_exec(self: Any, *args: Any, **kw: Any) -> Any:
+        if len(args) > 1 and str(args[1]).startswith(prop_key):
+            direct.append(args[:2])
+        return await real_exec(self, *args, **kw)
+
+    async def spy_pipe(self: Any, *a: Any, **kw: Any) -> Any:
+        n = sum(1 for cmd in self.command_stack if len(cmd[0]) > 1 and str(cmd[0][1]).startswith(prop_key))
+        if n:
+            pipes.append(n)
+        return await real_pipe(self, *a, **kw)
+
+    monkeypatch.setattr(Redis, "execute_command", spy_exec)
+    monkeypatch.setattr(Pipeline, "execute", spy_pipe)
+    items = (await owner.get("/owner/proposals")).json()["items"]
+    assert len(items) == 5 and all(i["expires_at"] for i in items)
+    assert direct == [] and pipes == [10]                       # một pipeline: 5 GET + 5 TTL, không lệnh lẻ
+    pipes.clear()
+    assert (await owner.get("/owner/today")).json()["nav"]["decide"] == 5 and pipes == [10]
 
 
 async def test_proposals_empty(owner: Api) -> None:
@@ -538,6 +607,24 @@ async def test_care_rule_order_and_scope(owner: Api, db: Any) -> None:
     assert "ngày chưa liên lạc" in items[3]["metric_text"] and "sắp rời" in items[0]["metric_text"]
     assert (await owner.get("/owner/relations?list=care&limit=2")).json()["items"][1]["name"] == "Anh Unknown"
     assert (await owner.get("/owner/relations?list=care&limit=999")).status_code == 200
+
+
+async def test_care_marks_people_who_already_have_an_open_reminder(owner: Api, db: Any) -> None:
+    """F-60-R15 (sau /code-review): "Gen đề xuất" không gợi ý tạo nhắc trùng — dòng care báo `has_open_task` khi người
+    đã có việc/nhắc hẹn ĐANG MỞ gắn vào hồ sơ (xong/huỷ thì không)."""
+    org = await _org(db)
+    open_ = await _care_person(db, org, "R-1", "Đã có nhắc", "customer", churn=80)
+    done = await _care_person(db, org, "R-2", "Nhắc đã xong", "customer", churn=70)
+    none = await _care_person(db, org, "R-3", "Chưa có nhắc", "customer", churn=60)
+    for i, (pid, status) in enumerate(((open_, "todo"), (open_, "done"), (done, "done"), (done, "cancelled"))):
+        await db.execute(text("""INSERT INTO biz.tasks (org_id, code, title, priority, status, subject_type, subject_id,
+                                                         due_at, source)
+                                 VALUES (:o, :c, 'Gọi hỏi thăm', 'P3', :s, 'person', :p, now() + interval '1 day',
+                                         'manual')"""), {"o": org, "c": f"TSK-R{i}", "s": status, "p": pid})
+    await db.commit()
+    items = {i["person_id"]: i for i in (await owner.get("/owner/relations?list=care")).json()["items"]}
+    assert items[str(open_)]["has_open_task"] is True
+    assert "has_open_task" not in items[str(done)] and "has_open_task" not in items[str(none)]
 
 
 async def test_care_bounds_the_silent_scan_to_a_window_and_keeps_churn_people(owner: Api, db: Any) -> None:

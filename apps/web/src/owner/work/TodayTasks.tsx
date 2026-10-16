@@ -1,11 +1,12 @@
 /**
  * v0.1.59 (G3) — "Việc hôm nay" và "Gen đề xuất" của màn Việc (`/owner/viec`).
  *
- * - Việc hôm nay = việc đang mở (`GET /tasks`, trạng thái todo + doing) có hạn đến hết hôm nay hoặc đã quá hạn
+ * - Việc hôm nay = việc đang mở (`GET /tasks`, trạng thái todo + doing) có hạn đến hết hôm nay hoặc đã quá hạn — LỌC HẠN Ở MÁY CHỦ
+ *   (`due_before` = đầu ngày mai theo giờ tổ chức) nên việc quá hạn tạo từ lâu không rơi khỏi 50 việc mới nhất
  *   + lời hứa quá hạn (`GET /tasks/promises?status=overdue`). Tick "Xong" (`useTaskDone`; lời hứa thì ghi "đã giữ lời"),
  *   "Dời sang mai" (`useTaskPostpone`, 09:00 sáng mai), "Mở hồ sơ" (`/owner/quan-he?nguoi=<mã người>`).
  * - Gen đề xuất = gợi ý nhắc việc cho khách cần chăm (`GET /owner/relations?list=care`) — Sếp bấm "Tạo nhắc" (`useCreateReminder`)
- *   thì mới có việc; Gen không tự tạo.
+ *   thì mới có việc; Gen không tự tạo. Người ĐÃ có việc/nhắc đang mở (`has_open_task`) không được gợi ý nữa (tải lại không tạo trùng).
  * Mọi chuỗi từ máy chủ qua `asText`; lỗi = câu thân thiện + "Chi tiết kỹ thuật".
  */
 /* eslint-disable react-refresh/only-export-components */
@@ -38,6 +39,32 @@ export function dayKey(iso: string | number | Date, tz: string = DEFAULT_TZ): st
     return fmt(DEFAULT_TZ);
   }
 }
+
+/** Số phút lệch của múi giờ `tz` so với UTC tại thời điểm `at` (UTC+7 ⇒ 420). Múi lạ ⇒ dùng DEFAULT_TZ. */
+function tzOffsetMin(at: number, tz: string): number {
+  const read = (zone: string) => {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: zone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(new Date(at));
+    const n = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+    return (Date.UTC(n('year'), n('month') - 1, n('day'), n('hour'), n('minute'), n('second')) - Math.floor(at / 1000) * 1000) / 60_000;
+  };
+  try {
+    return read(tz);
+  } catch {
+    return read(DEFAULT_TZ);
+  }
+}
+
+/** Đầu ngày MAI (00:00) theo giờ tổ chức, dạng ISO — mốc `due_before` của "Việc hôm nay". Cùng một giá trị cả ngày (khoá truy vấn ổn định). */
+export function tomorrowStartIso(now: number = Date.now(), tz: string = DEFAULT_TZ): string {
+  const [y, m, d] = dayKey(now, tz).split('-').map(Number);
+  const wall = Date.UTC(y, m - 1, d + 1, 0, 0, 0);
+  let at = wall - tzOffsetMin(wall, tz) * 60_000;
+  at = wall - tzOffsetMin(at, tz) * 60_000; // lần 2: múi giờ có giờ mùa hè lệch ngay quanh nửa đêm
+  return new Date(at).toISOString();
+}
+
+/** Mỗi nguồn việc (todo / doing) tải tối đa chừng này việc hạn ≤ hôm nay; nhiều hơn thì báo "còn N việc nữa". */
+export const TODAY_TASKS_LIMIT = 200;
 
 export interface TodayItem {
   kind: 'task' | 'promise';
@@ -118,6 +145,8 @@ export interface TodayData {
   promisesFailed: boolean;
   /** Chỉ MỘT trong hai nguồn việc (todo / doing) lỗi — danh sách có thể thiếu. */
   tasksPartialFailed: boolean;
+  /** Số việc hạn ≤ hôm nay mà máy chủ có nhưng chưa tải hết (vượt `TODAY_TASKS_LIMIT`); 0 = đã đủ. */
+  tasksNotShown: number;
   /** Lỗi của phần không tải được (lời hứa, hoặc nguồn việc lỗi) — cho "Chi tiết kỹ thuật" của dòng báo một phần. */
   partialError: unknown;
   error: unknown;
@@ -126,17 +155,22 @@ export interface TodayData {
 }
 
 export function useTodayData(tz: string = DEFAULT_TZ): TodayData {
-  const todo = useTasks({ status: 'todo' });
-  const doing = useTasks({ status: 'doing' });
+  // Lọc hạn Ở MÁY CHỦ (`due_before` = đầu ngày mai): trước đây lấy 50 việc mới nhất rồi lọc ở web nên việc quá hạn tạo sớm bị rơi.
+  const dueBefore = tomorrowStartIso(Date.now(), tz); // cùng một giá trị cả ngày ⇒ khoá truy vấn ổn định; qua nửa đêm thì tự tải lại
+  const todo = useTasks({ status: 'todo', due_before: dueBefore, limit: TODAY_TASKS_LIMIT });
+  const doing = useTasks({ status: 'doing', due_before: dueBefore, limit: TODAY_TASKS_LIMIT });
   const promises = usePromises('overdue');
   const taskRows = [...(Array.isArray(todo.data?.items) ? todo.data.items : []), ...(Array.isArray(doing.data?.items) ? doing.data.items : [])];
   const promiseRows = Array.isArray(promises.data?.items) ? promises.data.items : [];
+  const shown = (q: typeof todo) => (Array.isArray(q.data?.items) ? q.data.items.length : 0);
+  const total = (q: typeof todo) => (typeof q.data?.total === 'number' ? q.data.total : shown(q));
   return {
     items: buildTodayItems(taskRows, promiseRows, Date.now(), tz),
     isPending: todo.isPending && doing.isPending,
     isError: todo.isError && doing.isError,
     promisesFailed: promises.isError,
     tasksPartialFailed: todo.isError !== doing.isError,
+    tasksNotShown: Math.max(0, total(todo) - shown(todo)) + Math.max(0, total(doing) - shown(doing)),
     partialError: promises.error ?? todo.error ?? doing.error,
     error: todo.error ?? doing.error,
     isFetching: todo.isFetching || doing.isFetching || promises.isFetching,
@@ -189,6 +223,12 @@ export function TodayTasks({ data, kicker, tz = DEFAULT_TZ, className }: { data:
       {data.tasksPartialFailed ? 'Chưa tải được một phần danh sách việc — danh sách dưới đây có thể thiếu.' : 'Chưa tải được danh sách lời hứa — danh sách dưới đây có thể thiếu.'}
     </PartialLoadNote>
   ) : null;
+  const truncated =
+    data.tasksNotShown > 0 ? (
+      <p className="owner-muted" data-testid="work-today-truncated">
+        {`Còn ${data.tasksNotShown} việc đến hạn nữa chưa hiện hết — Sếp mở Việc & Nhắc hẹn để xem đủ.`}
+      </p>
+    ) : null;
   if (data.items.length === 0) {
     return (
       <Card title={title} kicker={kicker} className={className} data-testid="work-today">
@@ -202,6 +242,7 @@ export function TodayTasks({ data, kicker, tz = DEFAULT_TZ, className }: { data:
           }
         />
         {partial}
+        {truncated}
         {failed ? <InlineError detail={errorDetail(failed)}>{errorText(failed)}</InlineError> : null}
       </Card>
     );
@@ -215,6 +256,7 @@ export function TodayTasks({ data, kicker, tz = DEFAULT_TZ, className }: { data:
         </div>
       ) : null}
       {partial ? <div className="work-note">{partial}</div> : null}
+      {truncated ? <div className="work-note">{truncated}</div> : null}
       <ul className="work-list" aria-label="Việc hôm nay">
         {data.items.map((it) => {
           const key = `${it.kind}-${it.id}`;
@@ -275,28 +317,33 @@ export interface Suggestion {
   meta: string;
 }
 
-/** Khách cần chăm (có mã người) → gợi ý "Nhắc gọi hỏi thăm …". Hàng không có mã người bị bỏ. */
-export function buildSuggestions(rows: readonly OwnerRelationRow[]): Suggestion[] {
+/**
+ * Khách cần chăm (có mã người) → gợi ý "Nhắc gọi hỏi thăm …". Hàng không có mã người bị bỏ; người ĐÃ có việc/nhắc đang mở
+ * (`has_open_task`) cũng bị bỏ — nếu không, tải lại trang là gợi ý lại và Sếp tạo nhắc trùng. `keep`: người vừa được tạo nhắc
+ * trong phiên này vẫn giữ dòng ("Đã tạo nhắc") dù máy chủ đã báo họ có việc mở.
+ */
+export function buildSuggestions(rows: readonly OwnerRelationRow[], keep: ReadonlySet<string> = new Set()): Suggestion[] {
   const out: Suggestion[] = [];
   for (const r of rows) {
     const personId = asText(r?.person_id).trim();
     const name = asText(r?.name).trim();
     if (!personId || !name) continue;
+    if (r.has_open_task === true && !keep.has(personId)) continue;
     const value = typeof r.open_value_vnd === 'number' && r.open_value_vnd > 0 ? `còn cơ hội ${moneyText(r.open_value_vnd)}` : '';
     out.push({ personId, name, task: `Gọi hỏi thăm ${name}`, meta: [asText(r.metric_text) || asText(r.subtitle), value].filter(Boolean).join(' · ') });
   }
   return out;
 }
 
-export function suggestionRows(q: Pick<UseQueryResult<OwnerRelations>, 'data'>): Suggestion[] {
-  return buildSuggestions(Array.isArray(q.data?.items) ? q.data.items : []);
+export function suggestionRows(q: Pick<UseQueryResult<OwnerRelations>, 'data'>, keep?: ReadonlySet<string>): Suggestion[] {
+  return buildSuggestions(Array.isArray(q.data?.items) ? q.data.items : [], keep);
 }
 
 export function GenSuggest({ q, className }: { q: UseQueryResult<OwnerRelations>; className?: string }) {
   const create = useCreateReminder();
   const [made, setMade] = useState<ReadonlySet<string>>(new Set());
   const title = 'Gen đề xuất';
-  const rows = suggestionRows(q);
+  const rows = suggestionRows(q, made);
   if (q.isPending) return <Card title={title} state="loading" className={className} data-testid="work-suggest-loading" />;
   if (q.isError) {
     return (

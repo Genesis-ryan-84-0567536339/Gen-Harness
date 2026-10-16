@@ -10,7 +10,7 @@ export const qk3 = {
   raw: (id: string) => ['explain', 'raw', id] as const,
   views: (screen?: string) => ['views', screen ?? '*'] as const,
   drafts: ['drafts'] as const,
-  draftList: (status: string, kind?: string) => ['drafts', 'list', status, kind ?? ''] as const,
+  draftList: (status: string, kind?: string, hideSilenced = false) => ['drafts', 'list', status, kind ?? '', ...(hideSilenced ? ['hide-silenced'] : [])] as const,
   draft: (id: string) => ['drafts', 'one', id] as const,
 };
 
@@ -37,10 +37,11 @@ export const useViews = (screen: string | undefined, enabled = true) =>
     enabled,
   });
 
-export const useDrafts = (status: 'pending' | 'decided' | 'all' = 'pending', kind?: string) =>
+/** `hideSilenced`: bỏ nháp đã "Tắt tiếng" — Mặt tiền Owner dùng để số nháp khớp `today.nav.decide` (Bàn làm việc của Console vẫn liệt kê hết). */
+export const useDrafts = (status: 'pending' | 'decided' | 'all' = 'pending', kind?: string, opts: { hideSilenced?: boolean } = {}) =>
   useQuery({
-    queryKey: qk3.draftList(status, kind),
-    queryFn: ({ signal }) => api.drafts.list({ status, kind }, signal),
+    queryKey: qk3.draftList(status, kind, opts.hideSilenced === true),
+    queryFn: ({ signal }) => api.drafts.list({ status, kind, hide_silenced: opts.hideSilenced ? true : undefined }, signal),
   });
 
 export const useDraft = (id: string | null) =>

@@ -92,6 +92,9 @@ export interface TaskFilters {
   status?: TaskStatus;
   priority?: TaskPriority;
   overdue?: boolean;
+  /** ISO — chỉ việc CÓ hạn và hạn < mốc này (lọc ở máy chủ). */
+  due_before?: string;
+  limit?: number;
 }
 
 export const useTasks = (filters: TaskFilters) =>

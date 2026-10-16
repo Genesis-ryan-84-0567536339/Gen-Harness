@@ -142,7 +142,8 @@ export interface BriefHistoryItem {
 
 export interface OwnerBrief {
   latest: BriefStored | null;
-  live: BriefLive;
+  /** Số liệu đọc lúc này; `null` khi xem một bản cũ (`?id=`) — máy chủ không chạy lại phần đọc. */
+  live: BriefLive | null;
   /** ≤ 5 sự cố đang mở (nặng trước). */
   alerts: BriefAlert[];
   /** ≤ 14 bản gần nhất, mới trước. */
@@ -241,6 +242,8 @@ export interface OwnerRelationRow {
   /** Chỉ ở `care`: `churn` = sắp rời · `silent` = lâu chưa liên lạc. */
   reason?: 'churn' | 'silent';
   open_value_vnd?: number;
+  /** Chỉ ở `care`, chỉ khi `true`: người này đã có việc / nhắc hẹn ĐANG MỞ — không gợi ý tạo nhắc trùng. */
+  has_open_task?: boolean;
   /** Chỉ ở `matches`: mã gợi ý ghép (POST /matches/{id}/introduce|reject). */
   match_id?: string;
 }

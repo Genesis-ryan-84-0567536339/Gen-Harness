@@ -3,9 +3,10 @@
  * đường gửi thẳng — gửi tin / ghi ra ngoài luôn qua bản nháp + Xác nhận + mã PIN. Khi API trả 423 PIN_REQUIRED, client
  * (`createApiClient.requestPin`, packages/contracts/src/client.ts) tự mở hộp mã PIN rồi gửi lại — ở đây KHÔNG dựng hộp PIN.
  *
- * Sau MỌI lần ghi thành công: tải lại `['owner']`, `['drafts']`, `['inbox']`, `['tasks']` và cụm hàng đợi `['queue']`
- * (hộp thư / việc sẵn có, khoá `qkQueue` ở screens/queue/queries.ts) — số đếm trên thanh điều hướng, bản tin và dòng tin
- * luôn khớp.
+ * Sau MỌI lần ghi thành công: tải lại `['owner']`, `['drafts']`, cụm hàng đợi `['queue']` (hộp thư / việc / lời hứa sẵn có,
+ * khoá `qkQueue` ở screens/queue/queries.ts) và cụm thị trường `['market']` (cơ hội / ghép cung–cầu, `qkMarket` ở
+ * screens/market/queries.ts) — số đếm trên thanh điều hướng, bản tin và dòng tin luôn khớp. Mọi khoá ở đây PHẢI là gốc của một
+ * khoá truy vấn thật (test `owner-actions-v0159` đối chiếu); khoá không ai dùng chỉ là code chết.
  *
  * Hook: `useDraftDecision(draftId)` (Duyệt / Sửa rồi gửi / Từ chối) · `useProposalDecision()` (Xác nhận / Huỷ đề xuất Gen) ·
  * `useTaskDone()` · `useTaskPostpone()` · `useCreateReminder()` · `useReplyToItem(itemId?)` (tạo NHÁP trả lời, trả
@@ -19,9 +20,8 @@ import { api } from '../../lib/api';
 export const ACTION_INVALIDATE_KEYS: readonly (readonly string[])[] = [
   ['owner'],
   ['drafts'],
-  ['inbox'],
-  ['tasks'],
   ['queue'],
+  ['market'],
 ];
 
 export function invalidateAfterWrite(qc: QueryClient): void {

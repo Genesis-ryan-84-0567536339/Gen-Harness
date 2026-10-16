@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { request as httpRequest, createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { DraftDetail, OwnerBrief, OwnerFeed, OwnerInsights, OwnerProposal, OwnerRelations, OwnerToday } from '@gen-harness/contracts';
@@ -10,6 +10,7 @@ import { ProposalDecide } from '../../src/owner/actions/ProposalDecide';
 import {
   ACTION_INVALIDATE_KEYS,
   expiresText,
+  invalidateAfterWrite,
   tomorrowMorning,
   useAckItem,
   useCreateReminder,
@@ -32,6 +33,9 @@ import {
 } from '../../src/owner/queries';
 import { PinDialogHost } from '../../src/shell/PinDialogHost';
 import { qk } from '../../src/lib/queries';
+import { qk3 } from '../../src/screens/core/queries';
+import { qkMarket } from '../../src/screens/market/queries';
+import { qkQueue } from '../../src/screens/queue/queries';
 import { queryClient } from '../../src/lib/queryClient';
 import { createMockApi } from '../mock-api';
 import { createMock as createOwnerMock, parseOwnerDataMode } from '../mock-owner';
@@ -154,7 +158,7 @@ describe('DraftDecide', () => {
     expect(approves).toHaveLength(2);                                            // lần 1 bị 423, lần 2 sau khi có phiên PIN
     expect(approves[0].method).toBe('POST');
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['owner'] });
-    for (const k of ['drafts', 'inbox']) expect(invalidate).toHaveBeenCalledWith({ queryKey: [k] });
+    for (const k of ['drafts', 'queue', 'market']) expect(invalidate).toHaveBeenCalledWith({ queryKey: [k] });
   });
 
   it('Sửa rồi gửi gửi đúng nội dung đã sửa; Từ chối kèm lý do tuỳ chọn', async () => {
@@ -380,7 +384,33 @@ describe('hook ghi tại chỗ', () => {
   it('mọi khoá của Mặt tiền bắt đầu bằng ["owner", …] để một lần tải lại phủ hết', () => {
     const keys = [OWNER_KEYS.today, OWNER_KEYS.tasks, OWNER_KEYS.brief(), OWNER_KEYS.brief('b1'), OWNER_KEYS.feed('all', 30), OWNER_KEYS.feedContext('f1'), OWNER_KEYS.relations('care'), OWNER_KEYS.insights('week', 'messages_in'), OWNER_KEYS.proposals];
     for (const k of keys) expect(k[0]).toBe('owner');
-    expect(ACTION_INVALIDATE_KEYS.map((k) => k[0])).toEqual(expect.arrayContaining(['owner', 'drafts', 'inbox']));
+    expect(ACTION_INVALIDATE_KEYS.map((k) => k[0])).toEqual(['owner', 'drafts', 'queue', 'market']);
+  });
+
+  it('ACTION_INVALIDATE_KEYS: mỗi khoá là gốc của một khoá truy vấn THẬT (không còn khoá chết "inbox"/"tasks"), và có "market"', () => {
+    // khoá thật của từng cụm: Mặt tiền, Bàn làm việc (nháp), hàng đợi (hộp thư / việc / lời hứa), cơ hội & thị trường
+    const real = [
+      OWNER_KEYS.today, qk3.draftList('pending', undefined, true), qkQueue.inbox('all'), qkQueue.tasks({ status: 'todo' }), qkQueue.promises('overdue'),
+      qkMarket.matches({}), qkMarket.opportunities({}), qkMarket.pipeline,
+    ];
+    const roots = new Set<string>(real.map((k) => k[0]));
+    for (const k of ACTION_INVALIDATE_KEYS) expect(roots.has(k[0]), `khoá chết: ${k.join('/')}`).toBe(true);
+    const roots2: readonly string[] = ACTION_INVALIDATE_KEYS.map((k) => k[0]);
+    for (const root of ['inbox', 'tasks']) expect(roots2).not.toContain(root);
+    expect(ACTION_INVALIDATE_KEYS.map((k) => k[0])).toContain('market');          // ghép cung–cầu / giới thiệu đổi bảng thị trường
+  });
+
+  it('invalidateAfterWrite: đánh dấu CŨ mọi truy vấn Mặt tiền, nháp, hàng đợi (hộp thư / việc / lời hứa) và thị trường; không đụng cụm khác', () => {
+    const qc = new QueryClient();
+    const touched = [
+      OWNER_KEYS.today, OWNER_KEYS.tasks, qk3.draftList('pending'), qkQueue.inbox('all'), qkQueue.tasks({ status: 'todo' }), qkQueue.promises('overdue'),
+      qkMarket.matches({}), qkMarket.opportunities({}),
+    ];
+    const untouched = [['system', 'about'], ['graph', 'people']] as const;
+    for (const k of [...touched, ...untouched]) qc.setQueryData([...k], 1);
+    invalidateAfterWrite(qc);
+    for (const k of touched) expect(qc.getQueryState([...k])?.isInvalidated, k.join('/')).toBe(true);
+    for (const k of untouched) expect(qc.getQueryState([...k])?.isInvalidated, k.join('/')).toBe(false);
   });
 
   it('tomorrowMorning / expiresText là hàm thuần đúng nghĩa', () => {
@@ -492,9 +522,9 @@ describe('mock-owner (Mặt tiền v2)', () => {
     expect(brief.channels_connected).toBe(1);
     expect(brief.ai_ready).toBe(true);
     expect(brief.latest?.summary).toBeTruthy();
-    expect(brief.live.sections.find((s) => s.key === 'drafts_pending')).toMatchObject({ count: 2, group: 'decide', to: '/owner/viec' });
+    expect(brief.live?.sections.find((s) => s.key === 'drafts_pending')).toMatchObject({ count: 2, group: 'decide', to: '/owner/viec' });
     expect(brief.latest?.sections.map((s) => s.key)).toEqual(expect.arrayContaining(['calendar_today', 'mail_reply', 'gtasks_open']));
-    expect(brief.live.sections.map((s) => s.key)).not.toContain('calendar_today');         // Gen-hub chỉ ở bản đã lưu
+    expect(brief.live?.sections.map((s) => s.key)).not.toContain('calendar_today');         // Gen-hub chỉ ở bản đã lưu
     expect(brief.history.length).toBeGreaterThan(1);
     expect(brief.alerts.length).toBeLessThanOrEqual(5);
     expect(Date.parse(brief.next_at)).toBeGreaterThan(Date.now());
@@ -591,7 +621,7 @@ describe('mock-owner (Mặt tiền v2)', () => {
     expect(nav().decide).toBe(2 + 2);
     list = list.map((d) => (d.id === 'draft-a' ? { ...d, status: 'sent' } : d));
     expect(nav().decide).toBe(1 + 2);
-    const live = (callMock(m, '/api/v1/owner/brief').body as OwnerBrief).live.sections.find((s) => s.key === 'drafts_pending');
+    const live = (callMock(m, '/api/v1/owner/brief').body as OwnerBrief).live?.sections.find((s) => s.key === 'drafts_pending');
     expect(live?.count).toBe(1);
     const feedDrafts = (callMock(m, '/api/v1/owner/feed?view=approval').body as OwnerFeed).items;
     expect(feedDrafts.map((i) => i.id)).toEqual(['draft-b']);
@@ -734,7 +764,7 @@ describe('createMockApi: ownerData + __mock/p3/owner/data + nháp thật', () =>
     expect(feed1.items.map((i) => i.id)).not.toContain(target.id);
     expect(feed1.counts.approval).toBe(feed0.counts.approval - 1);
     expect(((await call('GET', '/api/v1/owner/today')).body as OwnerToday).nav.decide).toBe(nav0.decide - 1);
-    const live = ((await call('GET', '/api/v1/owner/brief')).body as OwnerBrief).live.sections.find((s) => s.key === 'drafts_pending');
+    const live = ((await call('GET', '/api/v1/owner/brief')).body as OwnerBrief).live?.sections.find((s) => s.key === 'drafts_pending');
     expect(live?.count).toBe(feed0.counts.approval - 1);
 
     const reply = await call('POST', '/api/v1/inbox/fd-3/act', { text: 'Dạ em gửi báo giá ạ' });

@@ -38,23 +38,31 @@ export interface TodayVsYesterday {
   /** null = chưa có số hôm qua (chuỗi ngắn hơn 2 điểm). */
   yesterday: number | null;
   spark: number[];
-  /** % so với hôm qua; null khi hôm qua = 0 hoặc chưa có. */
-  deltaPct: number | null;
 }
 
-/** Số tin hôm nay (điểm cuối của chuỗi 7 ngày) so với hôm qua (điểm kề cuối). Chuỗi lạ ⇒ 0, không ném. */
+/** Số tin hôm nay (điểm cuối của chuỗi 7 ngày) và CẢ NGÀY hôm qua (điểm kề cuối) — không tính % (hôm nay chưa hết). Chuỗi lạ ⇒ 0. */
 export function todayVsYesterday(metric: Pick<InsightMetric, 'series'> | null | undefined): TodayVsYesterday {
   const series = Array.isArray(metric?.series) ? metric.series : [];
   const values = series.map((p) => num(p?.v));
   const today = values.at(-1) ?? 0;
   const yesterday = values.length >= 2 ? (values.at(-2) ?? 0) : null;
-  const deltaPct = yesterday !== null && yesterday > 0 ? Math.round(((today - yesterday) / yesterday) * 1000) / 10 : null;
-  return { today, yesterday, spark: values, deltaPct };
+  return { today, yesterday, spark: values };
 }
 
 const CELL = 'kit-m2 kit-tb4 kit-c3';
 
-function MessagesTile({ q }: { q: UseQueryResult<OwnerInsights> }) {
+/**
+ * Dòng chú thích của ô "Tin mới hôm nay". Ngày CHƯA hết nên KHÔNG so nửa ngày với cả ngày hôm qua (không %/mũi tên/màu —
+ * trông như tụt dốc giả): chỉ nói "tính đến <giờ>" và cho số CẢ NGÀY hôm qua làm mốc (nhãn rõ là cả ngày).
+ */
+export function messagesNote(v: Pick<TodayVsYesterday, 'today' | 'yesterday'>, generatedAt: unknown, tz: string = DEFAULT_TZ): string {
+  const at = asText(generatedAt);
+  const upTo = Number.isFinite(Date.parse(at)) ? `Tính đến ${fmtHM(at, tz)}` : 'Hôm nay chưa hết ngày';
+  if (v.yesterday === null) return `${upTo} · chưa có số hôm qua`;
+  return `${upTo} · cả ngày hôm qua ${v.yesterday} tin`;
+}
+
+function MessagesTile({ q, tz }: { q: UseQueryResult<OwnerInsights>; tz: string }) {
   if (q.isPending) return <Card title="Tin mới hôm nay" state="loading" className={CELL} data-testid="intel-tile-messages-loading" />;
   if (q.isError) {
     return (
@@ -74,17 +82,8 @@ function MessagesTile({ q }: { q: UseQueryResult<OwnerInsights> }) {
       className={CELL}
       label="Tin mới hôm nay"
       value={v.today}
-      delta={v.deltaPct === null ? undefined : { pct: v.deltaPct, good: 'up', compare: 'so với hôm qua' }}
       spark={hasSeries ? v.spark : undefined}
-      note={
-        v.yesterday === 0
-          ? v.today > 0
-            ? 'Hôm qua chưa có tin nào'
-            : 'Chưa có tin nào trong 2 ngày qua'
-          : v.deltaPct === null && v.yesterday === null
-            ? 'Chưa có số hôm qua để so sánh'
-            : '7 ngày qua'
-      }
+      note={messagesNote(v, q.data.generated_at, tz)}
       data-testid="intel-tile-messages"
     />
   );
@@ -312,7 +311,7 @@ export function IntelScreen(): JSX.Element {
   const latest = useOwnerBrief();
   const picked = useOwnerBrief(briefId);
   const today = useOwnerToday();
-  const drafts = useDrafts('pending');
+  const drafts = useDrafts('pending', undefined, { hideSilenced: true });
   const proposals = useOwnerProposals();
   const insights = useOwnerInsights('week', SPARK_ONLY);
   const feed = useOwnerFeed('important', 5);
@@ -338,7 +337,7 @@ export function IntelScreen(): JSX.Element {
         ) : (
           <>
             {wide ? key : null}
-            <MessagesTile q={insights} />
+            <MessagesTile q={insights} tz={tz} />
             <KpiTiles q={today} />
             {wide ? null : key}
             <FeedBlock q={feed} tz={tz} />

@@ -203,6 +203,32 @@ async def test_reply_metrics_count_only_the_ten_one_to_one_messages(owner: Api, 
     assert m["unanswered"]["good"] == "down" and m["reply_fast_pct"]["unit"] == "pct"
 
 
+async def test_reply_metrics_do_not_pair_a_message_with_a_reply_to_another_customer(owner: Api, db: Any) -> None:
+    """F-60-R9 (sau /code-review): A nhắn, nhân viên nhắn B ⇒ A vẫn là CHƯA trả lời (trước đây tin đi kế tiếp trên cùng
+    kênh bị ghép cho A dù gửi khách khác). Tin đi ghi người nhận (threadId) hoặc nối theo tin đến 1-1 gần nhất."""
+    org = await _org(db)
+    ch = await channel(db, org)
+    a = await _person(db, org, "PER-A", "Chị A")
+    b = await _person(db, org, "PER-B", "Anh B")
+    s_a, s_b = await identity(db, a, ch, "zl-a"), await identity(db, b, ch, "zl-b")
+    day = today() - timedelta(days=2)
+    await event(db, org, ch, vn_noon(day, 9, 0), sender=s_a)                          # A hỏi lúc 09:00
+    await event(db, org, ch, vn_noon(day, 9, 1), sender=s_b)                          # B hỏi lúc 09:01
+    await event(db, org, ch, vn_noon(day, 9, 2), direction="outbound", payload='{"threadId": "zl-b"}')   # trả B
+    await event(db, org, ch, vn_noon(day, 9, 3), sender=s_b)                          # B hỏi tiếp
+    await event(db, org, ch, vn_noon(day, 9, 4), direction="outbound")                # trả B (không ghi người nhận)
+    await db.commit()
+    m = by_key(await _get(owner))
+    assert m["unanswered"]["total"] == 1                       # chỉ A; trước đây A bị tính đã trả lời ⇒ 0
+    assert m["reply_fast_pct"]["total"] == 100                 # 2 tin của B, đều trả lời trong 1 phút
+    # A được trả lời đúng người (remoteJid của A) 20 phút sau ⇒ A đã có trả lời, nhưng chậm
+    await event(db, org, ch, vn_noon(day, 9, 20), direction="outbound", payload='{"key": {"remoteJid": "zl-a@s.x"}}')
+    await db.commit()
+    m = by_key(await _get(owner))
+    assert m["unanswered"]["total"] == 0
+    assert m["reply_fast_pct"]["total"] == 67                  # 2 nhanh (B) / 3 đã trả lời
+
+
 # ─── người mới / cơ hội / tín hiệu ────────────────────────────────────────────────────────────────────────────────
 
 async def test_new_contacts_counts_unknown_but_not_staff_or_removed(owner: Api, db: Any) -> None:

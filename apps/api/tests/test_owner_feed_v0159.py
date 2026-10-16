@@ -16,6 +16,7 @@ import uuid
 from datetime import timedelta
 from typing import Any
 
+import orjson
 import pytest
 from sqlalchemy import text
 
@@ -185,6 +186,62 @@ async def test_silenced_draft_is_not_counted_by_nav_decide_nor_approval(owner: A
     await db.commit()
     assert (await owner.get("/owner/today")).json()["nav"]["decide"] == 1
     assert (await _feed(owner))["counts"]["approval"] == 1
+
+
+async def test_drafts_list_can_hide_silenced_so_the_front_count_matches_nav(owner: Api, db: Any) -> None:
+    """F-60-R17 (sau /code-review): "Việc phải quyết"/"Cần Sếp quyết" lấy `GET /drafts?hide_silenced=true` — cùng
+    tập với nav.decide và counts.approval (mặc định, như Bàn làm việc của Console, vẫn liệt kê cả nháp tắt tiếng)."""
+    org = await _org(db)
+    uid = (await db.execute(text("SELECT id FROM core.users LIMIT 1"))).scalar_one()
+    shown = await draft(db, org, "Nháp còn hiện")
+    quiet = await draft(db, org, "Nháp đã tắt tiếng")
+    expired = await draft(db, org, "Nháp tắt tiếng đã hết hạn")
+    await db.execute(text("""INSERT INTO biz.queue_silences (org_id, item_type, item_id, silenced_by, until)
+                             VALUES (:o, 'draft', :q, :u, NULL), (:o, 'draft', :e, :u, now() - interval '1 hour')"""),
+                     {"o": org, "q": quiet, "e": expired, "u": uid})
+    await db.commit()
+    plain = (await owner.get("/drafts?status=pending")).json()
+    assert plain["total"] == 3
+    hidden = (await owner.get("/drafts?status=pending&hide_silenced=true")).json()
+    assert hidden["total"] == 2 and {i["id"] for i in hidden["items"]} == {str(shown), str(expired)}
+    nav = (await owner.get("/owner/today")).json()["nav"]["decide"]
+    assert nav == hidden["total"] == (await _feed(owner))["counts"]["approval"]
+
+
+async def _reply_draft(db: Any, org: uuid.UUID, unit_id: uuid.UUID, status: str) -> uuid.UUID:
+    """Nháp trả lời tạo từ tin (như `POST /inbox/{id}/act`: sources[].ref = meaning_unit) ở trạng thái `status`."""
+    did = await draft(db, org, "Trả lời Khiếu nại", status=status)
+    await db.execute(text("UPDATE biz.action_drafts SET sources = CAST(:s AS jsonb) WHERE id = :i"),
+                     {"i": did, "s": orjson.dumps([{"label": "Khiếu nại", "ref": {"type": "meaning_unit",
+                                                                                    "id": str(unit_id)}}]).decode()})
+    return did
+
+
+async def test_urgent_open_drops_a_complaint_once_its_reply_draft_is_approved_or_sent(owner: Api, db: Any) -> None:
+    """F-60-R10 (sau /code-review): trả lời + duyệt nháp làm số Khẩn giảm; nav.urgent_open == counts.urgent_open."""
+    org = await _org(db)
+    lan = await _person(db, org, "PER-1", "Chị Lan")
+    keep = await unit(db, org, ago(hours=5), "Complained", "Khách than giao chậm", person=lan)
+    done = await unit(db, org, ago(hours=4), "Complained", "Khách than hàng lỗi", person=lan)
+    sent = await unit(db, org, ago(hours=3), "Complained", "Khách than sai màu", person=lan)
+    waiting = await unit(db, org, ago(hours=2), "Complained", "Khách than đóng gói", person=lan)
+    rejected = await unit(db, org, ago(hours=1), "Complained", "Khách than giá", person=lan)
+    await _reply_draft(db, org, done, "approved")
+    await _reply_draft(db, org, sent, "sent")
+    await _reply_draft(db, org, waiting, "pending")           # còn chờ duyệt ⇒ CHƯA xử lý
+    await _reply_draft(db, org, rejected, "rejected")         # bị từ chối ⇒ CHƯA xử lý
+    await db.commit()
+    d = await _feed(owner, view="all")
+    by_id = {i["id"]: i["importance"] for i in d["items"] if i["item_type"] == "unit"}
+    assert by_id[str(keep)] == by_id[str(waiting)] == by_id[str(rejected)] == "Khẩn"
+    assert by_id[str(done)] == by_id[str(sent)] == "Thường"
+    assert d["counts"]["urgent_open"] == 3
+    assert (await owner.get("/owner/today")).json()["nav"]["urgent_open"] == 3
+    # nháp "đã gửi" tạo từ tin khác loại/không ghi nguồn không làm tin nào mất Khẩn
+    other = await draft(db, org, "Nháp lạ", status="sent")
+    await db.execute(text("UPDATE biz.action_drafts SET sources = CAST('\"x\"' AS jsonb) WHERE id = :i"), {"i": other})
+    await db.commit()
+    assert (await _feed(owner))["counts"]["urgent_open"] == 3
 
 
 async def test_huge_offset_is_clamped_not_a_500(owner: Api) -> None:

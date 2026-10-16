@@ -48,9 +48,9 @@ import {
   showAiStrip,
   slotWord,
 } from '../../src/owner/intel/BriefBlocks';
-import { IntelScreen, careLink, channelsConnected, feedWho, todayVsYesterday } from '../../src/owner/intel/IntelScreen';
+import { IntelScreen, careLink, channelsConnected, feedWho, messagesNote, todayVsYesterday } from '../../src/owner/intel/IntelScreen';
 import { DecideList, decideCounts, draftFlags, draftRank, firstLines, sortDrafts } from '../../src/owner/work/DecideList';
-import { buildSuggestions, buildTodayItems, dayKey, dueText, profileLink } from '../../src/owner/work/TodayTasks';
+import { buildSuggestions, buildTodayItems, dayKey, dueText, profileLink, tomorrowStartIso } from '../../src/owner/work/TodayTasks';
 import { WorkScreen } from '../../src/owner/work/WorkScreen';
 import { useOwnerBrief, useOwnerProposals, useOwnerRelations, useOwnerToday } from '../../src/owner/queries';
 import { useDrafts } from '../../src/screens/core/queries';
@@ -194,6 +194,7 @@ const state = {
   drafts: [] as DraftDetail[],
   proposals: [] as OwnerProposal[],
   tasks: [] as Task[],
+  silencedDrafts: new Set<string>(),
   promises: [] as unknown[],
   pinOk: false,
 };
@@ -227,7 +228,11 @@ function defaults(c: Call): Response {
   if (path === '/owner/insights') return json(200, INSIGHTS());
   if (path === '/owner/feed') return json(200, FEED());
   if (path === '/owner/relations') return json(200, CARE);
-  if (path === '/drafts' && method === 'GET') return json(200, { items: state.drafts, next_cursor: null, total: state.drafts.length });
+  if (path === '/drafts' && method === 'GET') {
+    // như máy chủ: hide_silenced=true bỏ nháp đã Tắt tiếng (cả danh sách lẫn total)
+    const rows = new URLSearchParams(c.search).get('hide_silenced') === 'true' ? state.drafts.filter((x) => !state.silencedDrafts.has(x.id)) : state.drafts;
+    return json(200, { items: rows, next_cursor: null, total: rows.length });
+  }
   const d = /^\/drafts\/([\w-]+)(?:\/(approve|edit-send|reject))?$/.exec(path);
   if (d) {
     const draft = state.drafts.find((x) => x.id === d[1]);
@@ -251,9 +256,15 @@ function defaults(c: Call): Response {
   }
   if (path === '/tasks/promises' && method === 'GET') return json(200, { items: state.promises, next_cursor: null, total: state.promises.length });
   if (path === '/tasks' && method === 'GET') {
-    const status = new URLSearchParams(c.search).get('status');
-    const rows = state.tasks.filter((t) => !status || t.status === status);
-    return json(200, { items: rows, next_cursor: null, total: rows.length });
+    // như máy chủ: lọc status / due_before (chỉ việc CÓ hạn), mới tạo trước, mặc định 50 việc một trang
+    const q = new URLSearchParams(c.search);
+    const status = q.get('status');
+    const dueBefore = q.get('due_before');
+    const rows = state.tasks
+      .filter((t) => !status || t.status === status)
+      .filter((t) => !dueBefore || (!!t.due_at && Date.parse(t.due_at) < Date.parse(dueBefore)))
+      .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+    return json(200, { items: rows.slice(0, Number(q.get('limit') ?? 50)), next_cursor: null, total: rows.length });
   }
   if (path === '/tasks' && method === 'POST') return json(201, TASK('t-new', String((c.body as { title?: string }).title ?? ''), { status: 'todo', due_at: String((c.body as { due_at?: string }).due_at ?? '') }));
   const t = /^\/tasks\/([\w-]+)$/.exec(path);
@@ -299,6 +310,7 @@ beforeEach(() => {
   state.proposals = [PROPOSAL()];
   state.tasks = [TASK('t-1', 'Gọi lại chị Lan về hợp đồng')];
   state.promises = [];
+  state.silencedDrafts = new Set();
   state.pinOk = false;
   setViewport(false);
 });
@@ -355,6 +367,9 @@ describe('mục bản tin phòng thủ', () => {
     const sub = heroSubline(BRIEF({ latest: { ...BRIEF().latest!, at: '2026-10-11T00:30:00Z' }, live: { at: '2026-10-11T02:12:00Z', sections: [] }, next_at: '2026-10-11T10:30:00Z' }));
     expect(sub).toBe('Bản tin sáng 07:30 · số liệu cập nhật 09:12 · bản tin chiều lúc 17:30');
     expect(heroSubline(BRIEF({ latest: null, live: { at: '2026-10-11T02:12:00Z', sections: [] }, next_at: '2026-10-11T10:30:00Z' }))).toBe('số liệu cập nhật 09:12 · bản tin chiều lúc 17:30');
+    // xem bản CŨ (?id=): máy chủ không chạy phần đọc lúc này ⇒ live = null, không ném, không ghi "số liệu cập nhật"
+    expect(heroSubline(BRIEF({ latest: { ...BRIEF().latest!, at: '2026-10-11T00:30:00Z' }, live: null, next_at: '2026-10-11T10:30:00Z' }))).toBe('Bản tin sáng 07:30 · bản tin chiều lúc 17:30');
+    expect(briefSections(BRIEF({ live: null })).map((x) => x.key)).toEqual(BRIEF().latest!.sections.map((x) => x.key));
   });
 });
 
@@ -380,12 +395,21 @@ describe('Cảnh báo, nháp, tile', () => {
     expect(buildDecideRows([], [], fb)).toEqual([]);
   });
 
-  it('todayVsYesterday: điểm cuối so điểm kề cuối; hôm qua = 0 ⇒ không có %; chuỗi lạ ⇒ 0', () => {
-    expect(todayVsYesterday({ series: days(7, (i) => [10, 10, 10, 10, 10, 20, 25][i]) })).toMatchObject({ today: 25, yesterday: 20, deltaPct: 25 });
-    expect(todayVsYesterday({ series: days(3, (i) => [4, 0, 6][i]) })).toMatchObject({ today: 6, yesterday: 0, deltaPct: null });
-    expect(todayVsYesterday({ series: days(1, () => 5) })).toMatchObject({ today: 5, yesterday: null, deltaPct: null });
+  it('todayVsYesterday: điểm cuối và điểm kề cuối (cả ngày hôm qua); không còn %; chuỗi lạ ⇒ 0', () => {
+    expect(todayVsYesterday({ series: days(7, (i) => [10, 10, 10, 10, 10, 20, 25][i]) })).toEqual({ today: 25, yesterday: 20, spark: [10, 10, 10, 10, 10, 20, 25] });
+    expect(todayVsYesterday({ series: days(3, (i) => [4, 0, 6][i]) })).toMatchObject({ today: 6, yesterday: 0 });
+    expect(todayVsYesterday({ series: days(1, () => 5) })).toMatchObject({ today: 5, yesterday: null });
     expect(todayVsYesterday(undefined)).toMatchObject({ today: 0, spark: [] });
     expect(todayVsYesterday({ series: [{ d: 'x', v: 'a' as never }] })).toMatchObject({ today: 0 });
+  });
+
+  it('messagesNote: "Tính đến <giờ>" + CẢ NGÀY hôm qua (không so nửa ngày với cả ngày); thiếu giờ/số hôm qua vẫn rõ nghĩa', () => {
+    const at = '2026-10-16T05:30:00Z';          // 12:30 giờ VN
+    expect(messagesNote({ today: 4, yesterday: 20 }, at, 'Asia/Ho_Chi_Minh')).toBe('Tính đến 12:30 · cả ngày hôm qua 20 tin');
+    expect(messagesNote({ today: 0, yesterday: 0 }, at, 'Asia/Ho_Chi_Minh')).toBe('Tính đến 12:30 · cả ngày hôm qua 0 tin');
+    expect(messagesNote({ today: 4, yesterday: null }, at, 'Asia/Ho_Chi_Minh')).toBe('Tính đến 12:30 · chưa có số hôm qua');
+    expect(messagesNote({ today: 4, yesterday: 20 }, 'không phải giờ', 'Asia/Ho_Chi_Minh')).toBe('Hôm nay chưa hết ngày · cả ngày hôm qua 20 tin');
+    expect(messagesNote({ today: 4, yesterday: 20 }, undefined)).toContain('cả ngày hôm qua 20 tin');
   });
 
   it('careLink / feedWho / channelsConnected', () => {
@@ -445,6 +469,22 @@ describe('Việc: nháp, việc hôm nay, gợi ý', () => {
     expect(dueText({ dueAt: '2026-10-16T02:00:00Z', overdue: true }, now)).toBe('Quá hạn 3 giờ');
     expect(dueText({ dueAt: '2026-10-16T10:00:00Z', overdue: false }, now)).toBe('Hạn 17:00');
     expect(profileLink('p 1')).toBe('/owner/quan-he?nguoi=p%201');
+  });
+
+  it('tomorrowStartIso: đầu ngày mai (00:00) theo giờ tổ chức — cùng một giá trị cả ngày', () => {
+    expect(tomorrowStartIso(Date.parse('2026-10-16T05:00:00Z'), 'Asia/Ho_Chi_Minh')).toBe('2026-10-16T17:00:00.000Z'); // 17/10 00:00 VN
+    expect(tomorrowStartIso(Date.parse('2026-10-16T16:59:00Z'), 'Asia/Ho_Chi_Minh')).toBe('2026-10-16T17:00:00.000Z'); // 23:59 VN
+    expect(tomorrowStartIso(Date.parse('2026-10-16T17:01:00Z'), 'Asia/Ho_Chi_Minh')).toBe('2026-10-17T17:00:00.000Z'); // 00:01 ngày 17 VN
+    expect(tomorrowStartIso(Date.parse('2026-10-16T05:00:00Z'), 'UTC')).toBe('2026-10-17T00:00:00.000Z');
+    expect(tomorrowStartIso(Date.parse('2026-10-16T05:00:00Z'), 'Múi/Lạ')).toBe('2026-10-16T17:00:00.000Z'); // múi lạ ⇒ giờ VN
+    expect(tomorrowStartIso(Date.parse('2026-01-31T12:00:00Z'), 'UTC')).toBe('2026-02-01T00:00:00.000Z'); // sang tháng
+  });
+
+  it('buildSuggestions: người ĐÃ có nhắc đang mở (has_open_task) không được gợi ý lại; người vừa tạo trong phiên (keep) vẫn giữ dòng', () => {
+    const rows = [{ ...CARE.items[0], has_open_task: true }, CARE.items[1]];
+    expect(buildSuggestions(rows).map((x) => x.personId)).toEqual(['p-tri']);
+    expect(buildSuggestions(rows, new Set(['p-thang'])).map((x) => x.personId)).toEqual(['p-thang', 'p-tri']);
+    expect(buildSuggestions([{ ...CARE.items[0], has_open_task: false }]).map((x) => x.personId)).toEqual(['p-thang']);
   });
 
   it('buildSuggestions: khách cần chăm có mã người → "Gọi hỏi thăm …"; hàng thiếu mã người / tên bị bỏ', () => {
@@ -633,8 +673,10 @@ describe('Tình báo (/owner)', () => {
     expect(insightCalls.length).toBeGreaterThan(0);
     expect(insightCalls.every((c) => new URLSearchParams(c.search).get('only') === 'messages_in')).toBe(true);
     expect(document.body.textContent).not.toMatch(/Chi phí trợ lý Gen|Chi phí AI/);
-    // tile 1: so với hôm qua bằng chữ
-    expect(await screen.findByTestId('intel-tile-messages')).toHaveTextContent('so với hôm qua');
+    // tile 1 (F-60-R16): ngày chưa hết ⇒ KHÔNG so nửa ngày với cả ngày hôm qua — không %/mũi tên, ghi "tính đến <giờ>"
+    const tile = await screen.findByTestId('intel-tile-messages');
+    expect(tile).toHaveTextContent(/Tính đến \d{2}:\d{2} · cả ngày hôm qua \d+ tin/);
+    expect(tile.textContent).not.toMatch(/so với hôm qua|%|▲|▼/);
   });
 
   it('cảnh báo rỗng ⇒ khối "quiet" (CSS ẩn trên điện thoại); không có mục Khẩn ⇒ không viền bad', async () => {
@@ -659,9 +701,29 @@ describe('Tình báo (/owner)', () => {
     expect(within(care[1]).getByText('Lâu chưa liên lạc')).toBeInTheDocument();
   });
 
+  it('nháp đã Tắt tiếng không tính vào "Việc phải quyết" / "Cần Sếp quyết": cả hai đọc /drafts?hide_silenced=true, số khớp today.nav.decide', async () => {
+    state.drafts = [DRAFT_DETAIL('d-1', 'Nháp còn hiện'), DRAFT_DETAIL('d-quiet', 'Nháp đã tắt tiếng'), DRAFT_DETAIL('d-3', 'Nháp còn hiện 2')];
+    state.silencedDrafts = new Set(['d-quiet']);
+    const nav = () => TODAY({ nav: { urgent_open: 0, decide: 3 } }); // 2 nháp hiện + 1 đề xuất = số máy chủ đếm (không có nháp tắt tiếng)
+    setViewport(true);
+    const calls = mockApi({ '/owner/today': () => json(200, nav()) });
+    const intel = mount(<IntelScreen />);
+    await waitFor(() => expect(screen.getByTestId('intel-decide-count')).toHaveTextContent('3'));
+    expect(screen.getByTestId('intel-decide')).toHaveTextContent('2 nháp gửi khách · 1 đề xuất của Gen');
+    expect(screen.getByTestId('intel-decide')).not.toHaveTextContent('Nháp đã tắt tiếng');
+    intel.unmount();
+    queryClient.clear();
+    mount(<WorkScreen />, '/owner/viec');
+    await waitFor(() => expect(screen.getByTestId('work-decide-count')).toHaveTextContent('3'));
+    expect(screen.getAllByTestId('work-draft-row')).toHaveLength(2);
+    const drafts = calls.filter((c) => c.path === '/drafts' && c.method === 'GET');
+    expect(drafts.length).toBeGreaterThan(0);
+    expect(drafts.every((c) => new URLSearchParams(c.search).get('hide_silenced') === 'true')).toBe(true);
+  });
+
   it('"Bản tin trước" mở danh sách lịch sử; chọn bản cũ gọi /owner/brief?id=', async () => {
     const calls = mockApi({
-      '/owner/brief': (c) => (new URLSearchParams(c.search).get('id') === 'brief-0' ? json(200, BRIEF({ latest: { ...BRIEF().latest!, id: 'brief-0', summary: 'Chiều qua có 4 tin hỏi giá mới.' } })) : undefined),
+      '/owner/brief': (c) => (new URLSearchParams(c.search).get('id') === 'brief-0' ? json(200, BRIEF({ latest: { ...BRIEF().latest!, id: 'brief-0', summary: 'Chiều qua có 4 tin hỏi giá mới.' }, live: null })) : undefined),
     });
     mount(<IntelScreen />);
     await screen.findByText(/Sáng nay Sếp có nháp chờ duyệt/);
@@ -829,6 +891,58 @@ describe('Việc (/owner/viec)', () => {
     const post = calls.find((c) => c.method === 'POST' && c.path === '/tasks');
     expect(post?.body).toMatchObject({ title: 'Gọi hỏi thăm Bùi Đức Thắng', subject: { type: 'person', id: 'p-thang' } });
     expect(Date.parse((post?.body as { due_at: string }).due_at)).toBeGreaterThan(Date.now());
+  });
+
+  it('Việc hôm nay: việc quá hạn tạo sớm KHÔNG rơi khỏi 50 việc mới nhất — lọc hạn ở máy chủ (due_before = đầu ngày mai)', async () => {
+    setViewport(true);
+    const newer = Array.from({ length: 60 }, (_, i) => TASK(`n-${i}`, `Việc xa ${i}`, { due_at: later(10 * 24 * HOUR), overdue: false, created_at: ago(HOUR - i * MIN) }));
+    state.tasks = [TASK('old', 'Việc quá hạn tạo từ lâu', { created_at: ago(30 * 24 * HOUR), due_at: ago(3 * 24 * HOUR) }), ...newer];
+    const calls = mockApi();
+    mount(<WorkScreen />, '/owner/viec');
+    expect(await screen.findByText('Việc quá hạn tạo từ lâu')).toBeInTheDocument();
+    expect(screen.queryByText('Việc xa 0')).toBeNull();
+    const req = calls.filter((c) => c.path === '/tasks' && c.method === 'GET').map((c) => new URLSearchParams(c.search));
+    expect(req.map((q) => q.get('status')).sort()).toEqual(['doing', 'todo']);
+    for (const q of req) {
+      expect(q.get('limit')).toBe('200');
+      expect(q.get('due_before')).toBe(tomorrowStartIso(Date.now()));
+    }
+    expect(screen.queryByTestId('work-today-truncated')).toBeNull();
+  });
+
+  it('Việc hôm nay: máy chủ còn nhiều việc đến hạn hơn trang tải được ⇒ báo "còn N việc", không im lặng', async () => {
+    setViewport(true);
+    mockApi({ '/tasks': (c) => (new URLSearchParams(c.search).get('status') === 'todo' ? json(200, { items: [TASK('t-1', 'Gọi lại chị Lan')], next_cursor: 'x', total: 251 }) : undefined) });
+    mount(<WorkScreen />, '/owner/viec');
+    expect(await screen.findByTestId('work-today-truncated')).toHaveTextContent('Còn 250 việc đến hạn nữa');
+  });
+
+  it('Gen đề xuất: người ĐÃ có nhắc đang mở không bị gợi ý lại sau khi tải lại; vừa tạo trong phiên vẫn hiện "Đã tạo nhắc"', async () => {
+    setViewport(true);
+    const reminded = new Set<string>();
+    const careNow = (): OwnerRelations => ({ ...CARE, items: CARE.items.map((r) => (reminded.has(String(r.person_id)) ? { ...r, has_open_task: true } : r)) });
+    const calls = mockApi({
+      '/owner/relations': () => json(200, careNow()),
+      'POST /tasks': (c) => {
+        reminded.add(String((c.body as { subject?: { id?: string } }).subject?.id));
+        return undefined;
+      },
+    });
+    const first = mount(<WorkScreen />, '/owner/viec');
+    const user = userEvent.setup();
+    const row = (await screen.findAllByTestId('work-suggest-row'))[0];
+    await user.click(within(row).getByRole('button', { name: /Tạo nhắc/ }));
+    await within(row).findByTestId('work-suggest-made');
+    await waitFor(() => expect(calls.filter((c) => c.path === '/owner/relations').length).toBeGreaterThan(1)); // đã tải lại sau khi ghi
+    expect(screen.getAllByTestId('work-suggest-row')).toHaveLength(2); // dòng vừa tạo vẫn còn trong phiên
+    first.unmount();
+    // "tải lại trang": truy vấn mới ⇒ Bùi Đức Thắng đã có nhắc ⇒ không còn gợi ý cho họ
+    queryClient.clear();
+    mount(<WorkScreen />, '/owner/viec');
+    await screen.findByTestId('work-suggest');
+    await waitFor(() => expect(screen.getAllByTestId('work-suggest-row')).toHaveLength(1));
+    expect(screen.getByTestId('work-suggest')).not.toHaveTextContent('Bùi Đức Thắng');
+    expect(screen.getByTestId('work-suggest')).toHaveTextContent('Đặng Hữu Trí');
   });
 
   it('điện thoại: Segmented "Cần quyết (n) · Hôm nay (n) · Gen đề xuất (n)", mỗi lần một mục', async () => {

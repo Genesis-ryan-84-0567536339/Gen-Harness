@@ -27,7 +27,7 @@ export function WorkScreen(): JSX.Element {
   const tz = useOrgTimezone() || DEFAULT_TZ;
   const wide = useMediaQuery('(min-width: 760px)');
   const [tab, setTab] = useState<Tab>('decide');
-  const drafts = useDrafts('pending');
+  const drafts = useDrafts('pending', undefined, { hideSilenced: true });
   const proposals = useOwnerProposals();
   const today = useTodayData(tz);
   const care = useOwnerRelations('care', 5);

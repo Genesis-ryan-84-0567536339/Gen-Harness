@@ -447,7 +447,8 @@ export function createMock(opts: Opts) {
         id: pick.id, slot: pick.slot, at: ago(pick.mins * MIN), title: pick.title, summary: pick.summary, needs_api_key: false,
         sections: [...live.slice(0, 4), ...hubSections(), ...live.slice(4)],
       },
-      live: { at: new Date().toISOString(), sections: live },
+      // như máy chủ thật: xem một bản CŨ (?id=) không chạy phần đọc lúc này ⇒ live = null
+      live: id ? null : { at: new Date().toISOString(), sections: live },
       alerts: none ? [] : [
         { key: 'backup.failed', title: 'Bản sao lưu đêm qua chưa chạy được', severity: 'bad', raised_at: ago(9 * HOUR), to: '/system?tab=storage' },
         { key: 'disk.low', title: 'Ổ đĩa sắp đầy (82%)', severity: 'warn', raised_at: ago(3 * HOUR), to: '/system?tab=storage&focus=health' },

@@ -5,9 +5,9 @@ CHỈ ĐỌC, KHÔNG gọi model, không đọc Gen-hub:
 - `latest` = Bản tin Gen ĐÃ LƯU của chính Owner này (hội thoại có tin `kind='briefing'` — cùng kho
   `service.briefing_latest`
   đọc); `id` (mã hội thoại bản tin) chọn một bản trong `history`. Mục Gen-hub (lịch, mail, việc Google) chỉ có ở đây.
-- `live` = `gh.gen.briefing.collect(...)` chạy lúc đọc: CHỈ đọc DB (việc đến hạn, khách nóng, nháp chờ duyệt, sự cố,
-  Facebook,
-  Kho). Không `_hub_sections`, không `_summarize` ⇒ chưa tới 07:30 vẫn có số.
+- `live` = `gh.gen.briefing.collect(...)` chạy lúc đọc (CHỈ khi không có `id`; xem một bản cũ ⇒ `live: null`): CHỈ đọc
+  DB (việc đến hạn, khách nóng, nháp chờ duyệt, sự cố, Facebook, Kho). Không `_hub_sections`, không `_summarize` ⇒
+  chưa tới 07:30 vẫn có số.
 - Mỗi mục gắn `group` (decide · alert · key) và `to` đổi về đường Mặt tiền (/tasks, /workbench → /owner/viec …).
 """
 
@@ -114,21 +114,11 @@ def next_at(now: datetime) -> datetime:
     raise AssertionError("luôn có mốc 07:30 ngày mai")     # pragma: no cover
 
 
-_BRIEF_ROWS = """
-    SELECT c.id, c.title, m.created_at, m.content
-    FROM (SELECT id, title FROM agent.gen_conversations
-          WHERE org_id = :o AND user_id = :u {only} ORDER BY last_at DESC LIMIT 60) c
-    JOIN LATERAL (SELECT created_at, content FROM agent.gen_messages
-                  WHERE conversation_id = c.id AND role = 'assistant' AND content->>'kind' = 'briefing'
-                  ORDER BY created_at DESC LIMIT 1) m ON true
-    ORDER BY m.created_at DESC LIMIT :n"""
-
-
 async def _stored(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, bid: str | None,
                   ) -> tuple[Any | None, list[Any]]:
     """(bản được chọn, tối đa HISTORY_MAX bản gần nhất). `bid` lạ / không phải của Owner này ⇒ 404."""
     base = {"o": org_id, "u": user_id}
-    history = list((await db.execute(text(_BRIEF_ROWS.format(only="")), {**base, "n": HISTORY_MAX})).all())
+    history = list((await db.execute(text(svc.BRIEF_ROWS.format(only="")), {**base, "n": HISTORY_MAX})).all())
     if bid is None:
         return (history[0] if history else None), history
     try:
@@ -137,7 +127,7 @@ async def _stored(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, bid: 
         raise not_found("Bản tin") from None
     pick = next((r for r in history if r.id == cid), None)
     if pick is None:         # bản cũ hơn 14 bản gần nhất vẫn đọc được nếu đúng của Owner này
-        pick = (await db.execute(text(_BRIEF_ROWS.format(only="AND id = :cid")),
+        pick = (await db.execute(text(svc.BRIEF_ROWS.format(only="AND c.id = :cid")),
                                  {**base, "cid": cid, "n": 1})).one_or_none()
     if pick is None:
         raise not_found("Bản tin")
@@ -181,10 +171,15 @@ async def brief(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, bid: st
                 *, now: datetime | None = None) -> dict[str, Any]:
     now = now or datetime.now(UTC)
     pick, history = await _stored(db, org_id, user_id, bid)
-    live = await briefing.collect(db, org_id, briefing.slot_for(now), now)      # chỉ đọc DB, savepoint từng mục
+    # Xem một bản CŨ (`?id=`): không chạy `collect` (6+ truy vấn) — số liệu lúc này đã có ở lượt tải bản mới nhất;
+    # `live` = null (web vốn chỉ lấy `live` từ lượt tải không `id`).
+    live = None
+    if bid is None:
+        collected = await briefing.collect(db, org_id, briefing.slot_for(now), now)   # chỉ đọc DB, savepoint từng mục
+        live = {"at": iso(now), "sections": _sections(collected)}
     return {
         "latest": _latest(pick) if pick is not None else None,
-        "live": {"at": iso(now), "sections": _sections(live)},
+        "live": live,
         "alerts": await _alerts(db, org_id),
         "history": [{"id": str(r.id), "slot": _slot_part(r.content if isinstance(r.content, dict) else {},
         r.created_at),

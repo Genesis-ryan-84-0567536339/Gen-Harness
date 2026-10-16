@@ -14,6 +14,7 @@ from gh.auth import rbac, service
 from gh.auth.deps import current_user, require, require_pin
 from gh.biz.core import drafts, explain
 from gh.biz.core.scope import Scope, ensure_group, ensure_person, not_found, scope_for
+from gh.biz.queue import service as qsvc
 from gh.chassis import actionlog
 from gh.data.common import iso, mask_text, parse_cursor
 from gh.db import DB
@@ -117,6 +118,7 @@ async def _visible(db: AsyncSession, user: service.CurrentUser, draft_id: uuid.U
 
 @router.get("/drafts")
 async def list_drafts(status: Literal["pending", "decided", "all"] = "pending", kind: str | None = None,
+                      hide_silenced: bool = Query(False, description="Bỏ nháp đã Tắt tiếng (Mặt tiền Owner)"),
                       cursor: str | None = None, limit: int = Query(50, ge=1, le=200),
                       user: service.CurrentUser = Depends(current_user), db: AsyncSession = DB) -> dict[str, Any]:
     sc = await _drafts_scope(db, user)
@@ -128,6 +130,8 @@ async def list_drafts(status: Literal["pending", "decided", "all"] = "pending", 
         conds.append("d.status <> 'pending'")
     if kind:
         conds.append("d.kind = :k")
+    if hide_silenced:
+        conds.append(qsvc.not_silenced_sql("d", item_type="draft", id_col="id"))
     if cursor:
         conds.append("d.created_at < :c")
     sql_where = " AND ".join(conds)

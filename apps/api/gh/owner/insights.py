@@ -10,8 +10,10 @@ CHỈ ĐỌC. Không REFRESH, không đọc view tổng hợp, không job nền,
 - MỖI chỉ số và MỖI khối breakdown chạy trong savepoint riêng với `statement_timeout` 5 giây; lỗi/quá giờ thì chỉ
   chỉ số (khối) đó `state: 'error'` (kiểu `briefing.collect`), phần còn lại vẫn có.
 - `delta_pct = (kỳ này − kỳ trước) / kỳ trước × 100`; kỳ trước = 0 ⇒ `null` (web hiện "Mới").
-- `reply_fast_pct` / `unanswered`: CTE riêng chép logic ghép LATERAL của `gh.biz.people.service.PAIR_CTE` ("tin đến →
-  tin đi sớm nhất cùng luồng") nhưng chỉ tin 1-1 (`group_id IS NULL`) từ người KHÔNG phải nhân viên — tin nhóm Zalo
+- `reply_fast_pct` / `unanswered`: CTE riêng theo kiểu ghép LATERAL của `gh.biz.people.service.PAIR_CTE` ("tin đến →
+  tin đi sớm nhất cùng luồng") nhưng tin đi phải GỬI CHO ĐÚNG khách đó (cùng điều kiện `feed.outbound_to_sql` mà ngữ
+  cảnh hội thoại ở Thông tin dùng — người nhận trong payload, hoặc tin đến 1-1 gần nhất trước nó là của khách), và chỉ
+  tin 1-1 (`group_id IS NULL`) từ người KHÔNG phải nhân viên — tin nhóm Zalo
   đông người sinh hàng nghìn tin "chưa ai trả lời" giả. Hai chỉ số dùng chung một lần truy vấn.
 - `ai_cost_vnd`: `gh.ai_cost.daily_totals` rồi cắt 2 kỳ, CHỈ model đã có giá; `ai_cost.unpriced_calls` = số lượt
   chưa đặt giá (web không bao giờ hiện "0 ₫" khi còn lượt chưa đặt giá).
@@ -174,9 +176,14 @@ async def _simple(key: str, db: AsyncSession, org_id: Any, w: Window, ctx: Ctx) 
 
 # ─── trả lời nhanh / chưa trả lời (CTE riêng, chỉ tin 1-1 từ người không phải nhân viên) ─────────────────────────
 
-_REPLY_SQL = """
+_REPLY_SQL = f"""
 WITH inbound AS (
-  SELECT e.id, e.channel_id, e.occurred_at
+  SELECT e.id, e.channel_id, e.occurred_at,
+         -- định danh của CHÍNH khách này (mọi định danh của họ trên kênh) để chỉ ghép tin đi gửi đúng họ
+         ARRAY(SELECT x.id FROM core.person_identities x
+               WHERE x.person_id = pi.person_id AND x.channel_id = e.channel_id) AS ids,
+         ARRAY(SELECT NULLIF(split_part(x.external_id, '@', 1), '') FROM core.person_identities x
+               WHERE x.person_id = pi.person_id AND x.channel_id = e.channel_id) AS ext
   FROM raw.events e
   LEFT JOIN core.person_identities pi ON pi.id = e.sender_identity_id
   LEFT JOIN core.persons sp ON sp.id = pi.person_id
@@ -191,6 +198,7 @@ paired AS (
     SELECT e2.occurred_at FROM raw.events e2
     WHERE e2.org_id = :o AND e2.channel_id = i.channel_id AND e2.group_id IS NULL AND e2.direction = 'outbound'
       AND e2.received_at >= :rs AND e2.occurred_at > i.occurred_at
+      AND {feed.outbound_to_sql("e2", "i.ids", "i.ext")}
     ORDER BY e2.occurred_at LIMIT 1
   ) o ON true
 ),

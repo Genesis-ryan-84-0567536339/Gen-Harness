@@ -270,16 +270,24 @@ async def kpis(db: AsyncSession, org_id: uuid.UUID) -> dict[str, int]:
             "overdue_promises": promises}
 
 
+#: Bản tin Gen đã lưu của MỘT Owner: tin `kind='briefing'` mới nhất của MỖI hội thoại (không giới hạn "N hội thoại gần
+#: nhất" — Owner chat nhiều thì bản tin cũ vẫn tìm thấy; F-60-R11). Chỉ mục gen_conversations_user_idx (org_id,
+#: user_id, last_at) rồi gen_messages_conv_idx (conversation_id, created_at) cho từng hội thoại; `{only}` thêm điều
+#: kiện hội thoại.
+BRIEF_ROWS = """
+    SELECT c.id, c.title, m.created_at, m.content
+    FROM agent.gen_conversations c
+    JOIN LATERAL (SELECT created_at, content FROM agent.gen_messages
+                  WHERE conversation_id = c.id AND role = 'assistant' AND content->>'kind' = 'briefing'
+                  ORDER BY created_at DESC LIMIT 1) m ON true
+    WHERE c.org_id = :o AND c.user_id = :u {only}
+    ORDER BY m.created_at DESC LIMIT :n"""
+
+
 async def briefing_latest(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> dict[str, Any] | None:
-    """Bản tin Gen mới nhất của chính Owner này (hội thoại có tin `kind='briefing'`), xét 60 hội thoại gần nhất."""
-    r = (await db.execute(text("""
-        SELECT c.id, c.title, m.created_at, m.content
-        FROM (SELECT id, title FROM agent.gen_conversations
-              WHERE org_id = :o AND user_id = :u ORDER BY last_at DESC LIMIT 60) c
-        JOIN LATERAL (SELECT created_at, content FROM agent.gen_messages
-                      WHERE conversation_id = c.id AND role = 'assistant' AND content->>'kind' = 'briefing'
-                      ORDER BY created_at DESC LIMIT 1) m ON true
-        ORDER BY m.created_at DESC LIMIT 1"""), {"o": org_id, "u": user_id})).one_or_none()
+    """Bản tin Gen mới nhất của chính Owner này (hội thoại có tin `kind='briefing'`) — `BRIEF_ROWS`, không giới hạn
+    theo số hội thoại gần nhất."""
+    r = (await db.execute(text(BRIEF_ROWS.format(only="")), {"o": org_id, "u": user_id, "n": 1})).one_or_none()
     if r is None:
         return None
     summary = ""
@@ -324,6 +332,9 @@ _LAST_DAYS = "floor(extract(epoch FROM now() - lc.last_at) / 86400)::int"
 _OPEN_VALUE = """(SELECT COALESCE(sum(o.value_vnd), 0) FROM biz.opportunities o
                   WHERE o.org_id = :o AND o.person_id = p.id AND o.closed_at IS NULL
                     AND o.stage = ANY(CAST(:open_st AS text[])))"""
+#: Người này đã có việc / nhắc hẹn ĐANG MỞ gắn vào hồ sơ (web "Gen đề xuất" không gợi ý tạo nhắc trùng).
+_OPEN_TASK = """EXISTS (SELECT 1 FROM biz.tasks tk WHERE tk.org_id = :o AND tk.subject_type = 'person'
+                          AND tk.subject_id = p.id AND tk.status NOT IN ('done', 'cancelled'))"""
 _SCORE_JOIN = """LEFT JOIN clean.current_scores {a} ON {a}.subject_type = 'person' AND {a}.subject_id = p.id
                  AND {a}.dimension = '{dim}'"""
 
@@ -455,7 +466,7 @@ async def _care(db: AsyncSession, org_id: uuid.UUID, n: int) -> list[dict[str, A
         )
         SELECT p.id, p.display_name AS name, p.person_type AS type, p.organization_name AS org_name,
                heat.value AS heat, churn.value AS churn_risk, lc.n AS msgs, {_LAST_DAYS} AS days,
-               {_OPEN_VALUE} AS open_value
+               {_OPEN_VALUE} AS open_value, {_OPEN_TASK} AS open_task
         FROM cand JOIN core.persons p ON p.id = cand.id
         {_SCORE_JOIN.format(a="churn", dim="churn_risk")}
         {_SCORE_JOIN.format(a="heat", dim="heat")}
@@ -475,7 +486,8 @@ async def _care(db: AsyncSession, org_id: uuid.UUID, n: int) -> list[dict[str, A
         out.append({"id": str(r.id), "name": _text(r.name, 80) or "Chưa có tên",
                     "subtitle": _person_subtitle(r.type, r.org_name),
                     "metric_text": f"Có thể sắp rời · {quiet}" if churn else quiet, "to": profile_link(r.id),
-                    "reason": "churn" if churn else "silent", **_person_extras(r)})
+                    "reason": "churn" if churn else "silent", **_person_extras(r),
+                    **({"has_open_task": True} if r.open_task else {})})
     return out
 
 

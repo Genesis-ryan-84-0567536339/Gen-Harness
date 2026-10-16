@@ -6,7 +6,9 @@ Nguồn: `biz.inbox_items` (view, db/sql/0005_p3_queue.sql) — `item_type` unit
 (`importance`) do chính tệp này tính, KHÔNG dùng cột `priority` của view (P2 ở đó = Gen chắc chắn ≥ 0.8, không
 phải "việc quan trọng"):
 
-- Khẩn: unit `Complained`, hoặc cảnh báo đang mở mức P1.
+- Khẩn: unit `Complained` CHƯA được xử lý, hoặc cảnh báo đang mở mức P1. Unit "đã được xử lý" = đã có bản nháp trả lời
+  (tạo từ chính tin này: `sources[].ref = {type: meaning_unit, id}`) ở trạng thái đã duyệt / đã sửa-duyệt / đã gửi —
+  rơi về mức theo các luật dưới (thường là Thường). Nháp còn chờ duyệt thì tin vẫn Khẩn (nháp nằm ở "Chờ duyệt").
 - Quan trọng: unit có `event_type` thuộc `IMPORTANT_EVENT_TYPES`, hoặc người gửi có độ nóng ≥ `HOT_MIN`, hoặc nháp
   chờ duyệt, hoặc cảnh báo đang mở khác P1.
 - Thường: còn lại (câu chào, tin xã giao… dù Gen chắc chắn). Loại lạ cũng rơi vào đây — không mất tin, vẫn có ở
@@ -52,6 +54,8 @@ IMPORTANT_EVENT_TYPES = frozenset({
 OPPORTUNITY_EVENT_TYPES = frozenset({
     "AskedPrice", "RequestedSample", "SentQuotation", "RequestedPartnership", "OfferedSupply", "DealWon"})
 URGENT_EVENT_TYPE = "Complained"
+#: Trạng thái nháp trả lời coi như tin đã được xử lý (nháp chờ duyệt / bị từ chối / lỗi thì chưa).
+HANDLED_DRAFT_STATUSES = ("approved", "edited", "sent")
 
 IMPORTANCE_LABELS = ("Khẩn", "Quan trọng", "Thường")
 #: Nhãn việc (tiêu đề dòng tin) theo event_type — tiếng Việt đời thường, không lộ tên kỹ thuật.
@@ -66,7 +70,7 @@ _KIND_TEXT = {"image": "(Hình ảnh)", "file": "(Tệp đính kèm)", "sticker"
 
 #: Mức xếp hạng 0 Khẩn · 1 Quan trọng · 2 Thường — `:imp` = IMPORTANT_EVENT_TYPES, `:hot` = svc.HOT_MIN.
 _RANK_SQL = """CASE
-      WHEN i.item_type = 'unit' AND i.title = :urgent THEN 0
+      WHEN i.item_type = 'unit' AND i.title = :urgent AND hu.uid IS NULL THEN 0
       WHEN i.item_type = 'alert' AND i.priority = 'P1' THEN 0
       WHEN i.item_type = 'unit' AND i.title = ANY(CAST(:imp AS text[])) THEN 1
       WHEN i.item_type = 'unit' AND COALESCE(hs.value, 0) >= :hot THEN 1
@@ -96,13 +100,23 @@ async def _items_cte(db: AsyncSession, org_id: uuid.UUID) -> tuple[str, dict[str
     cfg = await triage.get_settings(db, org_id)
     junk = ""
     params: dict[str, Any] = {"o": org_id, "urgent": URGENT_EVENT_TYPE, "imp": sorted(IMPORTANT_EVENT_TYPES),
-                              "hot": svc.HOT_MIN, "opp": sorted(OPPORTUNITY_EVENT_TYPES), "days": UNIT_WINDOW_DAYS}
+                              "hot": svc.HOT_MIN, "opp": sorted(OPPORTUNITY_EVENT_TYPES), "days": UNIT_WINDOW_DAYS,
+                              "handled": list(HANDLED_DRAFT_STATUSES)}
     if cfg["enabled"]:
         # Cùng điều kiện "ẩn rác & trùng" của Hộp thư (gh.biz.queue.routes.JUNK_SQL).
         junk = "AND NOT COALESCE(m.is_spam OR m.duplicate_of IS NOT NULL OR m.quality < :minq, false)"
         params["minq"] = int(cfg["min_score"])
     sql = f"""
-WITH items AS (
+WITH handled AS (
+  -- tin đã có nháp trả lời được duyệt/gửi (nháp tạo từ POST /inbox/{{id}}/act ghi nguồn meaning_unit); chỉ mục
+  -- (org_id, status, created_at DESC); nháp luôn sinh SAU tin nên cùng cửa sổ UNIT_WINDOW_DAYS.
+  SELECT DISTINCT src->'ref'->>'id' AS uid
+  FROM biz.action_drafts d
+  CROSS JOIN LATERAL jsonb_array_elements(
+    CASE WHEN jsonb_typeof(d.sources) = 'array' THEN d.sources ELSE '[]'::jsonb END) src
+  WHERE d.org_id = :o AND d.status = ANY(CAST(:handled AS text[]))
+    AND d.created_at > now() - make_interval(days => :days) AND src->'ref'->>'type' = 'meaning_unit'
+), items AS (
   SELECT i.item_type, i.item_id AS id, i.title AS raw_title, i.summary, i.created_at, i.person_id, i.group_id,
          p.display_name AS p_name, g.name AS g_name, gc.type AS g_channel,
          d.title AS d_title, d.kind AS d_kind, a.suggested_action,
@@ -113,6 +127,7 @@ WITH items AS (
   LEFT JOIN core.channels gc ON gc.id = g.channel_id
   LEFT JOIN clean.current_scores hs ON i.item_type = 'unit' AND hs.subject_type = 'person'
                                    AND hs.subject_id = i.person_id AND hs.dimension = 'heat'
+  LEFT JOIN handled hu ON i.item_type = 'unit' AND hu.uid = CAST(i.item_id AS text)
   LEFT JOIN biz.action_drafts d ON i.item_type = 'draft' AND d.id = i.item_id
   LEFT JOIN biz.alerts a ON i.item_type = 'alert' AND a.id = i.item_id
   LEFT JOIN refinery.item_marks m ON m.item_type = i.item_type AND m.item_id = i.item_id
@@ -200,19 +215,29 @@ def _message(r: Any, center_id: uuid.UUID) -> dict[str, Any]:
 #: tin ĐẾN = của người đó; tin ĐI = có người nhận trong payload (Zalo `threadId`, WhatsApp `key.remoteJid`, hoặc
 #: `recipient`) trùng định danh của họ; tin đi không ghi người nhận ⇒ chỉ lấy khi tin ĐẾN 1-1 gần nhất trước nó
 #: (trong 7 ngày, cùng kênh) là của người đó. Khách khác trên cùng kênh không bao giờ lẫn vào.
-_RCPT_SQL = ("NULLIF(split_part(COALESCE(e.payload->>'threadId', e.payload->'key'->>'remoteJid', "
-             "e.payload->>'recipient'), '@', 1), '')")
+
+
+def outbound_to_sql(e: str, ids: str, ext: str) -> str:
+    """Điều kiện SQL "tin ĐI `e` (1-1) là gửi cho người có định danh `ids` (uuid[]) / mã ngoài `ext` (text[])": người
+    nhận trong payload trùng `ext`, hoặc (không ghi người nhận) tin ĐẾN 1-1 gần nhất trước nó trên cùng kênh là của
+    `ids`. MỘT chỗ duy nhất cho Thông tin (ngữ cảnh hội thoại) và Phân tích (`insights`: trả lời nhanh / chưa trả lời),
+    để hai nơi không bao giờ ghép tin đi cho sai khách. `e`: bí danh của `raw.events`; `ids`/`ext`: biểu thức SQL."""
+    rcpt = (f"NULLIF(split_part(COALESCE({e}.payload->>'threadId', {e}.payload->'key'->>'remoteJid', "
+            f"{e}.payload->>'recipient'), '@', 1), '')")
+    return f"""({e}.direction = 'outbound' AND (
+    {rcpt} = ANY({ext})
+    OR ({rcpt} IS NULL AND (
+      SELECT i2.sender_identity_id FROM raw.events i2
+      WHERE i2.org_id = {e}.org_id AND i2.channel_id = {e}.channel_id AND i2.group_id IS NULL
+        AND i2.direction = 'inbound' AND i2.occurred_at <= {e}.occurred_at
+        AND i2.occurred_at > {e}.occurred_at - interval '7 days'
+        AND i2.received_at > {e}.received_at - interval '37 days' AND i2.received_at <= {e}.received_at
+      ORDER BY i2.occurred_at DESC, i2.seq DESC LIMIT 1) = ANY({ids}))))"""
+
+
 _ONE_TO_ONE_SQL = f"""AND (
   (e.direction = 'inbound' AND e.sender_identity_id = ANY(CAST(:ids AS uuid[])))
-  OR (e.direction = 'outbound' AND (
-    {_RCPT_SQL} = ANY(CAST(:ext AS text[]))
-    OR ({_RCPT_SQL} IS NULL AND (
-      SELECT i2.sender_identity_id FROM raw.events i2
-      WHERE i2.org_id = e.org_id AND i2.channel_id = e.channel_id AND i2.group_id IS NULL
-        AND i2.direction = 'inbound' AND i2.occurred_at <= e.occurred_at
-        AND i2.occurred_at > e.occurred_at - interval '7 days'
-        AND i2.received_at > e.received_at - interval '37 days' AND i2.received_at <= e.received_at
-      ORDER BY i2.occurred_at DESC, i2.seq DESC LIMIT 1) = ANY(CAST(:ids AS uuid[])))))
+  OR {outbound_to_sql("e", "CAST(:ids AS uuid[])", "CAST(:ext AS text[])")}
 )"""
 
 
