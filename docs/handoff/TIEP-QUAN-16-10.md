@@ -1,7 +1,7 @@
 # Tiếp quản Gen-Harness trên máy cục bộ — hiện trạng 16/10/2026
 
 Tệp này do phiên Claude Code trên đám mây soạn khi bàn giao cho Claude Code chạy trên máy của Sếp.
-Đọc kèm: `CLAUDE.md` (luật cứng + quy trình), `docs/reports/HANDOFF-v0.1.1.md` (hiện trạng), `docs/ROADMAP.md` (tiến độ + Nợ).
+**Nạp trước tiên: `docs/handoff/TRI-NHO-PHIEN-DAM-MAY.md` (trí nhớ, kỹ năng, luật, quyết định của Sếp).** Đọc kèm: `CLAUDE.md` (luật cứng + quy trình), `docs/reports/HANDOFF-v0.1.1.md` (hiện trạng), `docs/ROADMAP.md` (tiến độ + Nợ).
 
 ## Trạng thái phiên đám mây
 
