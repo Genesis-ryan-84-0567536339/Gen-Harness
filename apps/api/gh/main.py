@@ -2,7 +2,11 @@
 
 import uvicorn
 
-from gh.app import configure_logging, create_app
+from gh.hardening import set_not_dumpable
+
+set_not_dumpable()   # gói G: sớm nhất có thể — agy cùng uid không đọc được /proc/1/environ của tiến trình api
+
+from gh.app import configure_logging, create_app  # noqa: E402
 
 configure_logging()
 app = create_app()
