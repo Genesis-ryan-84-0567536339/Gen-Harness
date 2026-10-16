@@ -2,7 +2,7 @@
 
 Không webhook (máy sau NAT/tunnel, không mở cổng). Cron `telegram_inbound` mỗi phút (đăng ký ở `JOBS`, được
 `gh/worker.py` nối vào danh sách việc nền): với mỗi tổ chức đang BẬT "Nhận tin từ Sếp" (hoặc có mã ghép sống) lấy khoá
-Redis riêng, chạy các lượt getUpdates ~20 giây tới hết ngân sách ~45 giây — nên gần như liên tục mà vẫn chỉ một
+Redis riêng, chạy các lượt getUpdates ~20 giây tới hết ngân sách ~55 giây — nên gần như liên tục mà vẫn chỉ một
 tiến trình nhận. `update_id` đã xử lý lưu ở `ops.notify_channels.inbound_offset` NGAY (trước khi chạy lệnh) — tối
 đa một lần mỗi tin, sập giữa chừng không chạy lại lệnh cũ.
 
@@ -33,7 +33,7 @@ LOCK_TTL_S = 240
 STATUS_KEY = "gh:tg:inbound:status:{}"
 STATUS_TTL_S = 900
 LONG_POLL_S = 20
-BUDGET_S = 45.0
+BUDGET_S = 55.0
 JOB_TIMEOUT_S = 180
 PAIRED_TEXT = (
     "Đã ghép tài khoản này với Gen-Harness. Từ giờ Sếp nhắn em ở đây được: /hom_nay · /viec · /suc_khoe · "
@@ -206,7 +206,8 @@ async def run_inbound(
         try:
             while time.monotonic() < deadline:
                 started = time.monotonic()
-                r = await poll_org(sm, redis, router, org_id, transport=transport, timeout_s=long_poll_s)
+                wait = max(1, min(long_poll_s, int(deadline - time.monotonic()))) if long_poll_s else 0
+                r = await poll_org(sm, redis, router, org_id, transport=transport, timeout_s=wait)
                 stats["updates"] += r["updates"]
                 if r["error_code"] is not None:
                     break
