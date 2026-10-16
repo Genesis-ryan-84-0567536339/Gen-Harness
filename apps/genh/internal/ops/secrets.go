@@ -17,15 +17,21 @@ import (
 //   - gh_bridge_key: khoá bridge (có từ v0.1.0, install sinh ở Bước 6);
 //   - gh_browser_key (v0.1.29): khoá RIÊNG giữa api/worker và browser-worker
 //     (ký việc, mã hoá phiên mạng xã hội khi truyền qua Redis);
+//   - gh_agy_key (v0.1.63, H3): khoá HMAC-SHA256 RIÊNG giữa api/worker và hộp
+//     agy-box (ký thân yêu cầu gọi model; box chỉ mount đúng khoá này) — 32 byte
+//     base64, 0644 như gh_browser_key;
 //   - gh_offsite_key (v0.1.40, F-12): "Khoá khôi phục" — mật khẩu gói .ghbundle
 //     của bản sao ngoài máy (định dạng dễ gõ/in, xem GenerateOffsiteKey).
 //
-// Máy cài từ bản CŨ chưa có gh_browser_key: compose.yaml mới (đồng bộ ở
+// Máy cài từ bản CŨ chưa có gh_browser_key / gh_agy_key: compose.yaml mới (đồng bộ ở
 // `genh update`) mount tệp này vào api/worker/browser — thiếu tệp thì
 // `docker compose up` báo "bind source path does not exist" và update rollback.
 // Vì vậy MỌI lệnh vận hành tìm compose.yaml (LocatePath/LocatePathSync) đều gọi
 // ensureAuxSecrets trước — idempotent, không bao giờ ghi đè khoá đã có.
-var auxSecretFiles = []string{"gh_bridge_key", "gh_browser_key", offsiteKeyName}
+var auxSecretFiles = []string{"gh_bridge_key", "gh_browser_key", agyKeyName, offsiteKeyName}
+
+// agyKeyName là tên Docker secret của khoá HMAC giữa api/worker và dịch vụ agy-box.
+const agyKeyName = "gh_agy_key"
 
 // offsiteKeyName là tên Docker secret của khoá khôi phục (chỉ mount vào api).
 const offsiteKeyName = "gh_offsite_key"
@@ -85,10 +91,12 @@ func ensureAuxSecrets(composePath string) error {
 	}
 	for _, name := range auxSecretFiles {
 		path := filepath.Join(dir, name)
-		if _, err := os.Stat(path); err == nil {
+		usable, err := auxSecretUsable(path)
+		if err != nil {
+			return err
+		}
+		if usable {
 			continue
-		} else if !os.IsNotExist(err) {
-			return fmt.Errorf("kiểm tra %s: %w", path, err)
 		}
 		content, err := auxSecretGen(name)()
 		if err != nil {
@@ -106,4 +114,30 @@ func ensureAuxSecrets(composePath string) error {
 		}
 	}
 	return nil
+}
+
+// auxSecretUsable cho biết path đã là một khoá dùng được (tệp có nội dung) —
+// khi đó TUYỆT ĐỐI không ghi đè. Trả false (cần sinh) khi: chưa có; là tệp rỗng
+// (lần chạy trước ghi dở); hoặc là THƯ MỤC RỖNG (Docker tự tạo thư mục khi
+// bind-mount nguồn chưa tồn tại — thư mục này được gỡ đi để thay bằng tệp khoá).
+// Thư mục có nội dung là thứ lạ của Owner: báo lỗi, không xoá.
+func auxSecretUsable(path string) (bool, error) {
+	st, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("kiểm tra %s: %w", path, err)
+	}
+	if st.IsDir() {
+		if err := os.Remove(path); err != nil { // chỉ gỡ được thư mục rỗng
+			return false, fmt.Errorf("%s là thư mục có nội dung (đáng lẽ là tệp khoá) — chuyển nó đi rồi chạy lại: %w", path, err)
+		}
+		return false, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false, fmt.Errorf("đọc %s: %w", path, err)
+	}
+	return strings.TrimSpace(string(raw)) != "", nil
 }

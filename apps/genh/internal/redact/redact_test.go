@@ -65,12 +65,13 @@ func TestSecretsFromInstall(t *testing.T) {
 	}
 	_ = os.WriteFile(filepath.Join(sec, "gh_bridge_key"), []byte("bridgekeyvalue-0001\n"), 0o644)
 	_ = os.WriteFile(filepath.Join(sec, "gh_offsite_key"), []byte("ABCDE-FGHIJ-KLMNO-PQRST-UVWXY-Z2345"), 0o644)
+	_ = os.WriteFile(filepath.Join(sec, "gh_agy_key"), []byte("agyboxkeyvalue-0002\n"), 0o644)
 	// Symlink bị bỏ qua (không đọc theo).
 	_ = os.Symlink("/etc/hostname", filepath.Join(sec, "gh_browser_key"))
 	got := SecretsFromInstall(dir, filepath.Join(dir, "deploy", "compose.yaml"), "123456789:AAFakeTokenForTestOnly_abcdefghijkl")
 	joined := strings.Join(got, "\n")
 	for _, want := range []string{res.Bundle.MasterKey, res.Bundle.DBPassword, res.Bundle.AppDBPassword, res.Bundle.BackupKey, res.Bundle.SetupToken,
-		"bridgekeyvalue-0001", "ABCDE-FGHIJ-KLMNO-PQRST-UVWXY-Z2345", "ABCDEFGHIJKLMNOPQRSTUVWXYZ2345", "123456789:AAFakeTokenForTestOnly_abcdefghijkl"} {
+		"bridgekeyvalue-0001", "agyboxkeyvalue-0002", "ABCDE-FGHIJ-KLMNO-PQRST-UVWXY-Z2345", "ABCDEFGHIJKLMNOPQRSTUVWXYZ2345", "123456789:AAFakeTokenForTestOnly_abcdefghijkl"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("thiếu literal (độ dài %d)", len(want))
 		}

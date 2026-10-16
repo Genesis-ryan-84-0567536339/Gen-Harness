@@ -63,7 +63,7 @@ func TestServicesStep_HappyPath_UpThenReady(t *testing.T) {
 	srv, _ := tlsReadyServer(t, 0)
 
 	fr := &fake.Runner{Responses: []fake.Response{
-		{Match: fake.MatchArgsContain("up", "-d", "api", "worker", "bridge", "browser-egress", "browser", "web", "proxy"), Output: []byte("")},
+		{Match: fake.MatchArgsContain("up", "-d", "api", "worker", "agy-box", "bridge", "browser-egress", "browser", "web", "proxy"), Output: []byte("")},
 	}}
 
 	step := servicesStep{
@@ -91,6 +91,39 @@ func TestServicesStep_HappyPath_UpThenReady(t *testing.T) {
 
 	if len(fr.Calls) != 1 {
 		t.Fatalf("số lệnh docker compose up = %d, muốn đúng 1", len(fr.Calls))
+	}
+}
+
+// v0.1.63 (H3): Bước 7 khởi động cả hộp riêng agy-box — đứng sau api/worker (dùng chung
+// ảnh api) và trước web/proxy; không có agy-box thì ngoại giao không có model nào.
+func TestServicesStep_UpBaoGomAgyBox(t *testing.T) {
+	composePath := testComposePath(t)
+	srv, _ := tlsReadyServer(t, 0)
+	fr := &fake.Runner{Responses: []fake.Response{{Match: fake.MatchArgsContain("up", "-d"), Output: []byte("")}}}
+	step := servicesStep{
+		runner:    fr,
+		locate:    func(string) (string, error) { return composePath, nil },
+		client:    insecureClient(),
+		timeout:   time.Second,
+		pollEvery: time.Millisecond,
+	}
+	env := testEnvWithSecrets(t)
+	env.Port = portFromServerURL(t, srv)
+	if err := step.Run(context.Background(), env, ReporterFunc(func(Progress) {})); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var upArgs []string
+	for _, c := range fr.Calls {
+		if a := c.Cmd.Args; len(a) > 0 {
+			joined := strings.Join(a, " ")
+			if i := strings.Index(joined, " up -d "); i >= 0 {
+				upArgs = strings.Fields(joined[i+len(" up -d "):])
+			}
+		}
+	}
+	want := []string{"api", "worker", "agy-box", "bridge", "browser-egress", "browser", "web", "proxy"}
+	if strings.Join(upArgs, ",") != strings.Join(want, ",") {
+		t.Fatalf("docker compose up -d %v, muốn %v", upArgs, want)
 	}
 }
 

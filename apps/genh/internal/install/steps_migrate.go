@@ -242,7 +242,9 @@ func ensureComposeSecretFiles(composePath string, res secretgen.Result) error {
 	// gh_browser_key (v0.1.29): khoá riêng giữa api/worker và browser-worker —
 	// cùng cách sinh với gh_bridge_key (ops.ensureAuxSecrets làm y hệt cho máy
 	// cài từ bản cũ khi `genh update`).
-	for _, name := range []string{"gh_bridge_key", "gh_browser_key"} {
+	// gh_agy_key (v0.1.63, H3): khoá HMAC riêng giữa api/worker và hộp agy-box
+	// (ops.ensureAuxSecrets sinh y hệt cho máy cài từ bản cũ khi `genh update`).
+	for _, name := range randomSecretNames {
 		if _, err := ensureRandomSecretFile(filepath.Join(secretsDir, name)); err != nil {
 			return err
 		}
@@ -261,13 +263,16 @@ func ensureComposeSecretFiles(composePath string, res secretgen.Result) error {
 	if err := os.Chmod(secretsDir, 0o700); err != nil {
 		return fmt.Errorf("đặt quyền %s: %w", secretsDir, err)
 	}
-	for _, name := range []string{"gh_master_key", "gh_bridge_key", "gh_browser_key", "gh_offsite_key"} {
+	for _, name := range append([]string{"gh_master_key", "gh_offsite_key"}, randomSecretNames...) {
 		if err := os.Chmod(filepath.Join(secretsDir, name), secretFilePerm); err != nil {
 			return fmt.Errorf("đặt quyền %s: %w", name, err)
 		}
 	}
 	return nil
 }
+
+// randomSecretNames: Docker secret ngẫu nhiên 32 byte base64 do genh sinh (xem ops.auxSecretFiles).
+var randomSecretNames = []string{"gh_bridge_key", "gh_browser_key", "gh_agy_key"}
 
 // secretFilePerm: xem giải thích trong ensureComposeSecretFiles.
 const secretFilePerm = 0o644
@@ -289,9 +294,20 @@ func writeSecretFileIfMissing(path, content string) error {
 // ensureRandomSecretFile đọc lại path nếu đã có (idempotent), hoặc sinh 32
 // byte ngẫu nhiên mã hoá base64 rồi ghi mới — cùng cách `make secrets` sinh
 // secrets/gh_bridge_key cho luồng dev (xem Makefile).
+//
+// Tệp RỖNG (lần chạy trước ghi dở) hoặc THƯ MỤC RỖNG (Docker tự tạo khi bind-mount
+// nguồn chưa có) không phải khoá dùng được ⇒ sinh lại; khoá đã có nội dung thì
+// không bao giờ ghi đè.
 func ensureRandomSecretFile(path string) (string, error) {
+	if st, err := os.Stat(path); err == nil && st.IsDir() {
+		if err := os.Remove(path); err != nil { // chỉ gỡ được thư mục rỗng
+			return "", fmt.Errorf("%s là thư mục có nội dung (đáng lẽ là tệp khoá) — chuyển nó đi rồi chạy lại: %w", path, err)
+		}
+	}
 	if data, err := os.ReadFile(path); err == nil {
-		return strings.TrimSpace(string(data)), nil
+		if key := strings.TrimSpace(string(data)); key != "" {
+			return key, nil
+		}
 	} else if !os.IsNotExist(err) {
 		return "", fmt.Errorf("đọc %s: %w", path, err)
 	}
