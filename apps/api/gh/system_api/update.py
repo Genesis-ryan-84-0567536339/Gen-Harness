@@ -324,8 +324,22 @@ def read_nightly(d: Path) -> dict[str, Any] | None:
         "linger": _pick(raw.get("linger"), LINGER_VALUES),
         "request_watcher": _pick(raw.get("request_watcher"), WATCHER_VALUES),
         "watcher": _watcher(raw.get("watcher")),
+        # genh từ v0.1.54 luôn ghi khối `watcher`; thiếu khối = genh cũ (chưa có timer dự phòng) — xem `watcher_failed`.
+        "watcher_reported": isinstance(raw.get("watcher"), dict),
         "checked_at": _iso_or_none(raw.get("checked_at")),
     }
+
+
+def watcher_failed(nightly: dict[str, Any] | None) -> bool:
+    """Trình nhận yêu cầu LỖI HẲN (không ai nhận yêu cầu bấm nút)? `request_watcher` chỉ là kết quả `systemctl is-active
+    .path` — 'failed' cũng là đúng lúc genh bật timer dự phòng (`watcher.state = fallback`, dự phòng vẫn nhận yêu
+    cầu mỗi phút) nên KHÔNG đủ để kết luận. genh từ v0.1.54 ghi khối `watcher` ⇒ chỉ `state = failed` mới là lỗi
+    hẳn. Genh cũ (không có khối, chưa có dự phòng) ⇒ dựa vào `request_watcher = failed`."""
+    if nightly is None:
+        return False
+    if nightly["watcher_reported"]:
+        return nightly["watcher"]["state"] == "failed"
+    return nightly["request_watcher"] == "failed"
 
 
 def _stalled_cause(d: Path, updater: Any) -> str:
@@ -335,7 +349,8 @@ def _stalled_cause(d: Path, updater: Any) -> str:
       Trình nhận yêu cầu crontab/launchd chạy cả khi không ai đăng nhập — genh vẫn ghi giá trị loginctl thật vào
       autostart-status.json, nên linger 'no' ở đó KHÔNG phải nguyên nhân (nhắc `enable-linger` chỉ che nguyên nhân
       thật);
-    - 'watcher_failed': genh báo trình nhận yêu cầu (gen-harness-update-request.path/.service) ở trạng thái lỗi;
+    - 'watcher_failed': genh báo trình nhận yêu cầu (gen-harness-update-request.path/.service) lỗi hẳn — KHÔNG tính
+      khi timer dự phòng đang nhận thay (`watcher.state = fallback`, xem `watcher_failed`);
     - 'not_picked_up': còn lại (không rõ nguyên nhân). Đọc trực tiếp tệp run/, không import gh.health (vòng import)."""
     auto = _read_json(d / "autostart-status.json") or {}
     if isinstance(updater, str) and updater:
@@ -344,7 +359,7 @@ def _stalled_cause(d: Path, updater: Any) -> str:
         systemd_watcher = auto.get("linger_required") is True
     if systemd_watcher and _pick(auto.get("linger"), LINGER_VALUES) == "no":
         return "linger_off"
-    if (read_nightly(d) or {}).get("request_watcher") == "failed":
+    if watcher_failed(read_nightly(d)):
         return "watcher_failed"
     return "not_picked_up"
 
@@ -460,8 +475,9 @@ def request_block_reason(user: service.CurrentUser, s: dict[str, Any], nightly: 
     2. `in_progress` — đang `requested`/`running`;
     3. `genh_unlinked` — không có trình nhận yêu cầu hoặc hộp thư `request/` không ghi được (đúng điều kiện
        `can_request = false`);
-    4. `watcher_stalled` — trình nhận yêu cầu LỖI: `stalled_reason = watcher_failed`, hoặc genh báo `watcher.state =
-       failed` / `request_watcher = failed` (`fallback` — timer dự phòng vẫn nhận yêu cầu — KHÔNG chặn nút);
+    4. `watcher_stalled` — trình nhận yêu cầu LỖI HẲN: `stalled_reason = watcher_failed`, hoặc genh báo `watcher.state =
+       failed` (genh cũ không có khối `watcher`: `request_watcher = failed`). `fallback` — timer dự phòng vẫn nhận yêu
+       cầu — KHÔNG chặn nút dù `request_watcher` lúc đó là 'failed' (`.path` chính là cái đã lỗi);
     5. `up_to_date` — không có bản mới hơn.
     None ⇒ nút "Cập nhật ngay" hiện được."""
     if user.role_code != rbac.OWNER:
@@ -470,9 +486,7 @@ def request_block_reason(user: service.CurrentUser, s: dict[str, Any], nightly: 
         return "in_progress"
     if not s["can_request"]:
         return "genh_unlinked"
-    watcher_failed = s.get("stalled_reason") == "watcher_failed" or (
-        nightly is not None and (nightly["request_watcher"] == "failed" or nightly["watcher"]["state"] == "failed"))
-    if watcher_failed:
+    if s.get("stalled_reason") == "watcher_failed" or watcher_failed(nightly):
         return "watcher_stalled"
     if not update_available:
         return "up_to_date"
@@ -517,11 +531,20 @@ async def get_update(request: Request, user: service.CurrentUser = Depends(MANAG
 
 
 @router.post("/system/update/check")
-async def check_update(request: Request, user: service.CurrentUser = Depends(MANAGE)) -> dict[str, Any]:
+async def check_update(request: Request, db: AsyncSession = DB,
+                       user: service.CurrentUser = Depends(MANAGE)) -> dict[str, Any]:
     """v0.1.30: nút "Kiểm tra bản mới" — hỏi GitHub ngay, bỏ qua bộ đệm. Giới hạn 1 lần / 30 giây (bấm dồn thì trả
-    kết quả đang đệm, `throttled: true`) để không vượt hạn mức API GitHub không xác thực."""
+    kết quả đang đệm, `throttled: true`) để không vượt hạn mức API GitHub không xác thực.
+    v0.1.61 (F105): ghi Action Log riêng `system.update_checked` (ai bấm, bản đang chạy, bản mới nhất) — trước đó chỉ có
+    dòng chung `http.post` của middleware, cột đối tượng trống."""
     fresh = bool(await request.app.state.redis.set(CHECK_LOCK_KEY, "1", nx=True, ex=CHECK_MIN_INTERVAL_SECONDS))
-    return {**await _payload(request, user, force=fresh), "throttled": not fresh}
+    payload = await _payload(request, user, force=fresh)
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action="system.update_checked", target_type="system", target_id="update",
+                           target_label=payload["current"], ip=user.ip,
+                           detail={"throttled": not fresh, "latest": payload["latest"]})
+    await db.commit()
+    return {**payload, "throttled": not fresh}
 
 
 @router.post("/system/update", status_code=202)
