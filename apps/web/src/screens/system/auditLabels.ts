@@ -69,6 +69,8 @@ export const ACTION_LABEL: Record<string, string> = {
   'gen.decide': 'Gen xử lý một mục theo luật',
   'gen.briefing': 'Gen soạn bản tin tổng hợp',
   'gen.kho_release_proposed': 'Gen đề xuất ghi vào Kho dữ liệu',
+  'gen.propose': 'Gen soạn một đề xuất',
+  'gen.answer': 'Gen trả lời',
   'gen.proposal_confirmed': 'Xác nhận một đề xuất của Gen',
   'gen.proposal_cancelled': 'Huỷ một đề xuất của Gen',
   'gen.memory_saved': 'Ghi nhớ một điều cho Gen',
@@ -114,6 +116,13 @@ export const ACTION_LABEL: Record<string, string> = {
   'notify.telegram.save': 'Lưu kết nối thông báo Telegram',
   'notify.telegram.test': 'Thử gửi thông báo Telegram',
   'notify.telegram.delete': 'Xoá kết nối thông báo Telegram',
+  // v0.1.64: Sếp nhắn Gen qua Telegram (chỉ tài khoản đã ghép; mọi tin lạ bị bỏ im lặng)
+  'telegram.pair_start': 'Bắt đầu ghép Telegram của Sếp',
+  'telegram.paired': 'Đã ghép tài khoản Telegram của Sếp',
+  'telegram.unpaired': 'Gỡ ghép tài khoản Telegram của Sếp',
+  'telegram.inbound_toggle': 'Bật/tắt nhận tin Telegram từ Sếp',
+  'telegram.command': 'Sếp nhắn Gen qua Telegram',
+  'telegram.rejected': 'Bỏ một tin Telegram không phải của Sếp',
   // Dữ liệu, tri thức
   'raw.exported': 'Xuất dữ liệu thô',
   'audit_log.exported': 'Xuất Nhật ký hành động',
