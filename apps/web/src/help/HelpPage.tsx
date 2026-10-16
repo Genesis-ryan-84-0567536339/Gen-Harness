@@ -158,7 +158,11 @@ export function HelpPage() {
             <ul className="help-examples">
               <li>Quên mật khẩu: nhờ Owner vào Đội ngũ › Người dùng › Đặt lại mật khẩu, rồi đăng nhập bằng mật khẩu tạm Owner gửi.</li>
               <li>Cần xem thêm màn hoặc làm thêm việc: nhờ Owner mở quyền cho vai trò của bạn.</li>
-              <li>Đổi mật khẩu, mã PIN của chính mình: menu tài khoản ở góc dưới bên trái › Tài khoản của tôi.</li>
+              <li>Đổi mật khẩu, đổi mã PIN của chính mình: menu tài khoản ở góc dưới bên trái › Tài khoản của tôi.</li>
+              <li>
+                Chưa có mã PIN (tài khoản mới được mời)? Vào Tài khoản của tôi › Đặt mã PIN, nhập mật khẩu đăng nhập và chọn 6 số —
+                cần mã PIN để duyệt bản nháp và các thao tác nhạy cảm Owner đã giao cho bạn.
+              </li>
             </ul>
           </Card>
         )}

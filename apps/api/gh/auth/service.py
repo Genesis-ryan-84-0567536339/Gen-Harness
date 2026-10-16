@@ -14,6 +14,9 @@ from gh.config import get_settings
 from gh.crypto import hash_secret, new_token, token_digest, verify_secret
 from gh.hub_link import KHO_LABEL
 
+#: Hộp PIN và Tài khoản của tôi dùng đúng câu này khi người dùng (vd Quản lý được mời) chưa đặt mã PIN.
+PIN_NOT_SET = "Tài khoản chưa có mã PIN — đặt ở Tài khoản của tôi"
+
 SESSION_COOKIE = "gh_session"
 CSRF_COOKIE = "gh_csrf"
 
@@ -40,7 +43,6 @@ PIN_OPERATIONS: dict[str, str] = {
     "policy.change": "Đổi mức tự trị, ngưỡng tiền, ranh giới",
     "data.export_delete": "Xuất / xoá dữ liệu",
     "people_review.read": "Xem dữ liệu đánh giá nhân sự",
-    "pin.change": "Đổi mã PIN",
     "agent.manage": "Tạo / tắt / nhân bản danh tính agent",
     "backup.download": "Tải bản sao lưu",
     "backup.restore": "Khôi phục bản sao lưu",
@@ -136,9 +138,14 @@ async def login(db: AsyncSession, email: str, password: str) -> dict[str, Any] |
     return {"id": row.id, "org_id": row.org_id}
 
 
-async def load_session(db: AsyncSession, token: str, *, renew: bool = True) -> CurrentUser | None:
+async def load_session(db: AsyncSession, token: str, *, renew: bool = True,
+                       renew_pin: bool = False) -> CurrentUser | None:
     """Nạp phiên từ token cookie. `renew=False` (v0.1.45, WS nạp lại định kỳ): chỉ ĐỌC — không gia hạn phiên trượt,
-    không gia hạn phiên PIN, không cập nhật last_seen_at (tab để mở không được giữ phiên/PIN sống mãi)."""
+    không gia hạn phiên PIN, không cập nhật last_seen_at (tab để mở không được giữ phiên/PIN sống mãi).
+
+    v0.1.61 (F115): phiên PIN "hết sau 30 phút KHÔNG thao tác" chỉ được gia hạn khi `renew_pin=True` — nơi gọi bật
+    cờ này CHỈ cho lời gọi ghi do người bấm (POST/PUT/PATCH/DELETE, xem deps.optional_user). Mặc định tắt: các
+    GET tự làm mới của giao diện (thanh đầu trang 60 giây, chuông 120 giây…) và WS không được giữ PIN sống mãi."""
     row = (await db.execute(text("""
         SELECT s.id AS sid, s.pin_verified_until, s.expires_at, s.created_at, u.id, u.org_id, u.email, u.display_name,
                u.addressing,
@@ -169,8 +176,8 @@ async def load_session(db: AsyncSession, token: str, *, renew: bool = True) -> C
             expires_at, renewed = new_exp, True
             await db.execute(text("UPDATE core.sessions SET expires_at = :e, last_seen_at = now() WHERE id = :sid"),
                              {"e": expires_at, "sid": row.sid})
-    # Phiên PIN trượt: hết hạn sau 30 phút KHÔNG thao tác.
-    if renew and pin_until is not None and pin_until > now():
+    # Phiên PIN trượt: hết hạn sau 30 phút KHÔNG thao tác — "thao tác" là lời gọi ghi của người dùng (F115).
+    if renew and renew_pin and pin_until is not None and pin_until > now():
         new_until = now() + timedelta(minutes=get_settings().pin_session_minutes)
         if (new_until - pin_until).total_seconds() > 60:
             await db.execute(text("UPDATE core.sessions SET pin_verified_until = :p, last_seen_at = now() "
@@ -216,6 +223,8 @@ class PinResult:
     locked_until: datetime | None = None
     pin_verified_until: datetime | None = None
     just_locked: bool = False
+    #: Tài khoản chưa đặt mã PIN (người được mời): không phải "nhập sai" — không đếm lần sai, không khoá.
+    no_pin: bool = False
 
 
 async def verify_pin(db: AsyncSession, user: CurrentUser, pin: str) -> PinResult:
@@ -223,6 +232,12 @@ async def verify_pin(db: AsyncSession, user: CurrentUser, pin: str) -> PinResult
     row = (await db.execute(text(
         "SELECT pin_hash, pin_failed, pin_locked_until FROM core.users WHERE id = :u FOR UPDATE"),
         {"u": user.id})).one()
+    if row.pin_hash is None:
+        # F071/F097: người được mời chưa có PIN. Nói thật "chưa có PIN" (không phải "không đúng"), không đếm sai
+        # (nếu không, gõ thử 5 lần là bị khoá 15 phút vì một mã không tồn tại).
+        await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                               action="auth.pin_not_set", result="failed", ip=user.ip)
+        return PinResult(ok=False, no_pin=True)
     if row.pin_locked_until is not None and row.pin_locked_until > now():
         await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                                action="auth.pin_attempt_while_locked", result="blocked", ip=user.ip)

@@ -191,12 +191,7 @@ describe('<AccountPage>', () => {
     await waitFor(() => expect(useToasts.getState().toasts.map((t) => t.text)).toContain('Đã đăng xuất 1 thiết bị khác.'));
   });
 
-  it('tài khoản không có PIN → không hiện mục Đổi mã PIN', async () => {
-    stubApi((url) => (url.endsWith('/account') ? { status: 200, body: { ...ACCOUNT, has_pin: false } } : undefined));
-    renderAt('/account', [{ path: '/account', element: <AccountPage /> }]);
-    expect(await screen.findByText('Hồ sơ')).toBeInTheDocument();
-    expect(screen.queryByText('Đổi mã PIN', { selector: '.gh-card__title' })).not.toBeInTheDocument();
-  });
+  // v0.1.61 (F071): tài khoản chưa có PIN nay hiện thẻ "Đặt mã PIN" — xem account-pin-lan-dau.test.tsx.
 });
 
 describe('buộc đổi mật khẩu (must_change_password)', () => {
