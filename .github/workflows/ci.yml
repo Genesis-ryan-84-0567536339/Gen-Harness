@@ -352,6 +352,11 @@ jobs:
         env:
           GH_PERSONAL_PATTERNS: ${{ secrets.GH_PERSONAL_PATTERNS }}
         run: python3 .github/scripts/check_no_personal_info.py
+      # v0.1.61 (lưới L5) — thuật ngữ chuẩn của CLAUDE.md (Kho dữ liệu, mã PIN, khoá, API & Model…): chữ cấm mới trong chuỗi
+      # hiển thị làm hỏng CI; hiện trạng nằm trong baseline của terms.json và chỉ được giảm. Route-crawl (lưới L4) chạy trong
+      # bước "Playwright (mock)" bên dưới, dùng chung terms.json.
+      - name: Kiểm thuật ngữ chuẩn (check_terms.py)
+        run: python3 .github/scripts/check_terms.py
       - run: npm run -w apps/web typecheck
       - run: npm run -w apps/web test
       - run: npm run -w apps/web build
