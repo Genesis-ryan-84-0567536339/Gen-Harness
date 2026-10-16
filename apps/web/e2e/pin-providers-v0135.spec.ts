@@ -25,30 +25,35 @@ async function freshAtStep4(page: Page): Promise<void> {
   });
   await apiCall(page, 'PUT', '/setup/steps/3', { org_name: 'Genesis Trading', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND', self_name: 'Anh', bot_calls_me: 'Sếp' });
   await page.goto('/setup');
-  await expect(page.getByRole('heading', { name: 'Bộ não AI' })).toBeVisible();
+  // v0.1.59: bước 4 của máy chủ = màn "Nguồn AI" của Thiết lập một màn (dán khoá Gemini/DeepSeek ở lựa chọn thứ hai).
+  await expect(page.getByRole('heading', { name: 'Nối nguồn AI cho Gen' })).toBeVisible();
 }
 
+const keyForm = (page: Page) => page.getByTestId('setup-ai-keyform-basic');
+
+// v0.1.59: hai ca đầu chạy trên màn Nguồn AI của Thiết lập một màn (bản cũ: form Bộ não AI của bước 4); form đầy đủ vẫn ở /guide/4.
 test.describe('PIN nhà cung cấp AI v0.1.35', () => {
-  test('bước 4: Thêm & kiểm tra hỏi mã PIN rồi gọi thử OK', async ({ page }) => {
+  test('bước Nguồn AI: dán khoá → Kiểm tra hỏi mã PIN rồi gọi thử OK ("Đã chạy được")', async ({ page }) => {
     await freshAtStep4(page);
-    await expect(page.getByText('Cần mã PIN 6 số')).toBeVisible();
-    await page.getByLabel('Khoá API').fill('AIza-good-key-1234');
-    await page.getByRole('button', { name: 'Thêm & kiểm tra' }).click();
+    await expect(keyForm(page).getByText('Cần mã PIN 6 số')).toBeVisible();
+    await keyForm(page).getByLabel('Khoá API').fill('AIza-good-key-1234');
+    await keyForm(page).getByRole('button', { name: 'Kiểm tra' }).click();
     await enterOwnerPin(page);
-    const row = page.locator('.prov-row', { hasText: 'Gemini API' });
+    const row = page.getByTestId('setup-ai-provider').filter({ hasText: 'Gemini API' });
     await expect(row).toContainText('Gọi thử OK');
+    await expect(page.getByTestId('setup-ai-ready')).toContainText('Đã chạy được');
   });
 
-  test('bước 4: huỷ mã PIN → không tạo nhà cung cấp, báo cần mã PIN', async ({ page }) => {
+  test('bước Nguồn AI: huỷ mã PIN → không tạo nhà cung cấp, báo cần mã PIN', async ({ page }) => {
     await freshAtStep4(page);
-    await page.getByLabel('Khoá API').fill('AIza-good-key-1234');
-    await page.getByRole('button', { name: 'Thêm & kiểm tra' }).click();
+    await keyForm(page).getByLabel('Khoá API').fill('AIza-good-key-1234');
+    await keyForm(page).getByRole('button', { name: 'Kiểm tra' }).click();
     const dlg = page.getByRole('dialog', { name: PIN_DIALOG });
     await expect(dlg).toBeVisible();
     await dlg.getByRole('button', { name: 'Huỷ' }).click();
     await expect(dlg).toBeHidden();
     await expect(page.getByText('Đã huỷ — thao tác cần mã PIN.')).toBeVisible();
-    await expect(page.locator('.prov-row')).toHaveCount(0);
+    await expect(page.getByTestId('setup-ai-provider')).toHaveCount(0);
     expect(await apiCall(page, 'GET', '/providers')).toEqual([]);
   });
 

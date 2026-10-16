@@ -23,6 +23,11 @@ const DONE_TARGETS = {
   team: '/guide/10',
 } as const;
 
+/** Bước tuỳ chọn 4–11 chưa xong và chưa để sau — "Hoàn tất" ghi chúng là "để sau" (dùng mặc định của máy chủ). */
+function pendingOptional(state: SetupState): number[] {
+  return state.steps.filter((x) => x.n >= 4 && x.n <= 11 && x.status !== 'done' && x.status !== 'skipped').map((x) => x.n);
+}
+
 export interface StepDoneProps {
   state: SetupState;
   /** Sếp đã chọn "Làm sau" ở bước Nguồn AI (sessionStorage). */
@@ -62,6 +67,16 @@ export function StepDone({ state, aiLater, onFinished, onBack }: StepDoneProps) 
     setError(null);
     setDetail(null);
     try {
+      // "Để sau" = dùng mặc định (API v0.1.28): bước 4–11 chưa làm được ghi "để sau" TRƯỚC khi Hoàn tất — máy chủ nạp bộ quy tắc
+      // khởi đầu (bước 7), lịch sao lưu 02:00 (bước 11) và chép model đã gọi thử (bước 4). Việc còn lại hiện ở "Việc thiết lập
+      // tiếp" / Cài đặt. Lỗi ở đây không chặn Hoàn tất (máy chủ chỉ bắt buộc bước 1–3).
+      for (const n of pendingOptional(state)) {
+        try {
+          await api.setup.skip(n);
+        } catch {
+          /* tuỳ chọn — bỏ qua */
+        }
+      }
       const s = await api.setup.step12();
       void queryClient.invalidateQueries({ queryKey: qk.me });
       void queryClient.invalidateQueries({ queryKey: qk.navigation });

@@ -14,7 +14,7 @@ test.describe('Hotfix v0.1.30 — không có model AI', () => {
     await loginAsOwner(page);
   });
 
-  test('/guide/8 thử trò chuyện: try_error = {reasons} không sập, có "Chọn model" → /guide/4', async ({ page }) => {
+  test('/guide/8 thử trò chuyện: try_error = {reasons} không sập, có "Chọn model" → /setup?buoc=nguon-ai (v0.1.59)', async ({ page }) => {
     await page.route('**/api/v1/setup/steps/8', async (route) => {
       if (route.request().method() !== 'PUT') return route.fallback();
       const body = route.request().postDataJSON() as { name: string };
@@ -32,7 +32,9 @@ test.describe('Hotfix v0.1.30 — không có model AI', () => {
     await notice.getByText('Chi tiết kỹ thuật').click();
     await expect(notice).toContainText('gemini: 429; deepseek: đang ngắt mạch');
     await notice.getByRole('link', { name: /Chọn model/ }).click();
-    await expect(page).toHaveURL(/\/guide\/4$/);
+    // v0.1.59: mọi nút "Chọn model" mở màn Thiết lập nguồn AI (Owner đã xong thiết lập vẫn mở lại được để đổi nguồn AI).
+    await expect(page).toHaveURL(/\/setup\?buoc=nguon-ai$/);
+    await expect(page.getByRole('heading', { name: 'Đổi nguồn AI' })).toBeVisible();
   });
 
   test('Đánh giá con người: 503 MODEL_UNAVAILABLE (detail đối tượng) → trạng thái "Chọn model", không sập', async ({ page }) => {
@@ -47,7 +49,7 @@ test.describe('Hotfix v0.1.30 — không có model AI', () => {
     await expect(page.getByRole('heading', { name: 'Đánh giá con người', level: 2 })).toBeVisible();
     await expect(page.getByText('Đã có lỗi xảy ra')).toHaveCount(0);
     await expect(page.getByTestId('model-unavailable')).toContainText('Chưa có model AI hoạt động');
-    await expect(page.getByRole('link', { name: /Chọn model/ })).toHaveAttribute('href', '/guide/4');
+    await expect(page.getByRole('link', { name: /Chọn model/ })).toHaveAttribute('href', '/setup?buoc=nguon-ai');
   });
 
   // v0.1.42 (F-61): thẻ "Cập nhật phần mềm" chỉ ở Cài đặt › Sao lưu & cập nhật; Trợ giúp có liên kết tới đó.

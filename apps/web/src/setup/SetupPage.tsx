@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ApiError, type SetupState } from '@gen-harness/contracts';
@@ -58,8 +58,14 @@ export function SetupPage() {
   const urlToken = params.get('token') ?? '';
   const [token, setTokenState] = useState(() => urlToken || readStoredToken());
   const [aiLater, setAiLater] = useState(readAiLater);
-  // Đích rời trang (sau PUT 12 / lưu nguồn AI khi đã xong): đặt TRƯỚC khi ghi trạng thái để không bị chuyển hướng chen ngang.
-  const [exitTo, setExitTo] = useState<string | null>(null);
+  // Đích rời trang (sau PUT 12 / lưu nguồn AI khi đã xong). Ghi vào ref NGAY (đồng bộ) trước khi cập nhật cache trạng thái: cache vừa
+  // báo "đã xong" là lần vẽ kế tiếp sẽ chuyển về /owner — đích đã chọn (vd /guide/5) phải thắng, không phụ thuộc thứ tự cập nhật.
+  const exitRef = useRef<string | null>(null);
+  const [, bump] = useState(0);
+  const setExitTo = (to: string) => {
+    exitRef.current = to;
+    bump((n) => n + 1);
+  };
 
   const state = useQuery({ queryKey: qk.setupState, queryFn: ({ signal }) => api.setup.state(signal) });
   const route = state.data ? resolveSetupRoute({ buoc: params.get('buoc'), step: params.get('step'), state: state.data, aiLater }) : null;
@@ -94,7 +100,7 @@ export function SetupPage() {
     setTokenState(t);
   }, []);
 
-  if (exitTo) return <Navigate to={exitTo} replace />;
+  if (exitRef.current) return <Navigate to={exitRef.current} replace />;
   if (state.isPending) return <SetupSkeleton />;
   if (state.isError) {
     return (

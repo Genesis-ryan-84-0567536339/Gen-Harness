@@ -137,16 +137,19 @@ test.describe('v0.1.55 · Mặt tiền Owner (máy tính)', () => {
     await noObjectText(page);
   });
 
-  test('Thêm: một dòng mỗi dịch vụ; Facebook → /social; Cài đặt nâng cao ⇒ Console, "← Về Mặt tiền" quay lại', async ({ page }) => {
+  // v0.1.59 (g5-thiet-lap): Cài đặt đúng 4 khối (Tài khoản · Nguồn AI · Việc nên làm tiếp · Cài đặt nâng cao); bỏ khối "Kết nối" từ boss-checks.
+  test('Cài đặt: 4 khối, MỘT danh sách Việc nên làm tiếp; nâng cao ⇒ Console, "← Về Mặt tiền" quay lại', async ({ page }) => {
     await loginAsOwner(page);
     await page.goto('/owner/them');
-    const rows = page.getByTestId('owner-conn-row');
-    await expect(rows.first()).toBeVisible();
-    expect(await rows.count()).toBeGreaterThanOrEqual(3);
-    await expect(rows.first()).toContainText('nguồn AI');          // dòng bắt buộc duy nhất đứng đầu: Sếp thấy ngay AI đã chạy chưa
-    await expect(rows.filter({ hasText: 'Facebook' }).first()).toHaveAttribute('href', '/social');
+    await expect(page.getByTestId('owner-more-account')).toBeVisible();
+    await expect(page.getByTestId('owner-more-ai-status')).toBeVisible();        // Sếp thấy ngay nguồn AI đã chạy chưa
+    await expect(page.getByRole('link', { name: /Đổi nguồn AI/ })).toHaveAttribute('href', '/setup?buoc=nguon-ai');
+    await expect(page.getByTestId('owner-more-todo')).toBeVisible();
+    await expect(page.getByTestId('owner-conn-row')).toHaveCount(0);
+    await expect(page.getByTestId('owner-connections')).toHaveCount(0);
+    await expect(page.getByTestId('owner-more-advanced').getByRole('link')).toHaveText([/API & Model/, /Bộ não AI/, /Mở Console đầy đủ/]);
 
-    const adv = page.getByRole('link', { name: 'Cài đặt nâng cao' });
+    const adv = page.getByRole('link', { name: /Mở Console đầy đủ/ });
     await expect(adv).toHaveAttribute('href', '/overview');
     await adv.click();
     await expect(page).toHaveURL(/\/overview$/);

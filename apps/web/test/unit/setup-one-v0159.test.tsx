@@ -176,6 +176,12 @@ function startServer(init: Partial<Srv> = {}): Srv {
       const key = `${method} ${path}`;
       if (srv.fail[key]) return srv.fail[key];
       if (path === '/setup/state') return json(200, stateNow());
+      const skip = /^\/setup\/steps\/(\d+)\/skip$/.exec(path);
+      if (skip && method === 'POST') {
+        const n = Number(skip[1]);
+        if (!srv.done.includes(n) && !srv.skipped.includes(n)) srv.skipped.push(n);
+        return json(200, stateNow());
+      }
       const put = /^\/setup\/steps\/(\d+)$/.exec(path);
       if (put && method === 'PUT') {
         const n = Number(put[1]);
@@ -551,6 +557,25 @@ describe('Bước 3 · Xong', () => {
     await user.click(await screen.findByRole('link', { name: 'Mời đội' }));
     await waitFor(() => expect(loc()).toBe('/guide/10'));
     expect(puts(12)).toEqual([12]);
+  });
+
+  it('Hoàn tất ghi bước 4–11 chưa xong là "để sau" (mặc định máy chủ) RỒI mới PUT 12; "Làm sau" bước Nguồn AI cũng được ghi', async () => {
+    const user = userEvent.setup();
+    startServer({ done: [1, 2, 3], session: true });
+    sessionStorage.setItem(AI_LATER_KEY, '1');
+    renderAt('/setup?buoc=xong');
+    await user.click(await screen.findByRole('button', { name: /Vào Mặt tiền/ }));
+    await waitFor(() => expect(loc()).toBe('/owner'));
+    const order = srv.calls.filter((c) => c.method !== 'GET' && c.path.startsWith('/setup/steps/')).map((c) => `${c.method} ${c.path}`);
+    expect(order).toEqual([4, 5, 6, 7, 8, 9, 10, 11].map((n) => `POST /setup/steps/${n}/skip`).concat('PUT /setup/steps/12'));
+    // bước 4 xong thật thì KHÔNG bị ghi "để sau"
+    queryClient.clear();
+    startServer({ done: [1, 2, 3, 4], session: true });
+    const again = renderAt('/setup?buoc=xong');
+    await user.click(await screen.findByRole('button', { name: /Vào Mặt tiền/ }));
+    await waitFor(() => expect(srv.calls.some((c) => c.path === '/setup/steps/12')).toBe(true));
+    expect(srv.calls.some((c) => c.path === '/setup/steps/4/skip')).toBe(false);
+    again.unmount();
   });
 
   it('PUT 12 lỗi: câu thân thiện + "Chi tiết kỹ thuật", ở lại bước Xong', async () => {
