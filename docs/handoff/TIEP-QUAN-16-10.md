@@ -21,10 +21,10 @@ Trước khi đụng nhánh nào trong bảng: `git fetch origin` và đọc l�
 |---|---|---|
 | `claude/wip/v0162/A4` `A5` `A8` `A9` `A10` `A11` `A12` | 7 gói đợt A còn lại (Hộp thư/Việc xem thêm; Khách & Nhóm phân trang + hàng loạt; Nhật ký tìm phía máy chủ; lỗi sao lưu/403 tiếng người; che OTP/mật khẩu trước khi gửi model + không in mã thiết lập; Cung↔Cầu; tài liệu khớp mã + `check_doc_facts.py`) | workflow đám mây đang thi công → tích hợp vào `claude/v0162` → review Opus → sửa |
 | `claude/v0162` | nhánh tích hợp v0.1.62 (gốc main a9513cb) | do workflow tạo; chưa có docs phát hành |
-| `claude/wip/v0162/agy-mo-thang` (926057c) | **Antigravity mở cho mọi vai** (quyết định Sếp 16/10, đã báo rủi ro): bỏ `allow_agy`/`AGY_OWNER_ONLY`, agy chạy cả việc nền, ô chọn model mọi agent có agy; giữ cô lập mỗi lượt của `AgyClient`; giữ luật Claude CLI việc nền (F-86) | test bị chạm xanh, ruff/mypy/tsc/eslint sạch, Playwright 36/36; **bộ pytest đầy đủ chưa có kết quả**; cần `/security-review` trước khi gộp |
-| `claude/wip/v0162/B4` | Kênh bền: mất mạng không xoá phiên Zalo/WhatsApp, QR sống đủ, đóng phiên cũ | đang thi công trên đám mây |
-| `claude/wip/v0162/B5` | Sức khoẻ: canh bridge, hàng lỗi có lối xử lý, sự cố model nói đúng loại nguồn | đang thi công trên đám mây |
-| (không nhánh) | Kiểm hồi quy app thật trên v0.1.61 (mọi màn, 390/1440) | đang chạy; kết quả sẽ ghi vào mục "Kiểm hồi quy" dưới |
+| `claude/wip/v0162/agy-mo-thang` (926057c) | **Antigravity mở cho mọi vai** (quyết định Sếp 16/10, đã báo rủi ro): bỏ `allow_agy`/`AGY_OWNER_ONLY`, agy chạy cả việc nền, ô chọn model mọi agent có agy; giữ cô lập mỗi lượt của `AgyClient`; giữ luật Claude CLI việc nền (F-86) | test bị chạm xanh, ruff/mypy/tsc/eslint sạch, Playwright 36/36; **bộ pytest đầy đủ chưa có kết quả** (hai lượt bị dừng giữa chừng vì máy quá tải, 0 lỗi tới lúc dừng); 2 ca vitest `setup.test.tsx` trượt timeout khi máy tải cao (chạy riêng 22/22 qua) — chạy lại trên máy cục bộ; cần `/security-review` trước khi gộp |
+| `claude/wip/v0162/B4` (426e7ce) | Kênh bền: mất mạng không xoá phiên Zalo/WhatsApp (phân loại lỗi, chỉ 401/đăng xuất mới hết hạn, `POST /channels/{type}/resume` + nút "Nối lại bằng phiên đã lưu"), QR sống theo `expires_at`, phiên mới phát `session.close` đóng phiên cũ, uptime giữ mốc gốc, câu BRIDGE_OFFLINE trung thực | XONG: bridge 72/72, pytest 17 tệp liên quan + lượt app 36/36, vitest 1512, tsc/eslint sạch. Chưa: Playwright e2e `phase2.spec.ts`, pytest đầy đủ, thử zca-js/Baileys thật. Ghi chú: `resumable`/`bridge_online` khai tạm trong `systemModel.ts` — đưa vào `packages/contracts` + `endpoints.ts` khi tích hợp; resume chỉ cần `system.manage`, KHÔNG đòi PIN (hỏi Sếp nếu muốn thêm `require_pin('channel.login')`) |
+| `claude/wip/v0162/B5` (7ac5fb2) | Sức khoẻ: khối `bridge` + sự cố `bridge.silent`; sự cố `dlq.inbound`, `POST /system/queues/{stream}/replay` và `/clear` (PIN `queue.manage` + Action Log); sự cố model hết hạn tách khoá API ↔ CLI | XONG: pytest 381 + lượt app 174, vitest 1514, tsc/eslint sạch. Chưa: ảnh 390/1440 thẻ Sức khoẻ, pytest đầy đủ. Còn dở của F051 (thuộc vùng B4): thẻ kênh vẫn "Đang kết nối" khi bridge im — dùng `/system/health` `bridge.state==='silent'` khi tích hợp |
+| (không nhánh) | Kiểm hồi quy app thật trên v0.1.61 (mọi màn, 390/1440) | XONG — không có hồi quy P1/P2 do sửa lỗi; xem mục "Kiểm hồi quy" |
 
 ### Việc tiếp theo cho v0.1.62 (Claude cục bộ làm, theo thứ tự)
 
@@ -80,6 +80,21 @@ tác động, gốc rễ, gợi ý sửa — bằng chứng ghi theo v0.1.59/v0.
 - Một race thật đã gặp: thông báo WebSocket đến trước khi socket mở ⇒ invalidate khi socket mở (v0.1.60).
 - Đĩa đầy (ENOSPC) khi nhiều worktree + node_modules: dùng `cp -al` hoặc một node_modules chung, xoá worktree đã push.
 
-## Kiểm hồi quy (điền khi có kết quả)
+## Kiểm hồi quy v0.1.61 (đám mây, 16/10)
 
-(chưa có)
+App thật (api + worker + web dev, Postgres/Redis riêng), Playwright 390 và 1440: thiết lập lần đầu, đăng nhập, 7 màn Mặt tiền + ~34 route Console
+cho Owner và Quản lý; mời Quản lý → đổi mật khẩu tạm → tự đặt PIN; bảng quyền đổi cột; nháp → duyệt bằng PIN → thẻ Gửi lỗi → Gửi lại; gộp người + Hoàn tác;
+Nhật ký; Sao lưu ngay. Kết luận: **không có hồi quy P1/P2 do sửa lỗi**; không pageerror, không tràn ngang 390, không `[object Object]`/undefined/NaN.
+Lỗi tồn từ trước (đưa vào v0.1.62 hoặc đợt sau, gói nào gần thì gộp vào gói đó):
+
+- **P2** Cảnh báo của bộ sàng lọc có tiêu đề thô "Complained · GRP-ZL-0005" (Tình báo, Thông tin): `apps/api/gh/refinery/runner.py` ~487 dùng nguyên `event_type` + `group_code`; đã có bảng `EVENT_LABEL` — dùng nhãn tiếng Việt + tên nhóm.
+- P3 Nhật ký hiện mã hành động tiếng Anh (`auth.login`, `draft.approved`…) và dòng `http.post` không nhãn; tìm kiếm phải gõ mã Anh (`LogTab.tsx`, `gh/middleware.py`) — gần gói A8.
+- P3 Kết nối: hai thẻ Telegram mâu thuẫn ("Chưa cài" ở danh sách kênh và thẻ bot Telegram đầy đủ).
+- P3 Bản nháp › Ngữ cảnh hiện enum thô `raw_signal · OPP-0003` (owner/feed FeedDetail/DraftCard).
+- P3 Quyền hạn: ô chọn cắt chữ ("Khách được ¦"), tab Cài đặt ở 390 cắt chữ, cột Vai trò "Quản".
+- P3 Đăng nhập sai / đặt PIN thành công xong: form xoá ô rồi kiểm lại trên giá trị rỗng ⇒ hiện lỗi thừa (`LoginPage.tsx`, PinCard).
+- P3 Vai Quản lý: mỗi màn có 403 trong console do khung gọi `/system/update`, `/setup/follow-up` (chỉ Owner) vô điều kiện.
+- P3 Dev: proxy vite `'/api'` nuốt route Console `/api` (dùng `'/api/'`); mã thiết lập in log bị `_redact_log` che ⇒ `make logs-token` không lấy được (`gh/app.py`, `gh/bootstrap.py:181`).
+- P3 Mặt tiền coi "không còn kênh hoạt động" là "ngày đầu" dù đã có tin ⇒ ẩn tin cũ trong khi huy hiệu vẫn đếm (`gh/owner/service.py` `channels_connected()`).
+
+Ảnh và log của lượt kiểm chỉ nằm trên máy đám mây (không chuyển được); khi cần, chạy lại theo kịch bản trên bằng kỹ năng `webapp-testing`.
