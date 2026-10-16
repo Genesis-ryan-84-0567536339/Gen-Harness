@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ErrorState, Icon, Skeleton, cx } from '@gen-harness/ui';
 import { errorDetail, errorReasons, errorText, isAgyOnlyUnavailable, isModelUnavailable } from '../lib/errorText';
 import { AGY_ONLY_TEXT, MODEL_UNAVAILABLE_TEXT, agyOnlyReasons, friendlyError, isAgyOnlyText } from '../lib/friendlyError';
+import { AI_SOURCE_PATH } from '../setup/steps';
 
 /** Mô tả chung: thao tác nhà cung cấp AI nào cần phiên PIN `ai.route_change` (v0.1.35, F-20). */
 export const PIN_ROUTE_CHANGE_TITLE = 'cần mã PIN 6 số (bật/tắt, thêm/sửa nhà cung cấp AI, khoá API, chuỗi chuyển hướng)';
@@ -159,7 +160,7 @@ export function CardError({ error, onRetry, retrying }: { error: unknown; onRetr
 }
 
 /**
- * v0.1.30: "chưa có model AI hoạt động" — trạng thái tại chỗ có nút "Chọn model" (→ /guide/4, bước chọn model),
+ * v0.1.30: "chưa có model AI hoạt động" — trạng thái tại chỗ có nút "Chọn model" (v0.1.59: → /setup?buoc=nguon-ai, màn Thiết lập nguồn AI),
  * lý do kỹ thuật từng nhà cung cấp ẩn trong "Chi tiết kỹ thuật". Dùng thay cho việc vẽ lỗi thô.
  */
 export function ModelUnavailableNotice({
@@ -193,7 +194,7 @@ export function ModelUnavailableNotice({
           <Icon name="ph ph-plugs" size={14} /> Thêm nguồn AI
         </Link>
       ) : (
-        <Link to="/guide/4" className="gh-btn gh-btn--secondary gh-btn--sm model-down__cta">
+        <Link to={AI_SOURCE_PATH} className="gh-btn gh-btn--secondary gh-btn--sm model-down__cta">
           <Icon name="ph ph-plugs" size={14} /> Chọn model
         </Link>
       )}

@@ -1,46 +1,23 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Navigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import type { SetupState, SetupStepStatus } from '@gen-harness/contracts';
+import { ApiError, type SetupState } from '@gen-harness/contracts';
 import { ErrorState, Icon, Skeleton } from '@gen-harness/ui';
+import { FOLLOW_UP_KEY } from '../guide/guideContent';
 import { api } from '../lib/api';
 import { qk } from '../lib/queries';
 import { queryClient } from '../lib/queryClient';
 import { useRealtime } from '../lib/realtime';
-import { useUrlState } from '../lib/uiStore';
+import { toast } from '../lib/toast';
 import { Logo } from '../shell/Logo';
-import { ComingSoonStep } from './ComingSoonStep';
-import { Step1Welcome } from './Step1Welcome';
-import { Step2Owner } from './Step2Owner';
-import { Step3Org } from './Step3Org';
-import { Step4Brain } from './Step4Brain';
-import { Step5Channels } from './Step5Channels';
-import { Step6Groups } from './Step6Groups';
-import { Step7Refinery } from './Step7Refinery';
-import { Step8Agent } from './Step8Agent';
-import { Step9Autonomy } from './Step9Autonomy';
-import { Step10Team } from './Step10Team';
-import { Step11Backup } from './Step11Backup';
-import { Step12Finish } from './Step12Finish';
-import { SETUP_STEPS, STEP_DESCRIPTIONS } from './steps';
-import { isReachable, mergeSteps } from './stepState';
-import type { StepProps } from './types';
+import { StepAccount } from './one/StepAccount';
+import { StepAiSource } from './one/StepAiSource';
+import { StepDone } from './one/StepDone';
+import './one/setup-one.css';
+import { AI_LATER_KEY, AI_SOURCE_PATH, SETUP_VIEWS, resolveSetupRoute, type SetupView } from './steps';
 import { describeError } from './types';
 
 const TOKEN_KEY = 'gh_setup_token';
-
-/** Phase-2 steps (docs/api/phase-2.md "Trình thiết lập bước 4–7, 12"). */
-const BUILT_STEPS: Record<number, (p: StepProps) => JSX.Element> = {
-  4: Step4Brain,
-  5: Step5Channels,
-  6: Step6Groups,
-  7: Step7Refinery,
-  8: Step8Agent,
-  9: Step9Autonomy,
-  10: Step10Team,
-  11: Step11Backup,
-  12: Step12Finish,
-};
 
 function readStoredToken(): string {
   try {
@@ -56,19 +33,42 @@ function storeToken(t: string) {
     /* private mode: keep it in memory only */
   }
 }
+function readAiLater(): boolean {
+  try {
+    return window.sessionStorage.getItem(AI_LATER_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+function storeAiLater() {
+  try {
+    window.sessionStorage.setItem(AI_LATER_KEY, '1');
+  } catch {
+    /* private mode: giữ trong bộ nhớ trang */
+  }
+}
 
+/**
+ * v0.1.59 (g5-thiet-lap) — Thiết lập MỘT màn, 3 bước: 1 Tài khoản · 2 Nguồn AI · 3 Xong. Máy chủ vẫn 12 bước (chỉ 1, 2, 3 và
+ * 12 bắt buộc); bước 5–11 làm sau ở /guide/5…/guide/11. URL `?buoc=tai-khoan|nguon-ai|xong`; `?step=` cũ được ánh xạ
+ * (`resolveSetupRoute`). Đã xong thiết lập: chỉ `?buoc=nguon-ai` mở được (đổi nguồn AI, cần phiên Owner), còn lại về /owner.
+ */
 export function SetupPage() {
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const urlToken = params.get('token') ?? '';
   const [token, setTokenState] = useState(() => urlToken || readStoredToken());
-  const [stepParam, setStepParam] = useUrlState<string>('step', '');
-  const [skipping, setSkipping] = useState(false);
-  const [skipError, setSkipError] = useState<string | null>(null);
-  const formRef = useRef<HTMLFormElement>(null);
+  const [aiLater, setAiLater] = useState(readAiLater);
+  // Đích rời trang (sau PUT 12 / lưu nguồn AI khi đã xong): đặt TRƯỚC khi ghi trạng thái để không bị chuyển hướng chen ngang.
+  const [exitTo, setExitTo] = useState<string | null>(null);
 
   const state = useQuery({ queryKey: qk.setupState, queryFn: ({ signal }) => api.setup.state(signal) });
-  // Live QR / CLI login / first-run progress once the owner is signed in (after step 3).
-  useRealtime(!!state.data && !state.data.finished && state.data.current_step >= 4);
+  const route = state.data ? resolveSetupRoute({ buoc: params.get('buoc'), step: params.get('step'), state: state.data, aiLater }) : null;
+  const view: SetupView | null = route?.kind === 'view' ? route.view : null;
+  const reopenAi = !!state.data?.finished && view === 'nguon-ai';
+  // Live CLI login / tiến độ lọc tin lần đầu khi Owner đã đăng nhập (sau bước 3); mở lại Nguồn AI sau Hoàn tất cũng cần.
+  useRealtime(!!state.data && state.data.current_step >= 4 && (!state.data.finished || reopenAi));
+  // Mở lại sau Hoàn tất: máy chủ chỉ cho Owner lưu bước 4 — kiểm phiên trước khi vẽ.
+  const me = useQuery({ queryKey: qk.me, queryFn: ({ signal }) => api.auth.me(signal), enabled: reopenAi, retry: false });
 
   useEffect(() => {
     document.title = 'Thiết lập Owner · Gen-Harness';
@@ -79,153 +79,118 @@ export function SetupPage() {
       setTokenState(urlToken);
     }
   }, [urlToken]);
+  // URL chuẩn: `?buoc=<bước>` (bỏ `?step=` cũ; giữ `?token=`). replace — Quay lại của trình duyệt không vòng lại.
+  useEffect(() => {
+    if (!view) return;
+    if (params.get('buoc') === view && !params.has('step')) return;
+    const next = new URLSearchParams(params);
+    next.delete('step');
+    next.set('buoc', view);
+    setParams(next, { replace: true });
+  }, [view, params, setParams]);
 
   const setToken = useCallback((t: string) => {
     storeToken(t);
     setTokenState(t);
   }, []);
 
-  // Enter = Tiếp tục even when focus is not inside a field (docs/06 "Tiếp cận").
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Enter' || e.defaultPrevented || e.isComposing) return;
-      const t = e.target as HTMLElement | null;
-      if (t && t.closest('button, a, input, select, textarea, [role="dialog"]')) return;
-      formRef.current?.requestSubmit();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
+  if (exitTo) return <Navigate to={exitTo} replace />;
   if (state.isPending) return <SetupSkeleton />;
   if (state.isError) {
     return (
-      <div className="page-center">
-        <div className="gh-card" style={{ width: 'min(520px, 100%)' }}>
-          <ErrorState
-            title="Không tải được trạng thái thiết lập"
-            message={describeError(state.error)}
-            onRetry={() => void state.refetch()}
-            retrying={state.isFetching}
-          />
+      <div className="setup-one">
+        <div className="setup-one__card">
+          <div className="gh-card setup-one__panel">
+            <ErrorState
+              title="Không tải được trạng thái thiết lập"
+              message={describeError(state.error)}
+              onRetry={() => void state.refetch()}
+              retrying={state.isFetching}
+            />
+          </div>
         </div>
       </div>
     );
   }
-  if (state.data.finished) return <Navigate to="/" replace />;
-
+  if (!route || route.kind === 'owner') return <Navigate to="/owner" replace />;
+  if (route.kind === 'guide') return <Navigate to={`/guide/${route.n}`} replace />;
   const data = state.data;
-  const steps = mergeSteps(data);
-  const requested = Number(stepParam);
-  const view = requested >= 1 && requested <= 12 && isReachable(requested, data) ? requested : data.current_step;
-  const current = steps[view - 1];
-  const settledCount = steps.filter((s) => s.status === 'done' || s.status === 'skipped').length;
 
-  const go = (n: number) => {
-    setSkipError(null);
-    setStepParam(n === data.current_step ? '' : String(n));
-  };
-  const onSaved = (s: SetupState) => {
-    queryClient.setQueryData(qk.setupState, s);
-    setSkipError(null);
-    setStepParam('');
-  };
-  const onBack = view > 1 ? () => go(view - 1) : undefined;
-  const onNext = () => go(Math.min(12, view + 1));
-  const onSkip = async () => {
-    setSkipping(true);
-    setSkipError(null);
-    try {
-      onSaved(await api.setup.skip(view));
-    } catch (e) {
-      setSkipError(describeError(e));
-    } finally {
-      setSkipping(false);
+  if (reopenAi) {
+    if (me.isPending) return <SetupSkeleton />;
+    if (me.isError) {
+      if (me.error instanceof ApiError && me.error.status === 401) return <Navigate to={`/login?next=${encodeURIComponent(AI_SOURCE_PATH)}`} replace />;
+      return (
+        <div className="setup-one">
+          <div className="setup-one__card">
+            <div className="gh-card setup-one__panel">
+              <ErrorState title="Không kiểm tra được phiên đăng nhập" message={describeError(me.error)} onRetry={() => void me.refetch()} retrying={me.isFetching} />
+            </div>
+          </div>
+        </div>
+      );
     }
-  };
+    // Chỉ Owner đổi được nguồn AI — vai trò khác về trang chủ của vai trò.
+    if (me.data.role?.code !== 'owner') return <Navigate to="/" replace />;
+  }
 
-  const common = {
-    meta: current,
-    description: STEP_DESCRIPTIONS[view] ?? current.content,
-    status: current.status,
-    token,
-    setToken,
-    onBack,
-    onSaved,
-    onNext,
-    formRef,
-    // Bước 10–11 (không bắt buộc) dùng chung nút "Để sau" với ComingSoonStep; các bước khác bỏ qua field này.
-    onSkip: !current.required && current.status !== 'done' && current.status !== 'skipped' ? () => void onSkip() : undefined,
-    skipping,
-    skipError,
+  const onState = (s: SetupState) => queryClient.setQueryData(qk.setupState, s);
+  const onAiSaved = (s: SetupState) => {
+    void queryClient.invalidateQueries({ queryKey: FOLLOW_UP_KEY });
+    if (data.finished) {
+      toast('Đã lưu nguồn AI — Gen dùng được ngay.', 'ok');
+      setExitTo('/owner');
+    }
+    onState(s);
+  };
+  const onLater = () => {
+    storeAiLater();
+    setAiLater(true);
+  };
+  const onFinished = (s: SetupState, to: string) => {
+    setExitTo(to);
+    onState(s);
+  };
+  const goAiSource = () => {
+    const next = new URLSearchParams(params);
+    next.delete('step');
+    next.set('buoc', 'nguon-ai');
+    setParams(next, { replace: true });
   };
 
   return (
-    <div className="setup">
-      <aside className="setup-rail" aria-label="Các bước thiết lập">
-        <Logo wide />
-        <div className="sb-rule" aria-hidden />
-        <ol className="setup-steps">
-          {steps.map((s) => {
-            const reachable = isReachable(s.n, data);
-            return (
-              <li key={s.n}>
-                <button
-                  type="button"
-                  className="setup-steps__item"
-                  data-active={s.n === view || undefined}
-                  data-status={s.status}
-                  aria-current={s.n === view ? 'step' : undefined}
-                  disabled={!reachable}
-                  onClick={() => go(s.n)}
-                >
-                  <span className="setup-steps__num">{String(s.n).padStart(2, '0')}</span>
-                  <span className="setup-steps__name">{s.title}</span>
-                  <StatusMark status={s.status} />
-                </button>
-              </li>
-            );
-          })}
-        </ol>
-        <div className="setup-progress">
-          <div
-            className="setup-progress__bar"
-            role="progressbar"
-            aria-label="Tiến độ thiết lập"
-            aria-valuemin={0}
-            aria-valuemax={12}
-            aria-valuenow={settledCount}
-          >
-            <span style={{ width: `${(settledCount / 12) * 100}%` }} />
+    <div className="setup-one" data-view={view}>
+      <main className="setup-one__card">
+        <header className="setup-one__head">
+          <div className="setup-one__brand">
+            <Logo wide />
           </div>
-          <div className="setup-progress__text">
-            Bước {data.current_step}/12
-          </div>
-        </div>
-      </aside>
-      <main className="setup-main">
-        <div className="setup-content" key={view}>
-          {view === 1 ? (
-            <Step1Welcome {...common} />
-          ) : view === 2 ? (
-            <Step2Owner {...common} />
-          ) : view === 3 ? (
-            <Step3Org {...common} />
-          ) : current.available && BUILT_STEPS[view] ? (
-            (() => {
-              const Step = BUILT_STEPS[view];
-              return <Step {...common} />;
-            })()
+          <ol className="setup-one__steps" aria-label="Các bước thiết lập">
+            {SETUP_VIEWS.map((v) => {
+              const at = SETUP_VIEWS.findIndex((x) => x.key === view);
+              const mine = SETUP_VIEWS.findIndex((x) => x.key === v.key);
+              const st = v.key === view ? 'current' : mine < at ? 'done' : 'todo';
+              return (
+                <li key={v.key} className="setup-one__step" data-state={st} aria-current={st === 'current' ? 'step' : undefined} data-testid={`setup-step-${v.key}`}>
+                  <span className="setup-one__num" aria-hidden>
+                    {st === 'done' ? <Icon name="ph ph-check" size={12} /> : v.n}
+                  </span>
+                  <span className="setup-one__label">
+                    <span className="visually-hidden">{`Bước ${v.n}: `}</span>
+                    {v.label}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        </header>
+        <div className="gh-card" key={view}>
+          {view === 'tai-khoan' ? (
+            <StepAccount state={data} token={token} setToken={setToken} onState={onState} />
+          ) : view === 'nguon-ai' ? (
+            <StepAiSource finished={data.finished} onSaved={onAiSaved} onLater={data.finished ? undefined : onLater} />
           ) : (
-            <ComingSoonStep
-              meta={current}
-              status={current.status}
-              onBack={onBack}
-              onNext={onNext}
-              onSkip={() => void onSkip()}
-              skipping={skipping}
-              formError={skipError}
-            />
+            <StepDone state={data} aiLater={aiLater} onFinished={onFinished} onBack={goAiSource} />
           )}
         </div>
       </main>
@@ -233,54 +198,21 @@ export function SetupPage() {
   );
 }
 
-function StatusMark({ status }: { status: SetupStepStatus }) {
-  switch (status) {
-    case 'done':
-      return (
-        <span className="setup-steps__mark setup-steps__mark--done">
-          <Icon name="ph ph-check" size={12} label="xong" />
-        </span>
-      );
-    case 'doing':
-      return (
-        <span className="setup-steps__mark">
-          <span className="setup-steps__dot" />
-          <span className="visually-hidden">đang làm</span>
-        </span>
-      );
-    case 'skipped':
-      return <span className="setup-steps__mark setup-steps__mark--skipped">để sau</span>;
-    default:
-      return (
-        <span className="setup-steps__mark setup-steps__mark--todo" aria-label="chưa làm">
-          ·
-        </span>
-      );
-  }
-}
-
 function SetupSkeleton() {
   return (
-    <div className="setup" aria-busy="true">
-      <aside className="setup-rail">
-        <Logo wide />
-        <div className="sb-rule" aria-hidden />
-        <div className="setup-steps">
-          {SETUP_STEPS.map((s) => (
-            <div className="setup-steps__item" key={s.n}>
-              <Skeleton width={16} height={10} />
-              <Skeleton width={`${45 + ((s.n * 13) % 40)}%`} height={10} />
-            </div>
-          ))}
-        </div>
-      </aside>
-      <main className="setup-main">
-        <div className="setup-content">
+    <div className="setup-one" aria-busy="true">
+      <div className="setup-one__card">
+        <header className="setup-one__head">
+          <div className="setup-one__brand">
+            <Logo wide />
+          </div>
+        </header>
+        <div className="gh-card setup-one__panel">
           <Skeleton width={200} height={20} />
           <Skeleton width="70%" height={12} style={{ marginTop: 9 }} />
-          <div className="gh-card setup-card" style={{ marginTop: 20, height: 260 }} />
+          <Skeleton width="100%" height={160} style={{ marginTop: 16 }} />
         </div>
-      </main>
+      </div>
     </div>
   );
 }

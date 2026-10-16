@@ -4,10 +4,12 @@ import { Icon } from '@gen-harness/ui';
 import { FOLLOW_UP_KEY } from '../../guide/guideContent';
 import { api } from '../../lib/api';
 import { useMe } from '../../lib/queries';
+import { AI_SOURCE_PATH } from '../../setup/steps';
 
 /**
  * v0.1.29 (Boss 30/09): bước 4 "Để sau" được — khi chưa có model nào gán cho Gen/Sàng lọc thì nói thẳng hậu quả và
- * cho một nút sửa ngay. Dùng ở bước 12 của trình thiết lập và đầu Tổng quan.
+ * cho một nút sửa ngay. Dùng ở bước 12 của trình thiết lập và đầu Tổng quan. v0.1.59: nút "Chọn model" của MỌI nơi dẫn tới
+ * `/setup?buoc=nguon-ai` (màn Thiết lập nguồn AI) — `to` do nơi gọi truyền, đều lấy từ `AI_SOURCE_PATH`.
  */
 export function NoModelNotice({ to }: { to: string }) {
   return (
@@ -38,5 +40,5 @@ export function NoModelBanner() {
   if (!isOwner) return null;
   const item = Array.isArray(q.data) ? q.data.find((s) => s.n === 4) : undefined;
   if (!item || item.done) return null;
-  return <NoModelNotice to="/guide/4" />;
+  return <NoModelNotice to={AI_SOURCE_PATH} />;
 }
