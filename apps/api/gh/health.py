@@ -70,6 +70,10 @@ WATCH_LOCK_KEY = "gh:health:tick"
 #: browser-worker ghi nhịp mỗi 15 giây (TTL 45 giây — apps/browser/ghb/worker.py) — quá 40 giây coi như im. Ngưỡng
 #: phải DƯỚI TTL: quá TTL khoá biến mất và trạng thái thành 'off' (không phân biệt được với chưa bật).
 BROWSER_SILENT_SECONDS = 40
+#: v0.1.63 (H1): hộp riêng Antigravity phải tắt liên tục chừng này giây mới mở sự cố `agy_box.down` (hộp khởi động lại
+#: khi `genh update` tắt vài chục giây — không nhá chuông).
+AGY_BOX_DOWN_GRACE_SECONDS = 120
+AGY_BOX_DOWN_SINCE_KEY = "gh:health:agy_box:down_since"
 
 STORAGE_LINK = "/system?tab=storage"
 #: Đích của job.timeout ("Xem sức khoẻ"): thẻ "Sức khoẻ hệ thống" đầu Dữ liệu & lưu trữ (HealthCard đọc `focus=health`).
@@ -574,6 +578,17 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
     except Exception:  # noqa: BLE001
         log.warning("Không đọc được nhịp trình duyệt nền", exc_info=True)
 
+    # v0.1.63 (H1): hộp riêng Antigravity — CHỈ có khối khi hộp đã được cấu hình (ok/down); chưa cài (bản cài cũ trước
+    # `genh update`, dev) giữ nguyên khuôn cũ như 'bridge'/'autostart'.
+    agy_box: dict[str, Any] = {"state": "not_installed", "checked_at": None, "agy_version": None}
+    try:
+        from gh.agybox.client import box_status
+
+        st = await box_status()
+        agy_box = {"state": st["state"], "checked_at": st["checked_at"], "agy_version": st["agy_version"]}
+    except Exception:  # noqa: BLE001
+        log.warning("Không đọc được trạng thái hộp riêng Antigravity", exc_info=True)
+
     # F051: cầu nối tin nhắn — CHỈ có khối khi có nhịp hoặc có kênh đang "kết nối" (giữ khuôn cũ khi chưa dùng cầu nối).
     bridge: dict[str, Any] | None = None
     try:
@@ -679,6 +694,7 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
            or (bridge is not None and bridge["state"] == "silent")
            or (update["failed"] and not update["interrupted"]) or disk["state"] == "low" or backup["stale"])
     warn = (any(i["severity"] == "warn" for i in issues) or browser["state"] == "silent" or update["failed"]
+            or agy_box["state"] == "down"
             or any(q["dlq"] > 0 for q in queues) or any(c["ok"] is False for c in crons)
             or (autostart is not None and autostart["state"] == "warn")
             or (nightly is not None and nightly["state"] == "warn")
@@ -697,6 +713,8 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
     }
     if bridge is not None:
         out["bridge"] = bridge
+    if agy_box["state"] != "not_installed":
+        out["agy_box"] = agy_box
     if boss_checks:
         # Chỉ khi đã có ít nhất một lần kiểm (như 'autostart': khuôn cũ giữ nguyên khi chưa có gì để xem).
         out["boss_checks"] = boss_checks
@@ -1131,6 +1149,32 @@ async def _eval_background_source(db: AsyncSession, org_id: uuid.UUID, redis: An
         await redis.delete(BG_NO_SOURCE_FLAG.format(org_id), BG_NO_SOURCE_TRY.format(org_id))
 
 
+AGY_BOX_DOWN_TITLE = "Hộp riêng Antigravity chưa chạy"
+AGY_BOX_DOWN_BODY = ("Việc có người ngoài (soạn trả lời khách, sàng lọc tin người lạ) tạm không dùng Antigravity và "
+                     "chuyển sang nguồn AI khác. Thường tự hết sau khi hộp khởi động lại; nếu kéo dài, chạy "
+                     "`genh update` trên máy chủ để dựng lại hộp.")
+
+
+async def _eval_agy_box(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: datetime) -> None:
+    """v0.1.63 (H1): sự cố `agy_box.down` (vàng) khi hộp đã cấu hình mà không trả lời `/healthz` liên tục
+    `AGY_BOX_DOWN_GRACE_SECONDS`. Hộp chạy lại hoặc chưa cài (`not_installed`) ⇒ đóng và quên mốc."""
+    from gh.agybox.client import box_status
+
+    st = await box_status()
+    if st["state"] != "down":
+        await redis.delete(AGY_BOX_DOWN_SINCE_KEY)
+        await clear(db, org_id, "agy_box.down")
+        return
+    raw = await redis.get(AGY_BOX_DOWN_SINCE_KEY)
+    since = _parse_ts(raw)
+    if since is None:
+        await redis.set(AGY_BOX_DOWN_SINCE_KEY, _iso(now))
+        return
+    if (now - since).total_seconds() >= AGY_BOX_DOWN_GRACE_SECONDS:
+        await raise_once(db, org_id, key="agy_box.down", kind="agy_box.down", severity="warn", title=AGY_BOX_DOWN_TITLE,
+                         body=AGY_BOX_DOWN_BODY, link=HEALTH_LINK, redis=redis)
+
+
 async def _eval_events(db: AsyncSession, org_id: uuid.UUID) -> None:
     """Dọn dòng sự kiện cũ: kênh đã đăng nhập lại (hoặc không còn kênh loại đó dùng được — bị xoá, plugin cầu nối bị
     tắt) / model đã ổn (hoặc bị tắt, bị xoá) ⇒ đóng sự cố."""
@@ -1182,6 +1226,7 @@ async def evaluate(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: date
         ("ai.budget", lambda: _eval_budget(db, org_id, redis, now)),
         ("ai.background_source", lambda: _eval_background_source(db, org_id, redis)),
         ("network", lambda: _eval_network(db, org_id, redis)),
+        ("agy_box", lambda: _eval_agy_box(db, org_id, redis, now)),
         ("social.session", lambda: session_watch.evaluate_alerts(db, org_id, redis)),
     )
     from gh import notifications

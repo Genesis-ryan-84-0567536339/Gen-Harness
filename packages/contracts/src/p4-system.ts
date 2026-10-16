@@ -445,6 +445,11 @@ export interface SystemHealth {
    * ⇒ vắng khối). 'silent' = nhịp mất > 2 phút mà kênh vẫn ghi "Đang kết nối" (kèm sự cố bridge.silent).
    */
   bridge?: { state: 'ok' | 'silent'; last_seen_at: string | null; silent_minutes: number | null };
+  /**
+   * v0.1.63 (H1): hộp riêng Antigravity (`agy-box`). CHỈ có khi hộp đã được cấu hình (chưa cài / dev ⇒ vắng khối).
+   * 'down' = đã cấu hình mà không trả lời kiểm tra sống (kèm sự cố agy_box.down sau 2 phút liên tục).
+   */
+  agy_box?: { state: 'ok' | 'down'; checked_at: string | null; agy_version: string | null };
   /** `stream` là tên stream gốc (không có `.dlq`). */
   queues: Array<{ stream: string; dlq: number }>;
   crons: Array<{ name: string; last_at: string | null; ok: boolean | null }>;
