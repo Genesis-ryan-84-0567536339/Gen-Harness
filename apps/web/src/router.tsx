@@ -1,5 +1,6 @@
 import { createBrowserRouter, Navigate, type RouteObject } from 'react-router-dom';
 import { buildScreenTree } from '@gen-harness/contracts';
+import { setKitNavigator } from '@gen-harness/ui';
 import { setNavigator } from './lib/navigation';
 import { UrlStateSync } from './lib/uiStore';
 import { LoginPage } from './pages/LoginPage';
@@ -21,9 +22,11 @@ import { RootLayout } from './RootLayout';
 import { AskGenScreen } from './owner/AskGenScreen';
 import { MoreScreen } from './owner/MoreScreen';
 import { OwnerShell } from './owner/OwnerShell';
-import { RelationsScreen } from './owner/RelationsScreen';
-import { OwnerTasksScreen } from './owner/TasksScreen';
-import { TodayScreen } from './owner/TodayScreen';
+import { AnalyticsScreen } from './owner/analytics/AnalyticsScreen';
+import { FeedScreen } from './owner/feed/FeedScreen';
+import { IntelScreen } from './owner/intel/IntelScreen';
+import { RelationsScreen } from './owner/relations/RelationsScreen';
+import { WorkScreen } from './owner/work/WorkScreen';
 
 /**
  * One route per screen key (docs/design/screens.json), nested
@@ -74,14 +77,17 @@ export const routes: RouteObject[] = [
       // v0.1.19: mật khẩu tạm sau `genh reset-password` — AppShell chuyển mọi màn Console về đây tới khi đổi xong.
       { path: '/change-password', element: <ForcePasswordPage /> },
       // v0.1.55 (G5): Mặt tiền Owner — khai báo tay NGOÀI screens.json, anh em với "/" (AppShell), trước "*" của AppShell.
-      // Vai khác Owner mở /owner/* ⇒ OwnerShell chuyển về "/". Đường lạ dưới /owner về Hôm nay.
+      // v0.1.59 (G2): 5 trụ cột — Tình báo (trang chủ), Thông tin, Quan hệ, Phân tích, Việc — cộng Hỏi Gen (đường cũ cho ?gen=) và
+      // Cài đặt (/owner/them). Vai khác Owner mở /owner/* ⇒ OwnerShell chuyển về "/". Đường lạ dưới /owner về Tình báo.
       {
         path: '/owner',
         element: <OwnerShell />,
         children: [
-          { index: true, element: <TodayScreen /> },
+          { index: true, element: <IntelScreen /> },
+          { path: 'thong-tin', element: <FeedScreen /> },
           { path: 'quan-he', element: <RelationsScreen /> },
-          { path: 'viec', element: <OwnerTasksScreen /> },
+          { path: 'phan-tich', element: <AnalyticsScreen /> },
+          { path: 'viec', element: <WorkScreen /> },
           { path: 'gen', element: <AskGenScreen /> },
           { path: 'them', element: <MoreScreen /> },
           { path: '*', element: <Navigate to="/owner" replace /> },
@@ -123,5 +129,7 @@ export const routes: RouteObject[] = [
 export function createAppRouter() {
   const router = createBrowserRouter(routes);
   setNavigator((to, opts) => void router.navigate(to, opts));
+  // v0.1.59 (G2): thành phần kit có `to` (StatTile, ListRow) chuyển trang trong ứng dụng thay vì tải lại cả trang.
+  setKitNavigator((to) => void router.navigate(to));
   return router;
 }
