@@ -207,7 +207,9 @@ async def test_overview_kpis_cover_f4_and_link_to_filtered_lists(world, owner_ap
         assert k["filter"] and k["filter"]["screen"]                # mỗi ô dẫn tới màn đã lọc
     by_key = {k["key"]: k for k in body["kpis"]}
     assert by_key["opportunity_claim_rate"]["filter"] == {"screen": "opportunity", "filters": {"owner": "none"}}
-    assert by_key["quotations_sent"]["filter"] == {"screen": "workbench", "filters": {"kind": "quotation"}}
+    # Cùng điều kiện với số đếm (đã gửi) để đối chiếu được; bộ lọc ngày 30 ngày còn là Nợ.
+    assert by_key["quotations_sent"]["filter"] == {"screen": "workbench",
+                                                   "filters": {"kind": "quotation", "status": "sent"}}
     assert "plugins" not in body["health"]                          # F-41: không đếm ops.plugins nữa
     tech = body["health"]["tech"]
     assert set(tech) == {"channels_live", "groups_listening", "events_today", "processing_latency_s"}
