@@ -9,7 +9,7 @@ Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) gh
 
 ## v0.1.62 — Đợt A phần 2, Antigravity phân lớp theo kiến trúc, kênh bền, sức khoẻ, dev cục bộ (17/10/2026)
 - **Xem hết & tìm ở máy chủ**: Hộp thư, Việc, Nhật ký (câu tiếng Việt, ẩn `http.*`), Khách & Nhóm (con trỏ `(created_at, id)`, gán BOT hàng loạt theo bộ lọc, xuất/ẩn danh hoá một người); lỗi sao lưu và 403 nói tiếng người; Cung–Cầu không ghép bừa; che OTP/mật khẩu (kể cả mẫu Việt Nam) trước khi gửi model.
-- **Antigravity phân lớp**: agy dùng cho lớp core/nội bộ (Gen của Sếp, Bản tin, sàng lọc, agent không gắn kênh); chưa dùng cho ngoại giao (`core.reply`, agent giao tiếp người ngoài) và Gen nhân viên — chờ hộp riêng v0.1.63; thêm `prctl` chống dump môi trường, timeout việc nền + khoá tệp token, ca canary đọc `/proc/1/environ`.
+- **Antigravity phân lớp**: agy dùng cho lớp core/nội bộ (Gen của Sếp, Bản tin, sàng lọc, agent không gắn kênh); chưa dùng cho ngoại giao (`core.reply`, agent giao tiếp người ngoài) và Gen nhân viên — chờ hộp riêng v0.1.63; thêm `prctl` che môi trường của chính api/worker (chưa phải cô lập thật — `/run/secrets` và tiến trình con còn đọc được, hộp riêng ở v0.1.63), `pg_dump`/`pg_restore` chỉ nhận môi trường tối thiểu, timeout việc nền + khoá tệp token, ca canary đọc `/proc/1/environ` (dự kiến báo hở, không chặn phát hành).
 - **Kênh bền & sức khoẻ**: mất mạng không xoá phiên Zalo/WhatsApp, nút Nối lại (hỏi lại khi phiên bị mở nơi khác), phiên lỗi có nút Đăng xuất; Sức khoẻ canh bridge im lặng, hàng lỗi có Phát lại/Xoá (mã PIN); Dockerfile api luôn cài mã mới + CI so băm; chỉ api sinh mã thiết lập; môi trường dev riêng (`docs/dev-local.md`).
 - Chi tiết: [docs/releases/v0.1.62.md](docs/releases/v0.1.62.md)
 

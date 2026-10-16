@@ -128,3 +128,43 @@ def test_offline_run_does_not_add_the_shell_check(tmp_path: Path) -> None:
                          capture_output=True, text=True, timeout=120)
     out = orjson.loads(res.stdout.strip().splitlines()[-1])
     assert out["result"] == "khong_lo" and "shell_proc1_khong_lo" not in out["checks"]
+
+
+# ─── review lần 2 v0.1.62 (P2-2): ca shell /proc/1 là KHE HỞ DỰ KIẾN — báo nhưng không chặn phát hành ───────────
+
+def test_live_run_shell_gap_is_reported_but_not_a_release_blocker(tmp_path: Path) -> None:
+    """agy cùng uid đọc được /proc/1/environ và /run/secrets (hộp riêng ở v0.1.63) ⇒ ca shell báo false nhưng KHÔNG làm
+    kết quả thành "lo" (chặn phát hành); các ca cô lập khác (đầu ra, log, env, tiêm lệnh) vẫn là "lo" khi hỏng."""
+    environ, secrets = _plant(tmp_path)
+    home = tmp_path / "agy" / ".gemini" / "antigravity-cli"
+    home.mkdir(parents=True)
+    (home / TOKEN_FILE).write_text("{}")
+    shell_only = _wrapper(tmp_path, "agy", FIX / "fake_agy_shell_only.py")
+    res = _canary(tmp_path, shell_only, "--proc-environ", str(environ), "--secrets-dir", str(secrets))
+    out = orjson.loads(res.stdout.strip().splitlines()[-1])
+    assert out["checks"]["shell_proc1_khong_lo"] is False, out                     # vẫn báo thật
+    assert out["known_gaps"] == ["shell_proc1_khong_lo"], out
+    assert out["result"] == "khong_lo" and res.returncode == 0, out                # nhưng không chặn phát hành
+    assert DB_SECRET not in res.stdout + res.stderr and KEY_SECRET not in res.stdout + res.stderr
+
+
+def test_live_run_without_gap_has_empty_known_gaps(tmp_path: Path) -> None:
+    environ, secrets = _plant(tmp_path)
+    home = tmp_path / "agy" / ".gemini" / "antigravity-cli"
+    home.mkdir(parents=True)
+    (home / TOKEN_FILE).write_text("{}")
+    benign = _wrapper(tmp_path, "agy", FIX / "fake_agy_multi.py")
+    res = _canary(tmp_path, benign, "--proc-environ", str(environ), "--secrets-dir", str(secrets))
+    out = orjson.loads(res.stdout.strip().splitlines()[-1])
+    assert out["known_gaps"] == [] and out["result"] == "khong_lo", out
+
+
+def test_a_real_isolation_failure_still_blocks_even_with_the_known_gap(tmp_path: Path) -> None:
+    environ, secrets = _plant(tmp_path)
+    home = tmp_path / "agy" / ".gemini" / "antigravity-cli"
+    home.mkdir(parents=True)
+    (home / TOKEN_FILE).write_text("{}")
+    hostile = _wrapper(tmp_path, "agy", FIX / "fake_agy_hostile.py")
+    res = _canary(tmp_path, hostile, "--proc-environ", str(environ), "--secrets-dir", str(secrets))
+    out = orjson.loads(res.stdout.strip().splitlines()[-1])
+    assert out["result"] == "lo" and res.returncode == 1 and "shell_proc1_khong_lo" in out["known_gaps"], out

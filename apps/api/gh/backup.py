@@ -271,13 +271,29 @@ async def list_backups(*, store: ObjectStore | None = None) -> list[BackupEntry]
 
 # ─── chạy tiến trình con thật ───────────────────────────────────────────────────────────────────────────────
 
+#: Biến môi trường tối thiểu tiến trình con pg_dump/pg_restore cần (ngoài PGPASSWORD do `libpq_conn` cấp).
+_PG_CHILD_ENV_KEEP = ("PATH", "LC_ALL", "LANG")
+
+
+def pg_child_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """Môi trường TỐI THIỂU cho pg_dump/pg_restore (review lần 2 v0.1.62): PATH (tìm tệp chạy) + LC_ALL/LANG nếu có +
+    `extra` (PGPASSWORD). KHÔNG thừa hưởng `os.environ` của api/worker — nó mang GH_ADMIN_DATABASE_URL, khoá master…
+    mà tiến trình con (và mọi thứ cùng uid đọc được `/proc/<pid>/environ` của nó) không cần biết."""
+    env = {k: os.environ[k] for k in _PG_CHILD_ENV_KEEP if os.environ.get(k)}
+    env.setdefault("PATH", os.defpath)
+    env.update(extra or {})
+    return env
+
+
 async def _run(cmd: list[str], *, env_extra: dict[str, str] | None = None) -> None:
     """Chạy `pg_dump`/`pg_restore`. v0.1.36 (F-3): job bị huỷ (quá giờ arq, worker tắt) ⇒ giết tiến trình con rồi mới
     ném lại `CancelledError` — không để pg_dump/pg_restore mồ côi chạy tiếp, giữ khoá CSDL/ghi đĩa không ai đợi.
 
     v0.1.45 (F-54): mật khẩu đi qua `env_extra` (PGPASSWORD — xem `libpq_conn`), KHÔNG trên argv; thông báo lỗi đã
-    che mật khẩu trước khi ném."""
-    env = {**os.environ, **env_extra} if env_extra else None
+    che mật khẩu trước khi ném.
+
+    Tiến trình con chỉ nhận môi trường tối thiểu (`pg_child_env`), không thừa hưởng environ của api/worker."""
+    env = pg_child_env(env_extra)
     proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                                                 env=env)
     try:

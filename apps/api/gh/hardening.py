@@ -7,8 +7,15 @@ Antigravity CLI (`agy`) chạy cùng uid `gh` với api/worker (xem `gh.provider
 CAP_SYS_PTRACE. Cờ được con cháu `fork` thừa hưởng nhưng `execve` (vd chạy `agy`) đặt lại — agy vẫn chạy bình
 thường, chỉ tiến trình api/worker là không bị đọc.
 
-KHÔNG thay cho việc tách agy ra container riêng (bước kế tiếp), chỉ thu hẹp mặt phơi bày: tệp bí mật /run/secrets/gh_*
-vẫn do quyền tệp bảo vệ. Chỉ có hiệu lực trên Linux; nền khác hoặc lỗi gọi ⇒ trả False, không ném lỗi.
+KHÔNG thay cho việc tách agy ra container riêng (hộp riêng, v0.1.63), chỉ thu hẹp mặt phơi bày. Phần CÒN HỞ (nói thật):
+- `/run/secrets/gh_*` đọc được bằng uid `gh` (quyền tệp theo uid) — agy cùng uid đọc được;
+- tiến trình con do api/worker sinh KHÔNG thừa hưởng cờ: `execve` đặt lại dumpable, nên HEALTHCHECK của api (15 giây)
+  và của worker (`arq --check`, 30 giây) chạy bằng uid `gh` mang đủ biến môi trường (vd GH_ADMIN_DATABASE_URL) và
+  `environ` của chúng đọc được trong khoảnh khắc đó;
+- `pg_dump`/`pg_restore` nay chỉ nhận môi trường tối thiểu (`gh.backup.pg_child_env`: PATH, PGPASSWORD, LC_ALL/LANG) —
+  nhưng PGPASSWORD (mật khẩu quản trị CSDL) vẫn nằm trong `environ` của chúng suốt lúc chạy.
+Canary `agy_canary --live` ca `shell_proc1_khong_lo` vì vậy dự kiến báo "lo" tới hộp riêng (báo trong `known_gaps`,
+không chặn phát hành). Chỉ có hiệu lực trên Linux; nền khác hoặc lỗi gọi ⇒ trả False, không ném lỗi.
 """
 
 import ctypes

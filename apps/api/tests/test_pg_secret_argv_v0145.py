@@ -143,3 +143,73 @@ async def test_bundle_export_import_keep_password_off_argv(admin_env: _Recorder,
     await bundle._export(str(out))
     await bundle._import(str(out))
     _assert_no_secret_on_argv(admin_env, expect=("pg_dump", "pg_restore"))
+
+
+# ─── F2 (review lần 2 v0.1.62) — tiến trình con pg_* chỉ nhận env TỐI THIỂU ────────────────────────────────────────
+
+PG_ENV_ALLOWED = {"PATH", "PGPASSWORD", "LC_ALL", "LANG"}
+
+
+def _plant_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GH_UNRELATED_SECRET", "khoa-master-gia-lap")
+    monkeypatch.setenv("GH_DATABASE_URL", "postgresql://gh_app:matkhau-app@db/gen")
+    monkeypatch.setenv("GH_UNRELATED_TOKEN", "khoa-bridge-gia-lap")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "bi-mat-bat-ky")
+
+
+def _assert_minimal_env(rec: _Recorder, *, expect: tuple[str, ...]) -> None:
+    calls = rec.pg_calls()
+    assert [c[0][0] for c in calls] == list(expect)
+    for argv, env in calls:
+        assert env is not None and set(env) <= PG_ENV_ALLOWED, (argv[0], sorted(env or {}))
+        assert env.get("PATH") and env.get("PGPASSWORD") == RAW_PASSWORD
+        assert not any("khoa-" in v or "matkhau-app" in v or "bi-mat" in v or "S3cr%40t" in v for v in env.values())
+
+
+async def test_backup_and_restore_children_get_minimal_env(admin_env: _Recorder, tmp_path: Path,
+                                                           monkeypatch: pytest.MonkeyPatch) -> None:
+    _plant_secrets(monkeypatch)
+    monkeypatch.setattr(backup, "recreate_database", lambda url: None)
+    store = LocalObjectStore(tmp_path / "store")
+    entry = await backup.run_backup(store=store)
+    await backup.restore_backup(entry.key, store=store, target_database="dich_thu")
+    _assert_minimal_env(admin_env, expect=("pg_dump", "pg_restore"))
+
+
+async def test_backup_child_env_is_minimal_even_without_password(admin_env: _Recorder, tmp_path: Path,
+                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    """URL quản trị không mật khẩu ⇒ trước đây env=None (thừa hưởng TOÀN BỘ environ của api/worker)."""
+    _plant_secrets(monkeypatch)
+    monkeypatch.setenv("GH_ADMIN_DATABASE_URL", "postgresql+asyncpg://gh@db:5432/gen_harness?sslmode=disable")
+    get_settings.cache_clear()
+    await backup.run_backup(store=LocalObjectStore(tmp_path / "store"))
+    ((_argv, env),) = admin_env.pg_calls()
+    assert env is not None and set(env) <= PG_ENV_ALLOWED and "PGPASSWORD" not in env and env.get("PATH")
+
+
+async def test_bundle_children_get_minimal_env(admin_env: _Recorder, tmp_path: Path,
+                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    _plant_secrets(monkeypatch)
+    monkeypatch.setenv("GH_BUNDLE_PASSWORD", "mat-khau-goi-du-dai-123")
+    monkeypatch.setattr(bundle, "_current_alembic_revision", lambda url: None)
+    monkeypatch.setattr(bundle, "_check_revision_compatible", lambda a, b: None)
+    monkeypatch.setattr(bundle, "recreate_database", lambda url: None)
+
+    async def _no_reencrypt(old: bytes) -> None:
+        return None
+
+    monkeypatch.setattr(bundle, "_reencrypt_secrets", _no_reencrypt)
+    out = tmp_path / "y.ghbundle"
+    await bundle._export(str(out))
+    await bundle._import(str(out))
+    _assert_minimal_env(admin_env, expect=("pg_dump", "pg_restore"))
+
+
+def test_pg_child_env_keeps_locale_only_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.delenv("LC_ALL", raising=False)
+    monkeypatch.delenv("LANG", raising=False)
+    monkeypatch.setenv("GH_UNRELATED_SECRET", "x")
+    assert backup.pg_child_env({"PGPASSWORD": "p"}) == {"PATH": "/usr/bin:/bin", "PGPASSWORD": "p"}
+    monkeypatch.setenv("LC_ALL", "C")
+    assert backup.pg_child_env(None) == {"PATH": "/usr/bin:/bin", "LC_ALL": "C"}
