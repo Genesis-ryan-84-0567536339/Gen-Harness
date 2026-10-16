@@ -125,8 +125,7 @@
       "apps/web/src/setup/validation.ts": 1
     },
     "vai-tieng-anh": {
-      "apps/api/gh/system_api/routes.py": 1,
-      "apps/web/src/screens/system/LogTab.tsx": 2
+      "apps/api/gh/system_api/routes.py": 1
     }
   },
   "crawl_baseline": {
