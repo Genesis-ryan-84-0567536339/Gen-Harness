@@ -63,6 +63,8 @@ test.describe('Thiết lập một màn (v0.1.59)', () => {
     await expect(page.getByTestId('setup-ai-advanced')).not.toHaveAttribute('open', /.*/);
     await expect(next).toBeDisabled();
     await loginGoogleInSetup(page);
+    // Như máy chủ thật: nguồn Antigravity vừa đăng nhập có 0 dòng model ⇒ màn tự "Kiểm tra" một lần, rồi mới "Đã chạy được".
+    await expect(page.getByTestId('setup-ai-cli-provider')).toContainText('Gọi thử OK');
     await expect(page.getByTestId('setup-ai-ready')).toContainText('Đã chạy được');
     await expect(next).toBeEnabled();
     await next.click();

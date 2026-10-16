@@ -10,7 +10,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
-import type { Provider, SetupState } from '@gen-harness/contracts';
+import type { CliProfile, Provider, SetupState } from '@gen-harness/contracts';
 import { GuideStepPage } from '../../src/guide/GuideStepPage';
 import { setNavigator } from '../../src/lib/navigation';
 import { qk } from '../../src/lib/queries';
@@ -147,6 +147,8 @@ interface Srv {
   session: boolean;
   role: string;
   providers: Provider[];
+  /** Tài khoản Antigravity đã đăng nhập (GET /cli/profiles?kind=antigravity_cli). */
+  agyProfiles: CliProfile[];
   /** `PUT 2` → phản hồi lỗi thay cho thành công. */
   fail: Record<string, Response>;
   firstRun: unknown;
@@ -162,7 +164,7 @@ const GEMINI_OK: Provider = {
 };
 
 function startServer(init: Partial<Srv> = {}): Srv {
-  srv = { done: [], skipped: [], finished: false, session: false, role: 'owner', providers: [], fail: {}, firstRun: null, coach: null, calls: [], ...init };
+  srv = { done: [], skipped: [], finished: false, session: false, role: 'owner', providers: [], agyProfiles: [], fail: {}, firstRun: null, coach: null, calls: [], ...init };
   srv.session = init.session ?? srv.done.includes(2);
   const stateNow = () => buildState(srv.done, srv.finished, srv.skipped);
   vi.stubGlobal(
@@ -202,7 +204,7 @@ function startServer(init: Partial<Srv> = {}): Srv {
       }
       if (/^\/providers\/[^/]+\/test$/.test(path) && method === 'POST')
         return json(200, { ok: true, latency_ms: 321, models: ['gemini-2.5-flash'], error: null, at: '2026-10-16T01:00:00Z' });
-      if (path === '/cli/profiles') return json(200, []);
+      if (path === '/cli/profiles') return json(200, u.searchParams.get('kind') === 'claude_code_cli' ? [] : srv.agyProfiles);
       if (path === '/setup/first-run')
         return json(200, srv.firstRun ?? { raw_collected: 0, classifying: 0, clean: 0, lowconf: 0, discarded: 0, run: null });
       if (path === '/setup/follow-up') return json(200, [{ n: 4, key: 'brain', title: 'Bộ não AI', status: 'todo', done: srv.done.includes(4) }]);
@@ -478,6 +480,57 @@ describe('Bước 2 · Nguồn AI', () => {
     expect(srv.calls.find((c) => c.method === 'PUT' && c.path === '/setup/steps/4')!.body).toEqual({ provider_ids: ['pv-new'] });
     expect(screen.getByTestId('setup-done-ai')).toHaveTextContent('Đã chạy');
     await waitFor(() => expect(loc()).toBe('/setup?buoc=xong'));
+  });
+
+  describe('Antigravity vừa đăng nhập (thật: 0 dòng model, chưa gọi thử)', () => {
+    const AGY_PROFILE: CliProfile = { id: 'cp1', email: 'an@example.vn', plan_label: null, active: true, expires_at: null, state: 'ok' };
+    const AGY_BARE: Provider = {
+      id: 'pv-agy', kind: 'antigravity_cli', name: 'Antigravity Brain', endpoint: null, failover_rank: 1, enabled: true, auth_state: 'ok', keys: [], models: [],
+    };
+    const agyTests = () => srv.calls.filter((c) => c.method === 'POST' && c.path === '/providers/pv-agy/test');
+
+    it('tự "Kiểm tra" đúng MỘT lần ⇒ "Đã chạy được" và Tiếp tục mở; không nói "Đã chạy được" trước đó', async () => {
+      startServer({ done: [1, 2, 3], session: true, providers: [{ ...AGY_BARE }], agyProfiles: [AGY_PROFILE] });
+      renderAt('/setup');
+      await screen.findByRole('heading', { name: 'Nối nguồn AI cho Gen' });
+      const ready = await screen.findByTestId('setup-ai-ready');
+      expect(ready).toHaveTextContent('Đã chạy được');
+      expect(ready).toHaveTextContent('Antigravity Brain');
+      await waitFor(() => expect(screen.getByRole('button', { name: /Tiếp tục/ })).toBeEnabled());
+      expect(agyTests()).toHaveLength(1);
+      const row = screen.getByTestId('setup-ai-cli-provider');
+      expect(row).toHaveTextContent('Gọi thử OK');
+      expect(within(row).getByRole('button', { name: 'Kiểm tra lại Antigravity Brain' })).toBeInTheDocument();
+    });
+
+    it('gọi thử lỗi ⇒ không "Đã chạy được", Tiếp tục khoá, dòng nguồn có câu thân thiện + "Chi tiết kỹ thuật" + "Kiểm tra lại" gọi lại', async () => {
+      const user = userEvent.setup();
+      startServer({
+        done: [1, 2, 3], session: true, providers: [{ ...AGY_BARE }], agyProfiles: [AGY_PROFILE],
+        fail: { 'POST /providers/pv-agy/test': json(200, { ok: false, latency_ms: null, models: [], error: 'agy: hết hạn đăng nhập', error_detail: 'exit 1', at: '2026-10-16T01:00:00Z' }) },
+      });
+      renderAt('/setup');
+      const row = await screen.findByTestId('setup-ai-cli-provider');
+      await waitFor(() => expect(row).toHaveTextContent('Chưa dùng được'));
+      expect(within(row).getAllByText('Chi tiết kỹ thuật').length).toBeGreaterThan(0);
+      expect(screen.queryByTestId('setup-ai-ready')).toBeNull();
+      expect(screen.getByRole('button', { name: /Tiếp tục/ })).toBeDisabled();
+      expect(screen.getByText(/có một nguồn chạy được là tiếp tục được/)).toBeInTheDocument();
+      expect(agyTests()).toHaveLength(1); // lỗi không kéo theo vòng lặp tự thử
+      await user.click(within(row).getByRole('button', { name: 'Kiểm tra lại Antigravity Brain' }));
+      await waitFor(() => expect(agyTests()).toHaveLength(2));
+    });
+
+    it('nguồn đã có model sẵn (đăng nhập từ trước) ⇒ không tự gọi thử, vẫn "Đã chạy được"', async () => {
+      startServer({
+        done: [1, 2, 3], session: true, agyProfiles: [AGY_PROFILE],
+        providers: [{ ...AGY_BARE, models: [{ id: 'm9', model_name: 'gemini-2.5-pro', daily_quota: null, used_today: 0 }] }],
+      });
+      renderAt('/setup');
+      expect(await screen.findByTestId('setup-ai-ready')).toHaveTextContent('Đã chạy được');
+      await waitFor(() => expect(screen.getByRole('button', { name: /Tiếp tục/ })).toBeEnabled());
+      expect(agyTests()).toHaveLength(0);
+    });
   });
 
   it('Kiểm tra lỗi: câu thân thiện + "Chi tiết kỹ thuật", Tiếp tục vẫn khoá', async () => {

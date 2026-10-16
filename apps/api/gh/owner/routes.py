@@ -10,16 +10,19 @@ FORBIDDEN).
 - `GET /relations?list=hot|cooling|bridges|matches|care&limit=20` — Quan hệ: 5 danh sách, mỗi dòng mở Hồ sơ sống
   (limit chặn ≤ 50).
 - `GET /insights?range=week|month&only=` — Phân tích 9 chỉ số tính thẳng từ dữ liệu đang có.
-- `GET /proposals` — đề xuất của Gen còn hiệu lực của chính Owner.
+- `GET /proposals` — đề xuất của Gen còn hiệu lực của chính Owner (`state: "unavailable"` khi Redis không đọc được).
 - `GET /tasks` — Việc: Hộp thư đã lọc, Bàn làm việc, Việc & Nhắc hẹn (đếm + vài dòng + link sâu).
 
 KHÔNG có POST/PUT/PATCH/DELETE: mọi thao tác ghi đi qua luồng sẵn có (duyệt nháp, đề xuất Gen + mã PIN, Bộ não AI) —
 test `test_owner_v0155` kiểm không có decorator ghi nào trong tệp này. Không gọi model, không ghi Action Log.
 """
 
+import logging
+import uuid
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
+from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.auth import service
@@ -32,17 +35,32 @@ from gh.owner import proposals_view
 from gh.owner import service as svc
 
 router = APIRouter(prefix="/owner", tags=["owner"])
+log = logging.getLogger("gh.owner.routes")
+
+
+async def _proposals(request: Request, db: AsyncSession, org_id: uuid.UUID,
+                     user_id: uuid.UUID) -> tuple[list[dict[str, Any]], bool]:
+    """Đề xuất Gen còn hiệu lực + cờ "đọc được". Redis chỉ là nguồn xác nhận đề xuất: Redis chậm / hỏng thì phần đề xuất
+    rỗng và cờ = False, KHÔNG làm hỏng cả `/today` (thanh điều hướng, Tình báo) hay `/proposals`. Chỉ ghi loại lỗi
+    (không ghi nội dung)."""
+    try:
+        return await proposals_view.list_proposals(db, request.app.state.redis, org_id, user_id), True
+    except (RedisError, OSError, TimeoutError) as e:     # CancelledError là BaseException ⇒ vẫn đi qua
+        log.warning("owner.proposals_unavailable: %s", type(e).__name__)
+        return [], False
 
 
 @router.get("/today")
 async def get_today(request: Request, user: service.CurrentUser = Depends(require_owner),
                     db: AsyncSession = DB) -> dict[str, Any]:
     data = await svc.today(db, user.org_id, user.id)
-    props = await proposals_view.list_proposals(db, request.app.state.redis, user.org_id, user.id)
+    props, ok = await _proposals(request, db, user.org_id, user.id)
     # `urgent_open` đếm bằng CÙNG hàm với `feed.counts.urgent_open`; `decide` = nháp chờ duyệt (mọi tuổi) + đề xuất
-    # Gen hợp lệ.
+    # Gen hợp lệ. Redis không đọc được ⇒ `decide` chỉ đếm nháp và có thêm `proposals_unavailable: true`.
     data["nav"] = {"urgent_open": await feed_mod.urgent_open(db, user.org_id),
                    "decide": await svc.pending_drafts(db, user.org_id) + len(props)}
+    if not ok:
+        data["nav"]["proposals_unavailable"] = True
     return data
 
 
@@ -83,7 +101,8 @@ async def get_insights(range_: Literal["week", "month"] = Query("week", alias="r
 @router.get("/proposals")
 async def get_proposals(request: Request, user: service.CurrentUser = Depends(require_owner),
                         db: AsyncSession = DB) -> dict[str, Any]:
-    return {"items": await proposals_view.list_proposals(db, request.app.state.redis, user.org_id, user.id)}
+    items, ok = await _proposals(request, db, user.org_id, user.id)
+    return {"items": items} if ok else {"items": [], "state": "unavailable"}
 
 
 @router.get("/tasks")

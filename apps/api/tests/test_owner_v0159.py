@@ -23,12 +23,14 @@ from typing import Any
 
 import orjson
 import pytest
+from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy import text
 
 from gh.gen import briefing
 from gh.gen import proposals as gen_proposals
 from gh.owner import brief as brief_mod
 from gh.owner import routes as owner_routes
+from gh.owner import service as svc
 from gh.providers.router import ModelRouter
 from tests.conftest import Api
 from tests.test_owner_v0155 import _org, _owner_id, _person
@@ -59,10 +61,10 @@ async def channel(db: Any, org: uuid.UUID, type_: str = "zalo", name: str | None
             ).scalar_one()  # type: ignore[no-any-return]
 
 
-async def identity(db: Any, person: uuid.UUID, ch: uuid.UUID) -> uuid.UUID:
+async def identity(db: Any, person: uuid.UUID, ch: uuid.UUID, ext: str | None = None) -> uuid.UUID:
     return (await db.execute(text("""INSERT INTO core.person_identities (person_id, channel_id, external_id)
                                      VALUES (:p, :c, :x) RETURNING id"""),
-                             {"p": person, "c": ch, "x": f"x-{uuid.uuid4().hex[:10]}"})).scalar_one()  # type: ignore
+                             {"p": person, "c": ch, "x": ext or f"x-{uuid.uuid4().hex[:10]}"})).scalar_one()  # type: ignore
 
 
 async def group(db: Any, org: uuid.UUID, ch: uuid.UUID, name: str = "Nhóm khách hàng") -> uuid.UUID:
@@ -74,15 +76,16 @@ async def group(db: Any, org: uuid.UUID, ch: uuid.UUID, name: str = "Nhóm khác
 
 async def event(db: Any, org: uuid.UUID, ch: uuid.UUID, at: datetime, *, direction: str = "inbound",
                 sender: uuid.UUID | None = None, grp: uuid.UUID | None = None, body: str | None = "Xin chào",
-                kind: str = "text", received_at: datetime | None = None) -> SimpleNamespace:
+                kind: str = "text", received_at: datetime | None = None, payload: str = "{}") -> SimpleNamespace:
     """Một dòng `raw.events`. `received_at` mặc định = `at` (lịch sử); sender = id `core.person_identities`."""
     ext = f"m-{uuid.uuid4().hex}"
     r = (await db.execute(text("""
         INSERT INTO raw.events (org_id, received_at, occurred_at, channel_id, group_id, sender_identity_id,
                                 external_msg_id, kind, body_text, payload, content_hash, direction)
-        VALUES (:o, :r, :t, :c, :g, :s, :x, :k, :b, CAST('{}' AS jsonb), :h, :d) RETURNING id, received_at, seq"""),
+        VALUES (:o, :r, :t, :c, :g, :s, :x, :k, :b, CAST(:pl AS jsonb), :h, :d) RETURNING id, received_at, seq"""),
                            {"o": org, "r": received_at or at, "t": at, "c": ch, "g": grp, "s": sender, "x": ext,
-                            "k": kind, "b": body, "h": hashlib.sha256(ext.encode()).digest(), "d": direction})).one()
+                            "k": kind, "b": body, "h": hashlib.sha256(ext.encode()).digest(), "d": direction,
+                            "pl": payload})).one()
     return SimpleNamespace(id=r.id, received_at=r.received_at, seq=r.seq, at=at)
 
 
@@ -413,6 +416,29 @@ async def test_today_nav_matches_feed_and_counts_valid_proposals(owner: Api, db:
     assert nav["urgent_open"] == feed_counts["urgent_open"]
 
 
+async def test_today_and_proposals_survive_a_broken_redis(owner: Api, db: Any, redis: Any,
+                                                          monkeypatch: pytest.MonkeyPatch,
+                                                          caplog: pytest.LogCaptureFixture) -> None:
+    """F-60-R2: Redis chậm / hỏng không được làm hỏng `/owner/today` (thanh điều hướng + Tình báo) hay `/proposals`."""
+    org, uid = await _org(db), await _owner_id(db)
+    await unit(db, org, ago(hours=2), "Complained", "Khách than giao chậm")
+    await draft(db, org, "Nháp mới")
+    await proposal(db, redis, org, uid)
+    await db.commit()
+
+    async def broken(*_a: Any, **_k: Any) -> Any:
+        raise RedisConnectionError("mật khẩu=bí-mật-123 không nối được")
+
+    monkeypatch.setattr(gen_proposals, "load", broken)
+    with caplog.at_level("WARNING"):
+        r = await owner.get("/owner/today")
+        p = await owner.get("/owner/proposals")
+    assert r.status_code == 200, r.text
+    assert r.json()["nav"] == {"urgent_open": 1, "decide": 1, "proposals_unavailable": True}   # chỉ còn nháp
+    assert p.status_code == 200 and p.json() == {"items": [], "state": "unavailable"}
+    assert "ConnectionError" in caplog.text and "bí-mật-123" not in caplog.text                # chỉ ghi loại lỗi
+
+
 # ─── proposals ───────────────────────────────────────────────────────────────────────────────────────────────────
 
 async def test_proposals_only_valid_redis_backed_own_pending(owner: Api, db: Any, redis: Any) -> None:
@@ -512,6 +538,31 @@ async def test_care_rule_order_and_scope(owner: Api, db: Any) -> None:
     assert "ngày chưa liên lạc" in items[3]["metric_text"] and "sắp rời" in items[0]["metric_text"]
     assert (await owner.get("/owner/relations?list=care&limit=2")).json()["items"][1]["name"] == "Anh Unknown"
     assert (await owner.get("/owner/relations?list=care&limit=999")).status_code == 200
+
+
+async def test_care_bounds_the_silent_scan_to_a_window_and_keeps_churn_people(owner: Api, db: Any) -> None:
+    """F-60-R3: luật "im lặng" chỉ xét người có tin trong CARE_WINDOW_DAYS; rủi ro rời bỏ cao thì không bị cắt."""
+    org = await _org(db)
+    await _care_person(db, org, "W-1", "Im lặng trong cửa sổ", "customer", msgs=3, quiet_days=100)
+    await _care_person(db, org, "W-2", "Im lặng quá lâu", "customer", msgs=3, quiet_days=svc.CARE_WINDOW_DAYS + 40)
+    await _care_person(db, org, "W-3", "Quá lâu nhưng sắp rời", "customer", churn=80, msgs=3,
+                       quiet_days=svc.CARE_WINDOW_DAYS + 40)
+    await _care_person(db, org, "W-4", "Chưa từng nhắn", "unknown")
+    await db.commit()
+    r = await owner.get("/owner/relations?list=care")
+    assert r.status_code == 200 and "state" not in r.json()
+    assert [i["name"] for i in r.json()["items"]] == ["Quá lâu nhưng sắp rời", "Im lặng trong cửa sổ"]
+
+
+async def test_care_timeout_or_error_returns_state_error_not_500(owner: Api, db: Any,
+                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    async def boom(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("quá giờ 5s — nội-dung-nhạy-cảm")
+
+    monkeypatch.setattr(svc, "_care", boom)
+    r = await owner.get("/owner/relations?list=care")
+    assert r.status_code == 200 and r.json() == {"list": "care", "items": [], "state": "error"}
+    assert (await owner.get("/owner/relations?list=hot")).status_code == 200            # danh sách khác không ảnh hưởng
 
 
 async def test_care_empty_org_and_other_lists_have_optional_fields(owner: Api, db: Any) -> None:

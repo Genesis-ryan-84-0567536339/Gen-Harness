@@ -36,6 +36,8 @@ DEFAULT_LIMIT = 30
 MAX_LIMIT = 50
 #: Cửa sổ thời gian của unit (ngày). Cảnh báo mở / nháp chờ duyệt không bị giới hạn tuổi.
 UNIT_WINDOW_DAYS = 7
+#: Chặn `offset` (phân trang không bao giờ cần xa hơn; tránh số vượt bigint → 500).
+MAX_OFFSET = 100_000
 SUMMARY_MAX = 240
 #: Hội thoại quanh tin: 5 tin trước + tin chính + 4 tin sau (≤ 10), mỗi tin cắt 280 ký tự.
 CONTEXT_BEFORE = 5
@@ -166,7 +168,7 @@ def _feed_item(r: Any) -> dict[str, Any]:
 
 async def feed(db: AsyncSession, org_id: uuid.UUID, view: str, offset: int, limit: int) -> dict[str, Any]:
     n = clamp_limit(limit)
-    off = max(0, int(offset))
+    off = max(0, min(int(offset), MAX_OFFSET))      # quá cỡ bigint sẽ làm Postgres lỗi ⇒ chặn trước
     cte, params = await _items_cte(db, org_id)
     rows = (await db.execute(text(cte + f"""
         SELECT * FROM items WHERE {_VIEW_WHERE[view]}
@@ -194,12 +196,54 @@ def _message(r: Any, center_id: uuid.UUID) -> dict[str, Any]:
             "text": body, "is_center": r.id == center_id}
 
 
+#: Tin 1-1 chỉ thuộc cuộc trò chuyện với ĐÚNG người của đơn vị ý nghĩa (v0.1.60, F-60-R1), bất kể tin chính đến hay đi:
+#: tin ĐẾN = của người đó; tin ĐI = có người nhận trong payload (Zalo `threadId`, WhatsApp `key.remoteJid`, hoặc
+#: `recipient`) trùng định danh của họ; tin đi không ghi người nhận ⇒ chỉ lấy khi tin ĐẾN 1-1 gần nhất trước nó
+#: (trong 7 ngày, cùng kênh) là của người đó. Khách khác trên cùng kênh không bao giờ lẫn vào.
+_RCPT_SQL = ("NULLIF(split_part(COALESCE(e.payload->>'threadId', e.payload->'key'->>'remoteJid', "
+             "e.payload->>'recipient'), '@', 1), '')")
+_ONE_TO_ONE_SQL = f"""AND (
+  (e.direction = 'inbound' AND e.sender_identity_id = ANY(CAST(:ids AS uuid[])))
+  OR (e.direction = 'outbound' AND (
+    {_RCPT_SQL} = ANY(CAST(:ext AS text[]))
+    OR ({_RCPT_SQL} IS NULL AND (
+      SELECT i2.sender_identity_id FROM raw.events i2
+      WHERE i2.org_id = e.org_id AND i2.channel_id = e.channel_id AND i2.group_id IS NULL
+        AND i2.direction = 'inbound' AND i2.occurred_at <= e.occurred_at
+        AND i2.occurred_at > e.occurred_at - interval '7 days'
+        AND i2.received_at > e.received_at - interval '37 days' AND i2.received_at <= e.received_at
+      ORDER BY i2.occurred_at DESC, i2.seq DESC LIMIT 1) = ANY(CAST(:ids AS uuid[])))))
+)"""
+
+
+async def _person_keys(db: AsyncSession, org_id: uuid.UUID, unit_id: uuid.UUID, observed_at: Any,
+                       c: Any) -> dict[str, Any]:
+    """Định danh (id + mã ngoài đã bỏ đuôi `@…`) của người sở hữu đơn vị ý nghĩa, kể cả hồ sơ đã gộp vào họ. Đơn vị
+    không gắn người mà tin chính là tin ĐẾN ⇒ dùng chính người gửi tin chính."""
+    rows = (await db.execute(text("""
+        SELECT pi.id, split_part(pi.external_id, '@', 1) AS ext
+        FROM clean.meaning_units mu
+        JOIN core.person_identities pi ON pi.channel_id = :ch
+         AND (pi.person_id = mu.person_id
+              OR pi.person_id IN (SELECT q.id FROM core.persons q WHERE q.merged_into_id = mu.person_id))
+        WHERE mu.id = :i AND mu.observed_at = :obs AND mu.org_id = :o"""),
+                             {"i": unit_id, "obs": observed_at, "o": org_id, "ch": c.channel_id})).all()
+    ids = {r.id for r in rows}
+    ext = {r.ext for r in rows if r.ext}
+    if not ids and c.direction == "inbound" and c.sender_identity_id is not None:
+        ids.add(c.sender_identity_id)
+        ext = {x for x in (await db.execute(text(
+            "SELECT split_part(external_id, '@', 1) FROM core.person_identities WHERE id = :i"),
+            {"i": c.sender_identity_id})).scalars().all() if x}
+    return {"ids": sorted(ids, key=str), "ext": sorted(ext)}
+
+
 async def context(db: AsyncSession, org_id: uuid.UUID, item_id: str) -> dict[str, Any]:
     """Hội thoại quanh một tin (CHỈ unit có bản ghi thô gốc): 5 tin trước + tin chính + 4 tin sau, cùng kênh và cùng
     nhóm (`group_id IS NOT DISTINCT FROM`), theo thời điểm xảy ra. Tin chính = bản ghi thô SỚM NHẤT trong chứng cứ
-    (`clean.evidence`). Tin 1-1 (không nhóm): tin ĐẾN chỉ lấy của chính người gửi tin chính (các cuộc 1-1 khác trên
-    cùng kênh không lẫn vào). Không phải unit / không có gốc ⇒ `messages` rỗng. Id lạ ⇒ 404. Không ghi thân tin vào
-    log."""
+    (`clean.evidence`). Tin 1-1 (không nhóm): chỉ lấy tin của cuộc trò chuyện với người của đơn vị ý nghĩa, dù tin
+    chính đến hay đi (xem `_ONE_TO_ONE_SQL`; cuộc 1-1 khác trên cùng kênh không lẫn vào).
+    Không phải unit / không có gốc ⇒ `messages` rỗng. Id lạ ⇒ 404. Không ghi thân tin vào log."""
     empty: dict[str, Any] = {"center_event_id": None, "messages": []}
     try:
         iid = uuid.UUID(str(item_id))
@@ -223,12 +267,11 @@ async def context(db: AsyncSession, org_id: uuid.UUID, item_id: str) -> dict[str
                                {"i": c.id, "r": c.received_at})).one_or_none()
     if center is None:
         return empty
-    # tin 1-1: không để tin đến của người khác trên cùng kênh lẫn vào (tin đi không có người nhận để lọc)
-    mine = "AND (e.group_id IS NOT NULL OR e.direction = 'outbound' OR e.sender_identity_id IS NOT DISTINCT FROM :sid)"
-    thread = ("WHERE e.org_id = :o AND e.channel_id = :ch AND e.group_id IS NOT DISTINCT FROM :g "
-              + (mine if c.direction == "inbound" else ""))
-    p = {"o": org_id, "ch": c.channel_id, "g": c.group_id, "t": c.occurred_at, "seq": c.seq,
-         **({"sid": c.sender_identity_id} if c.direction == "inbound" else {})}
+    thread = "WHERE e.org_id = :o AND e.channel_id = :ch AND e.group_id IS NOT DISTINCT FROM :g "
+    p: dict[str, Any] = {"o": org_id, "ch": c.channel_id, "g": c.group_id, "t": c.occurred_at, "seq": c.seq}
+    if c.group_id is None:
+        thread += _ONE_TO_ONE_SQL
+        p.update(await _person_keys(db, org_id, iid, item.created_at, c))
     before = (await db.execute(text(RAW_SELECT + thread + """
         AND (e.occurred_at, e.seq) < (:t, :seq) ORDER BY e.occurred_at DESC, e.seq DESC LIMIT :n"""),
                                {**p, "n": CONTEXT_BEFORE})).all()

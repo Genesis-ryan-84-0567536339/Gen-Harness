@@ -174,6 +174,24 @@ async def test_silenced_items_and_facebook_group_are_excluded(owner: Api, db: An
     assert [i["summary"] for i in (await _feed(owner, view="all"))["items"]] == ["Tin còn hiện"]
 
 
+async def test_silenced_draft_is_not_counted_by_nav_decide_nor_approval(owner: Api, db: Any) -> None:
+    """nit: nav.decide (Việc) và counts.approval (Thông tin) cùng loại nháp đã "Tắt tiếng"."""
+    org = await _org(db)
+    uid = (await db.execute(text("SELECT id FROM core.users LIMIT 1"))).scalar_one()
+    await draft(db, org, "Nháp còn hiện")
+    quiet = await draft(db, org, "Nháp đã tắt tiếng")
+    await db.execute(text("""INSERT INTO biz.queue_silences (org_id, item_type, item_id, silenced_by)
+                             VALUES (:o, 'draft', :i, :u)"""), {"o": org, "i": quiet, "u": uid})
+    await db.commit()
+    assert (await owner.get("/owner/today")).json()["nav"]["decide"] == 1
+    assert (await _feed(owner))["counts"]["approval"] == 1
+
+
+async def test_huge_offset_is_clamped_not_a_500(owner: Api) -> None:
+    r = await owner.get("/owner/feed?offset=99999999999999999999")
+    assert r.status_code == 200 and r.json()["items"] == [] and r.json()["next_offset"] is None
+
+
 # ─── bộ lọc, đếm, phân trang ──────────────────────────────────────────────────────────────────────────────────────
 
 async def test_views_counts_and_offset_paging(owner: Api, db: Any) -> None:
@@ -331,6 +349,32 @@ async def test_context_one_to_one_excludes_other_customers_inbound(owner: Api, d
     await db.commit()
     texts = [m["text"] for m in (await owner.get(f"/owner/feed/{uid}/context")).json()["messages"]]
     assert texts == ["Lan: chào em", "Lan: báo giá MDF?", "Em gửi báo giá ạ"]
+
+
+async def test_context_one_to_one_outbound_center_keeps_only_that_customers_thread(owner: Api, db: Any) -> None:
+    """F-60-R1: tin chính là tin ĐI (SentQuotation) — vẫn không lẫn tin của khách khác trên cùng kênh."""
+    org = await _org(db)
+    ch = await channel(db, org)
+    lan = await _person(db, org, "PER-1", "Chị Lan")
+    nam = await _person(db, org, "PER-2", "Anh Nam")
+    s_lan, s_nam = await identity(db, lan, ch, "zl-lan"), await identity(db, nam, ch, "zl-nam")
+    base = ago(hours=2)
+    await event(db, org, ch, base, sender=s_lan, body="Lan: cho xin báo giá")
+    await event(db, org, ch, base + timedelta(minutes=1), sender=s_nam, body="Nam: hỏi việc khác")
+    out_lan = await event(db, org, ch, base + timedelta(minutes=2), direction="outbound", body="Gửi Lan báo giá",
+                          payload='{"threadId": "zl-lan"}')
+    await event(db, org, ch, base + timedelta(minutes=3), direction="outbound", body="Gửi Nam hàng mẫu",
+                payload='{"threadId": "zl-nam"}')
+    await event(db, org, ch, base + timedelta(minutes=4), sender=s_nam, body="Nam: cảm ơn")
+    await event(db, org, ch, base + timedelta(minutes=5), direction="outbound", body="Trả lời Nam (không rõ)")
+    await event(db, org, ch, base + timedelta(minutes=6), sender=s_lan, body="Lan: ok em")
+    await event(db, org, ch, base + timedelta(minutes=7), direction="outbound", body="Dạ chị Lan (không rõ)")
+    uid = await unit(db, org, base, "SentQuotation", raw=(out_lan,), person=lan)
+    await db.commit()
+    msgs = (await owner.get(f"/owner/feed/{uid}/context")).json()["messages"]
+    assert [m["text"] for m in msgs] == [
+        "Lan: cho xin báo giá", "Gửi Lan báo giá", "Lan: ok em", "Dạ chị Lan (không rõ)"]
+    assert [m["is_center"] for m in msgs] == [False, True, False, False]
 
 
 async def test_context_does_not_log_message_bodies(owner: Api, db: Any, caplog: pytest.LogCaptureFixture) -> None:

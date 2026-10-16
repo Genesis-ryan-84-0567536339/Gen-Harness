@@ -12,6 +12,7 @@ Nguyên tắc:
   của chúng không làm sập `GET /owner/today` (bọc savepoint để giao dịch không bị hỏng; lỗi ⇒ giá trị rỗng).
 """
 
+import asyncio
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
@@ -22,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.biz.graph.jobs import COLD_DAYS, WINDOW_DAYS
 from gh.biz.market.service import OPEN_STAGES
-from gh.biz.queue.service import EVENT_LABELS
+from gh.biz.queue.service import EVENT_LABELS, not_silenced_sql
 from gh.boss_checks import service as boss_service
 from gh.data.common import iso
 from gh.defaults import registry as defaults_registry
@@ -56,6 +57,9 @@ CARE_CHURN_MIN = 60
 CARE_SILENT_DAYS = 14
 CARE_MIN_MSGS = 3
 CARE_EXCLUDED_TYPES = ("staff", "candidate", "learner")
+#: Chỉ xét người có tin trong cửa sổ này (ngày) cho luật "im lặng" — không dò cả nghìn người ngoài lề và cắt được
+#: phân vùng `raw.events`. Người im lặng quá lâu vẫn hiện nếu rủi ro rời bỏ ≥ CARE_CHURN_MIN.
+CARE_WINDOW_DAYS = 180
 #: Kênh KHÔNG tính là "kênh nhận tin" (Facebook/Telegram không đưa tin khách về Thông tin).
 NON_INTAKE_CHANNELS = ("facebook", "telegram")
 
@@ -117,9 +121,12 @@ async def channels_connected(db: AsyncSession, org_id: uuid.UUID) -> int:
 
 
 async def pending_drafts(db: AsyncSession, org_id: uuid.UUID) -> int:
-    """Số bản nháp chờ duyệt, KHÔNG giới hạn tuổi (khớp màn Việc) — chỉ mục (org_id, status, created_at DESC)."""
-    n = (await db.execute(text("SELECT count(*) FROM biz.action_drafts WHERE org_id = :o AND status = 'pending'"),
-                          {"o": org_id})).scalar_one()
+    """Số bản nháp chờ duyệt, KHÔNG giới hạn tuổi, bỏ nháp đã "Tắt tiếng" — khớp `feed.counts.approval` (cùng
+    `not_silenced_sql`) và màn Việc; chỉ mục (org_id, status, created_at DESC)."""
+    n = (await db.execute(text(f"""
+        SELECT count(*) FROM (SELECT 'draft' AS item_type, id AS item_id FROM biz.action_drafts
+                              WHERE org_id = :o AND status = 'pending') i
+        WHERE {not_silenced_sql("i")}"""), {"o": org_id})).scalar_one()  # noqa: S608
     return int(n or 0)
 
 
@@ -392,7 +399,16 @@ async def relations(db: AsyncSession, org_id: uuid.UUID, list_name: str, limit: 
                           "metric_text": f"Nối {pairs} cặp nhóm" if pairs > 0 else "Người nối các nhóm",
                           "to": profile_link(r.id), "person_id": str(r.id)})
     elif list_name == "care":
-        items = await _care(db, org_id, n)
+        # Savepoint + statement_timeout như Phân tích: quá giờ / lỗi ⇒ state "error" chứ không treo cả màn.
+        from gh.owner.insights import guarded  # tránh import vòng (insights nạp service)
+        try:
+            async with guarded(db):
+                items = await _care(db, org_id, n)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — danh sách này lỗi không được làm hỏng cả màn
+            log.warning("Quan hệ: danh sách care lỗi (%s)", type(exc).__name__)
+            return {"list": list_name, "items": [], "state": "error"}
     else:  # matches
         # Cung ↔ Cầu (biz.matches): còn hiệu lực = gợi ý mới hoặc đã giới thiệu; chỉ mục (org_id, status).
         for r in (await db.execute(text("""
@@ -420,12 +436,27 @@ async def relations(db: AsyncSession, org_id: uuid.UUID, list_name: str, limit: 
 async def _care(db: AsyncSession, org_id: uuid.UUID, n: int) -> list[dict[str, Any]]:
     """"Khách cần chăm": người KHÔNG phải nhân viên/ứng viên/học viên (gồm `unknown`), chưa xoá/gộp, mà rủi ro rời bỏ
     ≥ CARE_CHURN_MIN (lý do `churn`) HOẶC đã nhắn ≥ CARE_MIN_MSGS tin và ≥ CARE_SILENT_DAYS ngày không có tin mới (lý do
-    `silent`). Xếp rủi ro giảm dần rồi số ngày im lặng giảm dần."""
+    `silent`). Xếp rủi ro giảm dần rồi số ngày im lặng giảm dần.
+
+    Chặn chi phí (F-60-R3): tập ỨNG VIÊN lấy trước bằng MỘT lần quét `raw.events` trong CARE_WINDOW_DAYS (cắt phân
+    vùng, gom theo người) + các người có điểm rủi ro cao; chỉ ứng viên mới đi dò "lần liên lạc gần nhất". Người ở nhóm
+    Zalo `unknown` chưa từng nhắn không bị dò."""
     rows = (await db.execute(text(f"""
+        WITH recent AS (
+          SELECT pi.person_id FROM raw.events e JOIN core.person_identities pi ON pi.id = e.sender_identity_id
+          WHERE e.org_id = :o AND e.received_at >= now() - make_interval(days => :win)
+          GROUP BY pi.person_id
+          HAVING count(*) >= :msgs AND max(e.occurred_at) < now() - make_interval(days => :silent)
+        ), cand AS (
+          SELECT person_id AS id FROM recent
+          UNION
+          SELECT subject_id FROM clean.current_scores
+          WHERE subject_type = 'person' AND dimension = 'churn_risk' AND value >= :churn
+        )
         SELECT p.id, p.display_name AS name, p.person_type AS type, p.organization_name AS org_name,
                heat.value AS heat, churn.value AS churn_risk, lc.n AS msgs, {_LAST_DAYS} AS days,
                {_OPEN_VALUE} AS open_value
-        FROM core.persons p
+        FROM cand JOIN core.persons p ON p.id = cand.id
         {_SCORE_JOIN.format(a="churn", dim="churn_risk")}
         {_SCORE_JOIN.format(a="heat", dim="heat")}
         {_LAST_CONTACT.format(pid="p.id")}
@@ -436,7 +467,7 @@ async def _care(db: AsyncSession, org_id: uuid.UUID, n: int) -> list[dict[str, A
         ORDER BY churn.value DESC NULLS LAST, {_LAST_DAYS} DESC NULLS LAST, p.display_name
         LIMIT :n"""),  # noqa: S608
         {"o": org_id, "skip": list(CARE_EXCLUDED_TYPES), "churn": CARE_CHURN_MIN, "msgs": CARE_MIN_MSGS,
-         "silent": CARE_SILENT_DAYS, "n": n, "open_st": list(OPEN_STAGES)})).all()
+         "silent": CARE_SILENT_DAYS, "win": CARE_WINDOW_DAYS, "n": n, "open_st": list(OPEN_STAGES)})).all()
     out: list[dict[str, Any]] = []
     for r in rows:
         churn = r.churn_risk is not None and float(r.churn_risk) >= CARE_CHURN_MIN

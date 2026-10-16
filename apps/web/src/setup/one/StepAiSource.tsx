@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import type { CliKind, Provider, ProviderKind, ProviderTestResult, SetupState } from '@gen-harness/contracts';
@@ -69,14 +69,12 @@ export function StepAiSource({ finished = false, onSaved, onLater }: StepAiSourc
   const ready = list.filter((p) => providerReady(p, tested, cliActive));
   const withModel = ready.filter((p) => providerHasModel(p, tested));
   const canContinue = withModel.length > 0;
+  // "Đã chạy được" chỉ khi nguồn có model hoặc vừa gọi thử xanh — đăng nhập xong mà chưa kiểm tra thì chưa nói chạy được.
+  const shown = ready.filter((p) => providerHasModel(p, tested) || tested[p.id]?.ok === true);
   const onlyAgyReady = ready.length > 0 && ready.every((p) => p.kind === 'antigravity_cli');
   const keyProviders = list.filter((p) => !isCliKind(p.kind));
-  const blockReason = canContinue
-    ? null
-    : ready.length
-      ? 'Nguồn đã chạy được nhưng chưa có model nào — mở “Thứ tự dự phòng” để chọn model.'
-      : 'Đăng nhập Google hoặc dán một khoá API và bấm Kiểm tra — có một nguồn chạy được là tiếp tục được.';
-
+  const agyRows = list.filter((p) => p.kind === 'antigravity_cli');
+  const claudeRows = list.filter((p) => p.kind === 'claude_code_cli');
   const test = useMutation({
     mutationFn: (id: string) => api.providers.test(id),
     onSuccess: (r, id) => {
@@ -85,6 +83,24 @@ export function StepAiSource({ finished = false, onSaved, onLater }: StepAiSourc
     },
     onError: (e, id) => setTested((t) => ({ ...t, [id]: { ok: false, latency_ms: null, models: [], error: errorText(e) } })),
   });
+
+  // Đăng nhập Google/Claude Code xong, máy chủ chưa có dòng model và chưa gọi thử lần nào ⇒ tự "Kiểm tra" MỘT lần (máy chủ
+  // lưu cặp model chạy được ở đúng lượt này). Nếu không, "Tiếp tục" khoá mà Sếp chẳng có nút nào để mở.
+  const autoTried = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const target = ready.find((p) => isCliKind(p.kind) && !p.models.length && !p.last_test && !tested[p.id] && !autoTried.current.has(p.id));
+    if (!target || test.isPending) return;
+    autoTried.current.add(target.id);
+    test.mutate(target.id);
+  });
+
+  const blockReason = canContinue
+    ? null
+    : ready.length
+      ? test.isPending
+        ? 'Đang kiểm tra kết nối với nguồn vừa đăng nhập…'
+        : 'Đã đăng nhập nhưng chưa kiểm tra được model — bấm “Kiểm tra lại” ở nguồn bên trên.'
+      : 'Đăng nhập Google hoặc dán một khoá API và bấm Kiểm tra — có một nguồn chạy được là tiếp tục được.';
 
   const save = async (e?: FormEvent) => {
     e?.preventDefault();
@@ -132,6 +148,7 @@ export function StepAiSource({ finished = false, onSaved, onLater }: StepAiSourc
           </h2>
           <p className="setup-one__muted">Dùng tài khoản Google của Sếp, không cần dán khoá.</p>
           <CliLoginPanel kind="antigravity_cli" onlyAgyReady={onlyAgyReady} bare />
+          <ProviderRows providers={agyRows} cli tested={tested} testing={test.isPending ? test.variables : null} onTest={(id) => test.mutate(id)} />
         </section>
 
         <section className="setup-one__choice" aria-labelledby="setup-ai-key-title" data-testid="setup-ai-key">
@@ -149,6 +166,7 @@ export function StepAiSource({ finished = false, onSaved, onLater }: StepAiSourc
             <div data-testid="setup-ai-claude">
               <h3 className="setup-one__choice-title">Claude Code CLI · gói Claude (tuỳ chọn)</h3>
               <CliLoginPanel kind="claude_code_cli" bare />
+              <ProviderRows providers={claudeRows} cli tested={tested} testing={test.isPending ? test.variables : null} onTest={(id) => test.mutate(id)} />
             </div>
             <div data-testid="setup-ai-compat">
               <h3 className="setup-one__choice-title">Tương thích OpenAI / OpenRouter</h3>
@@ -161,11 +179,11 @@ export function StepAiSource({ finished = false, onSaved, onLater }: StepAiSourc
           </div>
         </details>
 
-        {ready.length ? (
+        {shown.length ? (
           <div className="setup-one__ready" role="status" data-testid="setup-ai-ready">
             <Icon name="ph ph-check-circle" size={16} color="var(--color-ok)" />
             <span>Đã chạy được</span>
-            <span className="setup-one__ready-names">{ready.map((p) => p.name).join(' → ')}</span>
+            <span className="setup-one__ready-names">{shown.map((p) => p.name).join(' → ')}</span>
           </div>
         ) : null}
         {!canContinue && providers.data ? (
@@ -202,13 +220,16 @@ export function StepAiSource({ finished = false, onSaved, onLater }: StepAiSourc
 /** Các nguồn dán khoá đã có — mỗi nguồn một dòng với kết quả gọi thử và nút kiểm tra lại. */
 function ProviderRows({
   providers,
-  loading,
+  loading = false,
+  cli = false,
   tested,
   testing,
   onTest,
 }: {
   providers: Provider[];
-  loading: boolean;
+  loading?: boolean;
+  /** Nguồn CLI (đăng nhập tài khoản, không có khoá): dòng riêng để còn nút "Kiểm tra lại" và kết quả gọi thử. */
+  cli?: boolean;
   tested: Record<string, ProviderTestResult>;
   testing: string | null | undefined;
   onTest: (id: string) => void;
@@ -216,19 +237,20 @@ function ProviderRows({
   if (loading) return <SkeletonLines rows={1} padding="0" />;
   if (!providers.length) return null;
   return (
-    <div className="setup-one__prov" aria-label="Nguồn khoá API đã thêm" data-testid="setup-ai-providers">
+    <div className="setup-one__prov" aria-label={cli ? 'Nguồn đăng nhập tài khoản' : 'Nguồn khoá API đã thêm'} data-testid={cli ? 'setup-ai-cli-providers' : 'setup-ai-providers'}>
       {providers.map((p) => {
         const t = tested[p.id] ?? p.last_test ?? null;
         const offered = testedModels(p, tested);
         return (
-          <div className="setup-one__prov-row" key={p.id} data-testid="setup-ai-provider">
+          <div className="setup-one__prov-row" key={p.id} data-testid={cli ? 'setup-ai-cli-provider' : 'setup-ai-provider'}>
             <div className="setup-one__prov-main">
               <div className="setup-one__prov-name" title={p.name}>
                 {p.name}
               </div>
               <div className="setup-one__muted">
-                {fmtInt(p.keys.length)} khoá{p.keys[0] ? ` · …${p.keys[0].last4}` : ''}
+                {cli ? 'Tài khoản đã đăng nhập' : `${fmtInt(p.keys.length)} khoá${p.keys[0] ? ` · …${p.keys[0].last4}` : ''}`}
                 {offered.length ? ` · ${offered.length} model` : ''}
+                {cli && !t && !offered.length && !p.models.length ? ' · chưa kiểm tra' : ''}
               </div>
               {t ? (
                 <div className="setup-one__prov-test" data-bad={t.ok ? undefined : ''} role="status">
