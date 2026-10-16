@@ -101,4 +101,110 @@
   --font-size-domain: 9.5px; /* domain label */
   --font-size-screen-desc: 12.5px; /* screen-title description */
   --scrollbar-thumb: var(--color-neutral-800); /* webkit scrollbar thumb */
+
+  /* Mặt tiền kit (v0.1.59) — chữ 12/14/18/28 · lưới 8pt · bán kính · bố cục: không đổi theo giao diện */
+  --fs-12: 12px;
+  --fs-14: 14px;
+  --fs-18: 18px;
+  --fs-28: 28px;
+  --lh-12: 16px;
+  --lh-14: 20px;
+  --lh-18: 24px;
+  --lh-28: 32px;
+  --fw-400: 400;
+  --fw-600: 600;
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 16px;
+  --sp-4: 24px;
+  --sp-5: 32px;
+  --sp-6: 48px;
+  --r-8: 8px;
+  --r-999: 999px;
+  --rail-w: 232px;
+  --top-h: 64px;
+  --tab-h: 64px;
+  --tap: 44px;
+  --drawer-w: 480px;
+  --content-max: 1200px;
+  --bg: var(--neutral-50);
+  --text: var(--neutral-900);
+  --text-2: var(--neutral-700);
+  --text-3: var(--neutral-600);
+  --border: var(--neutral-200);
+  --border-strong: var(--neutral-300);
+  --chart-prev: var(--neutral-400);
+  --chart-base: var(--neutral-300);
+
+  /* Mặt tiền kit — màu ngữ nghĩa, bản TỐI (mặc định) */
+  --neutral-50: #161826;
+  --neutral-100: #2a2d3c;
+  --neutral-200: #2e3141;
+  --neutral-300: #44485c;
+  --neutral-400: #6d7185;
+  --neutral-500: #858aa0;
+  --neutral-600: #9a9eb2;
+  --neutral-700: #c2c5d4;
+  --neutral-800: #dcdee8;
+  --neutral-900: #e9e9ed;
+  --accent: #9184d9;
+  --accent-hover: #a99ee6;
+  --accent-soft: #2b2741;
+  --accent-ink: #cdc6fb;
+  --on-accent: #151622;
+  --ok: oklch(0.76 0.12 162);
+  --ok-soft: oklch(0.76 0.12 162 / 0.15);
+  --ok-ink: oklch(0.82 0.11 162);
+  --warn: oklch(0.82 0.13 84);
+  --warn-soft: oklch(0.79 0.12 82 / 0.16);
+  --warn-ink: oklch(0.86 0.12 84);
+  --bad: oklch(0.72 0.16 24);
+  --bad-soft: oklch(0.66 0.17 24 / 0.2);
+  --bad-ink: oklch(0.8 0.13 24);
+  --info: oklch(0.74 0.1 240);
+  --info-soft: oklch(0.7 0.1 240 / 0.16);
+  --info-ink: oklch(0.83 0.08 240);
+  --surface: #1f2130;
+  --surface-2: #252736;
+  --hover: #272a39;
+  --chart-grid: #2b2e3d;
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --scrim: rgba(0, 0, 0, 0.6);
+}
+
+/* Mặt tiền kit — màu ngữ nghĩa, bản SÁNG (data-theme đặt trên <html> bởi lib/theme.ts) */
+:root[data-theme='light'] {
+  --neutral-50: #f5f6fa;
+  --neutral-100: #eceef4;
+  --neutral-200: #e3e5ed;
+  --neutral-300: #cdd1dd;
+  --neutral-400: #9a9eb1;
+  --neutral-500: #81859a;
+  --neutral-600: #676b80;
+  --neutral-700: #464a5e;
+  --neutral-800: #2e3144;
+  --neutral-900: #1b1d27;
+  --accent: #6a5dc4;
+  --accent-hover: #5b50a8;
+  --accent-soft: #efedfc;
+  --accent-ink: #4f4591;
+  --on-accent: #ffffff;
+  --ok: oklch(0.56 0.12 162);
+  --ok-soft: oklch(0.6 0.12 162 / 0.13);
+  --ok-ink: oklch(0.44 0.1 162);
+  --warn: oklch(0.7 0.14 70);
+  --warn-soft: oklch(0.8 0.14 82 / 0.24);
+  --warn-ink: oklch(0.47 0.11 60);
+  --bad: oklch(0.56 0.19 24);
+  --bad-soft: oklch(0.62 0.19 24 / 0.12);
+  --bad-ink: oklch(0.48 0.17 25);
+  --info: oklch(0.56 0.12 245);
+  --info-soft: oklch(0.62 0.12 245 / 0.11);
+  --info-ink: oklch(0.45 0.11 250);
+  --surface: #ffffff;
+  --surface-2: #f7f8fb;
+  --hover: #f0f1f6;
+  --chart-grid: #e9ebf1;
+  --shadow-pop: 0 12px 32px rgba(20, 22, 40, 0.16);
+  --scrim: rgba(17, 18, 28, 0.44);
 }

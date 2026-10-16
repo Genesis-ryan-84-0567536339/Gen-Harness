@@ -2,16 +2,29 @@ import { expect, test, type Page } from '@playwright/test';
 import { apiCall, loginAs, loginAsOwner, p3Hook, resetMock } from './support';
 
 /**
- * v0.1.55 (G5) — Mặt tiền Owner (/owner/*) trên máy chủ giả (tất định, test/mock-owner.ts — chỉ ĐỌC):
- * Owner đăng nhập mở "/" ⇒ /owner thấy Hôm nay của Sếp + 4 số + "Gen lọc giúp"; Quan hệ có 4 danh sách và bấm dòng mở Hồ sơ sống;
- * Việc 3 nhóm; Hỏi Gen nhúng khung chat; Thêm › Cài đặt nâng cao ⇒ Console, nút "← Về Mặt tiền" quay lại; < 760px thanh dưới
- * 5 nút; vai nhân viên mở "/" như cũ và mở /owner bị chuyển; trạng thái rỗng/lỗi có "Chi tiết kỹ thuật"; Gen tắt.
+ * v0.1.59 (G2) — khung Mặt tiền Owner 5 trụ cột (/owner/*) trên máy chủ giả (tất định). Spec này CHỈ kiểm KHUNG (thanh điều
+ * hướng, tiêu đề, nút Hỏi Gen, menu ảnh đại diện, vai trò, đường lạ) — nội dung từng màn có spec riêng của G3/G4 (owner-intel,
+ * owner-work, owner-analytics, owner-feed, owner-relations). Bảng testid là hợp đồng, ghi ở đầu apps/web/src/owner/OwnerShell.tsx:
+ *   owner-nav-{intel|feed|relations|analytics|work|settings} · owner-tabbar · owner-tabbar-{intel|feed|relations|analytics|work}
+ *   owner-ask-gen · owner-avatar-menu · first-run-card
+ * Máy tính 1440: thanh trái 232px (5 trụ cột + vạch ngăn + Cài đặt). Điện thoại 390: thanh dưới đúng 5 nút. "Hỏi Gen" là ngăn kéo
+ * (480px bên phải / toàn màn), Esc đóng; /owner/gen?gen=<mã> (link cũ) vẫn mở được.
  */
+
+const PILLARS = [
+  { key: 'intel', label: 'Tình báo', path: '/owner', url: /\/owner$/ },
+  { key: 'feed', label: 'Thông tin', path: '/owner/thong-tin', url: /\/owner\/thong-tin$/ },
+  { key: 'relations', label: 'Quan hệ', path: '/owner/quan-he', url: /\/owner\/quan-he$/ },
+  { key: 'analytics', label: 'Phân tích', path: '/owner/phan-tich', url: /\/owner\/phan-tich$/ },
+  { key: 'work', label: 'Việc', path: '/owner/viec', url: /\/owner\/viec$/ },
+] as const;
+const SETTINGS = { key: 'settings', label: 'Cài đặt', path: '/owner/them', url: /\/owner\/them$/ } as const;
 
 const COACH_CARD = 'Hôm nay của Sếp';
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Mặt tiền' });
-const tabbar = (page: Page) => page.getByRole('navigation', { name: 'Thanh dưới' });
+const tabbar = (page: Page) => page.getByTestId('owner-tabbar');
 const back = (page: Page) => page.getByTestId('back-to-front');
+const askDialog = (page: Page) => page.getByRole('dialog', { name: 'Hỏi Gen' });
 
 async function noObjectText(page: Page): Promise<void> {
   expect(await page.locator('body').innerText()).not.toContain('[object Object]');
@@ -22,172 +35,133 @@ async function noHorizontalScroll(page: Page): Promise<void> {
   expect(over).toBeLessThanOrEqual(0);
 }
 
-test.describe('v0.1.55 · Mặt tiền Owner (máy tính)', () => {
+test.describe('v0.1.59 · Mặt tiền 5 trụ cột (máy tính 1440)', () => {
   test.beforeEach(async ({ page }) => {
     await resetMock(page.request, 'finished');
     await page.setViewportSize({ width: 1440, height: 900 });
   });
 
-  test('Owner mở "/" ⇒ /owner: Hôm nay của Sếp, Cần Sếp duyệt, 4 số, Bản tin, "Gen lọc giúp", gợi ý', async ({ page }) => {
+  test('Owner mở "/" ⇒ /owner (Tình báo): thanh trái 5 trụ cột + Cài đặt đúng testid, rộng 232px, vạch ngăn trước Cài đặt, không có thanh dưới', async ({ page }) => {
     await loginAsOwner(page);
     await page.goto('/');
     await expect(page).toHaveURL(/\/owner$/);
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Hôm nay');
-    await expect(page.getByRole('region', { name: COACH_CARD })).toBeVisible();
-
-    const review = page.getByTestId('owner-review');
-    await expect(review.getByTestId('owner-review-row')).toHaveCount(4);
-    await expect(review).toContainText('Gen đề xuất: Soạn nháp tin gửi đi (cần mã PIN)');
-    await expect(review.getByTestId('owner-review-row').nth(1)).toHaveAttribute('href', '/workbench?id=draft-1');
-
-    const kpis = page.getByTestId('owner-kpis');
-    await expect(kpis.getByTestId('owner-kpi-hot')).toContainText('Khách nóng');
-    await expect(kpis.getByTestId('owner-kpi-hot')).toContainText('3');
-    await expect(kpis.getByTestId('owner-kpi-cooling')).toContainText('Quan hệ nguội');
-    await expect(kpis.getByTestId('owner-kpi-open_opps')).toContainText('2,4 tỷ ₫');
-    await expect(kpis.getByTestId('owner-kpi-overdue_promises')).toContainText('Lời hứa quá hạn');
-    await expect(page.getByTestId('owner-briefing')).toContainText('3 bản nháp chờ Sếp duyệt');
-    await expect(page.getByTestId('owner-filter-value')).toContainText('Gen lọc giúp');
-    await expect(page.getByTestId('owner-filter-value')).toContainText('128 tin rác/trùng, bớt 94 lượt gọi AI');
-    await expect(page.getByTestId('owner-suggest-apply_standard').getByRole('link', { name: 'Mở' })).toHaveAttribute('href', '/system?tab=brain#chuan');
-    await expect(page.getByTestId('owner-suggest-background_key_missing').getByRole('link', { name: 'Mở' })).toHaveAttribute('href', '/system?tab=brain');
-    await expect(page.getByTestId('owner-progress')).toContainText('việc bắt buộc đã xong');
-    // Chữ đời thường: không có thuật ngữ kỹ thuật ở Hôm nay.
-    expect(await page.getByTestId('owner-today').innerText()).not.toMatch(/\b(model|token|API)\b/i);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Tình báo');
+    await expect(rail(page).getByRole('link')).toHaveText(['Tình báo', 'Thông tin', 'Quan hệ', 'Phân tích', 'Việc', 'Cài đặt']);
+    for (const it of [...PILLARS, SETTINGS]) await expect(page.getByTestId(`owner-nav-${it.key}`)).toBeVisible();
+    await expect(page.getByTestId('owner-nav-intel')).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByTestId('owner-nav-feed')).not.toHaveAttribute('aria-current', 'page');
+    await expect(rail(page).getByRole('separator')).toHaveCount(1);
+    // vạch ngăn nằm ngay trước Cài đặt
+    const sepBottom = (await rail(page).getByRole('separator').boundingBox())!;
+    const setTop = (await page.getByTestId('owner-nav-settings').boundingBox())!;
+    const workBottom = (await page.getByTestId('owner-nav-work').boundingBox())!;
+    expect(sepBottom.y).toBeGreaterThan(workBottom.y + workBottom.height - 1);
+    expect(setTop.y).toBeGreaterThanOrEqual(sepBottom.y);
+    const aside = (await page.locator('aside.owner-rail').boundingBox())!;
+    expect(Math.round(aside.width)).toBe(232);
+    await expect(tabbar(page)).toHaveCount(0);
+    // tiêu đề màn 18px / 600; mục điều hướng cao ≥ 44px
+    const title = await page.getByRole('heading', { level: 1 }).evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { size: cs.fontSize, weight: cs.fontWeight, upper: cs.textTransform };
+    });
+    expect(title).toEqual({ size: '18px', weight: '600', upper: 'none' });
+    for (const it of [...PILLARS, SETTINGS]) expect((await page.getByTestId(`owner-nav-${it.key}`).boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await expect(page.getByTestId('owner-ask-gen')).toBeVisible();
+    await expect(page.getByTestId('owner-avatar-menu')).toBeVisible();
     await noObjectText(page);
     await noHorizontalScroll(page);
   });
 
-  test('thanh trái 6 mục; Phân tích "sắp có" bị khoá; không có thanh dưới', async ({ page }) => {
+  test('bấm từng mục: đổi màn, đổi tiêu đề, mục đang sáng đổi theo; đường dẫn đúng', async ({ page }) => {
     await loginAsOwner(page);
     await page.goto('/owner');
-    await expect(rail(page).getByRole('link')).toHaveText(['Hôm nay', 'Việc', 'Quan hệ', 'Hỏi Gen', 'Thêm']);
-    const soon = rail(page).getByRole('button', { name: /Phân tích/ });
-    await expect(soon).toBeDisabled();
-    await expect(soon).toContainText('sắp có');
-    await expect(rail(page).getByTestId('owner-nav-today')).toHaveAttribute('aria-current', 'page');
-    await expect(tabbar(page)).toHaveCount(0);
-    await rail(page).getByRole('link', { name: 'Quan hệ' }).click();
+    for (const it of [...PILLARS.slice(1), SETTINGS, PILLARS[0]]) {
+      await page.getByTestId(`owner-nav-${it.key}`).click();
+      await expect(page).toHaveURL(it.url);
+      await expect(page.getByRole('heading', { level: 1 })).toHaveText(it.label);
+      await expect(page.getByTestId(`owner-nav-${it.key}`)).toHaveAttribute('aria-current', 'page');
+      await expect(page.locator('[data-testid^="owner-nav-"][aria-current="page"]')).toHaveCount(1);
+      await noHorizontalScroll(page);
+    }
+  });
+
+  test('mọi đường dẫn trụ cột mở thẳng được, không văng ra Console; đường lạ dưới /owner về /owner; "/" của Owner không còn về /overview', async ({ page }) => {
+    await loginAsOwner(page);
+    for (const it of [...PILLARS, SETTINGS]) {
+      await page.goto(it.path);
+      await expect(page).toHaveURL(it.url);
+      await expect(page.getByRole('heading', { level: 1 })).toHaveText(it.label);
+      await expect(page.locator('aside.sb')).toHaveCount(0);        // không phải khung Console
+    }
+    await page.goto('/owner/khong-co-trang-nay');
+    await expect(page).toHaveURL(/\/owner$/);
+    await page.goto('/overview');
+    await expect(page).toHaveURL(/\/overview$/);                    // vào thẳng Console vẫn được
+    await page.goto('/');
+    await expect(page).toHaveURL(/\/owner$/);
+  });
+
+  test('Hỏi Gen: nút ở đầu trang mở ngăn bên phải 480px (khung chat Gen nguyên vẹn), Esc đóng; nút × của khung Gen cũng đóng', async ({ page }) => {
+    await loginAsOwner(page);
+    await page.goto('/owner');
+    await expect(askDialog(page)).toHaveCount(0);
+    await page.getByTestId('owner-ask-gen').click();
+    const dlg = askDialog(page);
+    await expect(dlg).toBeVisible();
+    const box = (await dlg.boundingBox())!;
+    expect(Math.round(box.width)).toBe(480);
+    expect(Math.round(box.x + box.width)).toBe(1440);              // dính mép phải
+    await expect(dlg.getByLabel('Câu hỏi cho Gen')).toBeVisible();
+    await expect(dlg.getByRole('complementary', { name: /Gen — trợ lý quản trị/ })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(dlg).toHaveCount(0);
+    // mở lại, đóng bằng × của khung Gen
+    await page.getByTestId('owner-ask-gen').click();
+    await expect(askDialog(page)).toBeVisible();
+    await askDialog(page).getByRole('button', { name: 'Đóng khung Gen' }).click();
+    await expect(askDialog(page)).toHaveCount(0);
+    // bấm nền mờ phía sau cũng đóng
+    await page.getByTestId('owner-ask-gen').click();
+    await expect(askDialog(page)).toBeVisible();
+    await page.mouse.click(200, 400);
+    await expect(askDialog(page)).toHaveCount(0);
+    await noObjectText(page);
+  });
+
+  test('Hỏi Gen mở từ màn nào cũng được và giữ nguyên màn đó phía sau; hỏi một câu thì Gen trả lời trong ngăn', async ({ page }) => {
+    await loginAsOwner(page);
+    await page.goto('/owner/quan-he');
+    await page.getByTestId('owner-ask-gen').click();
+    const dlg = askDialog(page);
+    await dlg.getByLabel('Câu hỏi cho Gen').fill('Hôm nay có gì cần tôi xử lý?');
+    await dlg.getByRole('button', { name: 'Gửi', exact: true }).click();
+    await expect(dlg.locator('.gen-msg').first()).toBeVisible();
+    await page.keyboard.press('Escape');
     await expect(page).toHaveURL(/\/owner\/quan-he$/);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Quan hệ');
   });
 
-  test('Quan hệ: 4 danh sách; bấm dòng mở Hồ sơ sống, "← Về Mặt tiền" quay lại', async ({ page }) => {
-    await loginAsOwner(page);
-    await page.goto('/owner/quan-he');
-    await expect(page.getByRole('tab')).toHaveText(['Khách nóng', 'Quan hệ nguội', 'Cầu nối', 'Cung ↔ Cầu']);
-    const rows = page.getByTestId('owner-rel-row');
-    await expect(rows).toHaveCount(3);
-    await expect(rows.first()).toContainText('Trần Văn Hậu');
-    await expect(rows.first()).toContainText('Độ nóng 91');
-
-    const expected = { cooling: '42 ngày chưa liên lạc', bridges: 'Nối 5 cặp nhóm', matches: 'Khớp 88%' } as const;
-    for (const [list, metric] of Object.entries(expected)) {
-      await page.getByTestId(`owner-rel-tab-${list}`).click();
-      await expect(page.getByTestId('owner-rel-panel')).toHaveAttribute('data-list', list);
-      await expect(page.getByTestId('owner-rel-panel')).toContainText(metric);
-      await expect(page).toHaveURL(new RegExp(`list=${list}$`));
-    }
-    expect(await page.getByTestId('owner-relations').innerText()).not.toMatch(/\b(model|token|API)\b/i);
-
-    await page.getByTestId('owner-rel-tab-hot').click();
-    await expect(page.getByTestId('owner-rel-panel')).toHaveAttribute('data-list', 'hot');
-    await rows.first().click();
-    await expect(page).toHaveURL(/\/profile\?id=p-hau$/);
-    await expect(page.locator('.content')).toContainText('Trần Văn Hậu');
-    await expect(back(page)).toBeVisible();
-    await back(page).click();
-    await expect(page).toHaveURL(/\/owner$/);
-  });
-
-  test('4 số ở Hôm nay mở đúng danh sách ở Quan hệ', async ({ page }) => {
-    await loginAsOwner(page);
-    await page.goto('/owner');
-    await page.getByTestId('owner-kpi-cooling').click();
-    await expect(page).toHaveURL(/\/owner\/quan-he\?list=cooling$/);
-    await expect(page.getByTestId('owner-rel-tab-cooling')).toHaveAttribute('aria-selected', 'true');
-    await expect(page.getByTestId('owner-rel-row').first()).toContainText('Hoàng Thị Lan và Phạm Quốc Minh');
-  });
-
-  test('Việc: Hộp thư đã lọc, Bàn làm việc, Việc & Nhắc hẹn — đếm + link sâu', async ({ page }) => {
-    await loginAsOwner(page);
-    await page.goto('/owner/viec');
-    await expect(page.getByTestId('owner-group-count-inbox')).toHaveText('7');
-    await expect(page.getByTestId('owner-group-count-desk')).toHaveText('3');
-    await expect(page.getByTestId('owner-group-count-tasks')).toHaveText('5');
-    await expect(page.getByText('Hộp thư đã lọc', { exact: true })).toBeVisible();
-    await expect(page.getByText('Bàn làm việc', { exact: true })).toBeVisible();
-    await expect(page.getByText('Việc & Nhắc hẹn', { exact: true })).toBeVisible();
-    await page.getByTestId('owner-group-open-desk').click();
-    await expect(page).toHaveURL(/\/workbench(\?|$)/);       // Bàn làm việc tự mở bản nháp đầu tiên
-    await expect(back(page)).toBeVisible();
-  });
-
-  test('Hỏi Gen: khung chat Gen bên phải; câu gợi ý chỉ điền sẵn ô nhập', async ({ page }) => {
+  test('/owner/gen (link cũ) vẫn mở: khung chat bên phải; câu gợi ý chỉ điền sẵn ô nhập', async ({ page }) => {
     await loginAsOwner(page);
     await page.goto('/owner/gen');
     const gen = page.getByTestId('owner-gen-panel');
     await expect(gen.getByRole('complementary', { name: /Gen — trợ lý quản trị/ })).toBeVisible();
     const box = await gen.boundingBox();
     expect(box).not.toBeNull();
-    expect(box!.x).toBeGreaterThan(700); // máy tính: panel bên phải
+    expect(box!.x).toBeGreaterThan(700);                           // máy tính: khung chat bên phải
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Hỏi Gen');
     await page.getByRole('complementary', { name: 'Gợi ý câu hỏi' }).getByRole('button', { name: /Nhắc tôi gọi lại khách/ }).click();
     await expect(gen.getByLabel('Câu hỏi cho Gen')).toHaveValue('Nhắc tôi gọi lại khách lúc 3 giờ chiều');
-    await expect(gen.locator('.gen-msg')).toHaveCount(0);
+    await expect(gen.locator('.gen-msg')).toHaveCount(0);          // chỉ điền sẵn, không gửi
+    // nút Hỏi Gen ở trang này chỉ đưa con trỏ vào ô nhập, không mở ngăn thứ hai
+    await page.getByTestId('owner-ask-gen').click();
+    await expect(askDialog(page)).toHaveCount(0);
+    await expect(gen.getByLabel('Câu hỏi cho Gen')).toBeFocused();
     await noObjectText(page);
   });
 
-  test('Thêm: một dòng mỗi dịch vụ; Facebook → /social; Cài đặt nâng cao ⇒ Console, "← Về Mặt tiền" quay lại', async ({ page }) => {
-    await loginAsOwner(page);
-    await page.goto('/owner/them');
-    const rows = page.getByTestId('owner-conn-row');
-    await expect(rows.first()).toBeVisible();
-    expect(await rows.count()).toBeGreaterThanOrEqual(3);
-    await expect(rows.first()).toContainText('nguồn AI');          // dòng bắt buộc duy nhất đứng đầu: Sếp thấy ngay AI đã chạy chưa
-    await expect(rows.filter({ hasText: 'Facebook' }).first()).toHaveAttribute('href', '/social');
-
-    const adv = page.getByRole('link', { name: 'Cài đặt nâng cao' });
-    await expect(adv).toHaveAttribute('href', '/overview');
-    await adv.click();
-    await expect(page).toHaveURL(/\/overview$/);
-    await expect(page.locator('aside.sb')).toBeVisible();           // khung Console đầy đủ
-    await expect(back(page)).toHaveAccessibleName('Về Mặt tiền');
-    await expect(back(page)).toContainText('← Về Mặt tiền');
-    await back(page).click();
-    await expect(page).toHaveURL(/\/owner$/);
-    await expect(page.getByTestId('owner-today')).toBeVisible();
-  });
-
-  test('"/" của Owner không còn về /overview: Console chỉ mở bằng đường rõ ràng', async ({ page }) => {
-    await loginAsOwner(page);
-    await page.goto('/overview');
-    await expect(page).toHaveURL(/\/overview$/);               // vào thẳng Console vẫn được
-    await page.goto('/');
-    await expect(page).toHaveURL(/\/owner$/);
-    await page.goto('/owner/khong-co-trang-nay');
-    await expect(page).toHaveURL(/\/owner$/);                  // đường lạ dưới /owner về Hôm nay
-  });
-
-  test('?gen=coach: "/" giữ tham số tới Mặt tiền, thẻ Hôm nay của Sếp hiện, tham số bị bỏ khỏi địa chỉ', async ({ page }) => {
-    await loginAsOwner(page);
-    await page.goto('/?gen=coach');
-    await expect(page).toHaveURL(/\/owner$/);
-    await expect(page.getByRole('region', { name: COACH_CARD })).toBeVisible();
-    await expect(page.getByRole('region', { name: COACH_CARD }).getByTestId('coach-todo').first()).toBeVisible();
-  });
-
-  test('Gen tắt: ?gen=coach ⇒ /guide/viec-sep như hiện nay; Hỏi Gen giải thích + link Bộ não AI', async ({ page }) => {
-    await loginAsOwner(page);
-    await apiCall(page, 'PATCH', '/gen/settings', { enabled: false });
-    await page.goto('/?gen=coach');
-    await expect(page).toHaveURL(/\/guide\/viec-sep$/);
-    await page.goto('/owner/gen');
-    await expect(page.getByText('Gen đang tắt')).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Mở Bộ não AI' })).toHaveAttribute('href', '/system?tab=brain');
-    await expect(page.getByTestId('owner-gen-panel')).toHaveCount(0);
-  });
-
-  test('Bản tin từ chuông: "/?gen=<mã>" của Owner ⇒ Mặt tiền, mở Bản tin ở Hỏi Gen', async ({ page }) => {
+  test('Bản tin từ chuông: "/?gen=<mã>" của Owner ⇒ /owner/gen, mở Bản tin trong khung chat', async ({ page }) => {
     await loginAsOwner(page);
     const seeded = (await apiCall(page, 'POST', '/gen/__mock/briefing', { slot: 'sang' })) as { conversation_id: string };
     await page.goto(`/?gen=${seeded.conversation_id}`);
@@ -195,70 +169,171 @@ test.describe('v0.1.55 · Mặt tiền Owner (máy tính)', () => {
     await expect(page.getByTestId('owner-gen-panel').locator('.gen-msg--briefing')).toContainText('Bản tin');
   });
 
-  test('rỗng: chữ đời thường ở cả 3 màn dữ liệu', async ({ page }) => {
+  test('?gen=coach: "/" giữ tham số tới Tình báo, ngăn Hỏi Gen mở ra với thẻ Hôm nay của Sếp, tham số bị bỏ khỏi địa chỉ', async ({ page }) => {
     await loginAsOwner(page);
-    await p3Hook(page.request, 'owner', 'scenario', { mode: 'empty' });
-    await page.goto('/owner');
-    await expect(page.getByText('Chưa có gì chờ Sếp duyệt')).toBeVisible();
-    await expect(page.getByTestId('owner-briefing')).toHaveCount(0);
-    await expect(page.getByTestId('owner-filter-value')).toHaveCount(0);
-    await page.goto('/owner/quan-he');
-    await expect(page.getByText('Chưa có khách nóng')).toBeVisible();
-    await page.goto('/owner/viec');
-    await expect(page.getByText('Chưa có việc nào')).toBeVisible();
-    await noObjectText(page);
+    await page.goto('/?gen=coach');
+    await expect(page).toHaveURL(/\/owner$/);
+    await expect(askDialog(page)).toBeVisible();
+    await expect(askDialog(page).getByRole('region', { name: COACH_CARD })).toBeVisible();
+    await expect(askDialog(page).getByRole('region', { name: COACH_CARD }).getByTestId('coach-todo').first()).toBeVisible();
   });
 
-  test('lỗi: câu thân thiện + "Chi tiết kỹ thuật"; Thử lại khi máy chủ khoẻ lại', async ({ page }) => {
+  test('Gen tắt: ?gen=coach ⇒ /guide/viec-sep; ngăn và trang Hỏi Gen giải thích + link Bộ não AI', async ({ page }) => {
     await loginAsOwner(page);
-    await p3Hook(page.request, 'owner', 'scenario', { mode: 'error' });
-    for (const path of ['/owner', '/owner/quan-he', '/owner/viec']) {
-      await page.goto(path);
-      const err = page.getByTestId('owner-error');
-      await expect(err).toBeVisible();
-      await expect(err.getByText('Chi tiết kỹ thuật')).toBeVisible();
-      await noObjectText(page);
-    }
-    await p3Hook(page.request, 'owner', 'scenario', { mode: 'data' });
-    await page.goto('/owner/viec');
-    await expect(page.getByTestId('owner-group-inbox')).toBeVisible();
+    await apiCall(page, 'PATCH', '/gen/settings', { enabled: false });
+    await page.goto('/?gen=coach');
+    await expect(page).toHaveURL(/\/guide\/viec-sep$/);
+    await page.goto('/owner');
+    await page.getByTestId('owner-ask-gen').click();
+    await expect(askDialog(page).getByText('Gen đang tắt')).toBeVisible();
+    await expect(askDialog(page).getByRole('link', { name: 'Mở Bộ não AI' })).toHaveAttribute('href', '/system?tab=brain');
+    await page.keyboard.press('Escape');
+    await page.goto('/owner/gen');
+    await expect(page.getByText('Gen đang tắt')).toBeVisible();
+    await expect(page.getByTestId('owner-gen-panel')).toHaveCount(0);
+  });
+
+  test('menu ảnh đại diện: Cài đặt · Trợ giúp · Đổi giao diện sáng/tối · Đăng xuất', async ({ page }) => {
+    await loginAsOwner(page);
+    await page.goto('/owner');
+    await page.getByTestId('owner-avatar-menu').click();
+    const menu = page.getByRole('menu', { name: 'Tài khoản' });
+    await expect(menu.getByRole('menuitem')).toHaveText([/^Cài đặt$/, /^Trợ giúp$/, /Đổi giao diện sáng\/tối/, /^Đăng xuất$/]);
+    for (const item of await menu.getByRole('menuitem').all()) expect((await item.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    // Esc đóng
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    // đổi giao diện: html[data-theme] đảo giữa sáng/tối (cơ chế theme sẵn có)
+    const theme = () => page.evaluate(() => document.documentElement.dataset.theme);
+    const before = await theme();
+    await page.getByTestId('owner-avatar-menu').click();
+    await page.getByRole('menuitem', { name: /Đổi giao diện sáng\/tối/ }).click();
+    await expect.poll(theme).not.toBe(before);
+    expect(['light', 'dark']).toContain(await theme());
+    // Cài đặt → /owner/them
+    await page.getByTestId('owner-avatar-menu').click();
+    await page.getByRole('menuitem', { name: 'Cài đặt', exact: true }).click();
+    await expect(page).toHaveURL(/\/owner\/them$/);
+    // Trợ giúp → /help (Console)
+    await page.getByTestId('owner-avatar-menu').click();
+    await page.getByRole('menuitem', { name: 'Trợ giúp' }).click();
+    await expect(page).toHaveURL(/\/help$/);
+  });
+
+  test('menu ảnh đại diện: Đăng xuất ⇒ trang đăng nhập, mở /owner lại phải đăng nhập', async ({ page }) => {
+    await loginAsOwner(page);
+    await page.goto('/owner');
+    await page.getByTestId('owner-avatar-menu').click();
+    await page.getByRole('menuitem', { name: 'Đăng xuất' }).click();
+    await expect(page).toHaveURL(/\/login/);
+    await page.goto('/owner');
+    await expect(page).toHaveURL(/\/login\?next=%2Fowner$/);
+  });
+
+  test('Console (vào thẳng /overview): nút "← Về Mặt tiền" đưa về /owner', async ({ page }) => {
+    await loginAsOwner(page);
+    await page.goto('/overview');
+    await expect(page.locator('aside.sb')).toBeVisible();          // khung Console đầy đủ
+    await expect(back(page)).toHaveAccessibleName('Về Mặt tiền');
+    await expect(back(page)).toContainText('← Về Mặt tiền');
+    await back(page).click();
+    await expect(page).toHaveURL(/\/owner$/);
+    await expect(page.getByTestId('owner-nav-intel')).toHaveAttribute('aria-current', 'page');
+  });
+
+  test('chuyển giao diện sáng/tối: nền, chữ và thanh trái đổi theo token, không còn chữ hoa toàn bộ', async ({ page }) => {
+    await loginAsOwner(page);
+    await page.goto('/owner');
+    const paint = () =>
+      page.evaluate(() => {
+        const cs = (sel: string) => getComputedStyle(document.querySelector(sel)!);
+        return { app: cs('.owner-app').backgroundColor, title: cs('.owner-top__title').color, rail: cs('.owner-rail').backgroundColor, upper: cs('.owner-nav__name').textTransform };
+      });
+    await page.evaluate(() => (document.documentElement.dataset.theme = 'dark'));
+    const dark = await paint();
+    await page.evaluate(() => (document.documentElement.dataset.theme = 'light'));
+    const light = await paint();
+    expect(dark.app).not.toBe(light.app);
+    expect(dark.title).not.toBe(light.title);
+    expect(dark.rail).not.toBe(light.rail);
+    expect([dark.upper, light.upper]).toEqual(['none', 'none']);
   });
 });
 
-test.describe('v0.1.55 · Mặt tiền Owner (điện thoại 390px)', () => {
+test.describe('v0.1.59 · Mặt tiền 5 trụ cột (điện thoại 390px)', () => {
   test.beforeEach(async ({ page }) => {
     await resetMock(page.request, 'finished');
     await page.setViewportSize({ width: 390, height: 844 });
   });
 
-  test('thanh dưới đúng 5 nút, không có thanh trái; bấm chuyển màn; không tràn ngang', async ({ page }) => {
+  test('thanh dưới đúng 5 nút đúng testid (icon 24 + nhãn 12), dính đáy, không có thanh trái; bấm chuyển màn; không tràn ngang', async ({ page }) => {
     await loginAsOwner(page);
     await page.goto('/');
     await expect(page).toHaveURL(/\/owner$/);
-    await expect(tabbar(page).getByRole('link')).toHaveText(['Hôm nay', 'Việc', 'Quan hệ', 'Hỏi Gen', 'Thêm']);
+    await expect(tabbar(page).getByRole('link')).toHaveText(['Tình báo', 'Thông tin', 'Quan hệ', 'Phân tích', 'Việc']);
+    for (const it of PILLARS) await expect(page.getByTestId(`owner-tabbar-${it.key}`)).toBeVisible();
+    await expect(page.getByTestId('owner-tabbar-settings')).toHaveCount(0);
     await expect(rail(page)).toHaveCount(0);
-    const bar = await tabbar(page).boundingBox();
-    expect(bar!.y + bar!.height).toBeGreaterThan(843);          // dính đáy màn
+    await expect(page.locator('[data-testid^="owner-nav-"]')).toHaveCount(0);
+    const bar = (await tabbar(page).boundingBox())!;
+    expect(Math.round(bar.y + bar.height)).toBe(844);              // dính đáy màn
+    const first = await page.getByTestId('owner-tabbar-intel').evaluate((el) => {
+      const label = el.querySelector('.owner-tabbar__name')!;
+      const icon = el.querySelector('svg')!;
+      const ir = icon.getBoundingClientRect();
+      return { size: getComputedStyle(label).fontSize, iw: Math.round(ir.width), ih: Math.round(ir.height) };
+    });
+    expect(first).toEqual({ size: '12px', iw: 24, ih: 24 });
+    for (const it of PILLARS) expect((await page.getByTestId(`owner-tabbar-${it.key}`).boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await noHorizontalScroll(page);
-    for (const [label, path, title] of [['Việc', /\/owner\/viec$/, 'Việc'], ['Quan hệ', /\/owner\/quan-he$/, 'Quan hệ'], ['Thêm', /\/owner\/them$/, 'Thêm'], ['Hôm nay', /\/owner$/, 'Hôm nay']] as const) {
-      await tabbar(page).getByRole('link', { name: label }).click();
-      await expect(page).toHaveURL(path);
-      await expect(page.getByRole('heading', { level: 1 })).toHaveText(title);
-      await expect(tabbar(page).getByRole('link', { name: label })).toHaveAttribute('aria-current', 'page');
+    for (const it of [PILLARS[4], PILLARS[2], PILLARS[1], PILLARS[3], PILLARS[0]]) {
+      await page.getByTestId(`owner-tabbar-${it.key}`).click();
+      await expect(page).toHaveURL(it.url);
+      await expect(page.getByRole('heading', { level: 1 })).toHaveText(it.label);
+      await expect(page.getByTestId(`owner-tabbar-${it.key}`)).toHaveAttribute('aria-current', 'page');
       await noHorizontalScroll(page);
     }
   });
 
-  test('Hỏi Gen: Gen chiếm cả màn giữa đầu trang và thanh dưới', async ({ page }) => {
+  test('đầu trang: nút Hỏi Gen, chuông, ảnh đại diện đều có vùng chạm ≥ 44px; menu ảnh đại diện không tràn màn', async ({ page }) => {
+    await loginAsOwner(page);
+    await page.goto('/owner');
+    for (const loc of [page.getByTestId('owner-ask-gen'), page.getByRole('button', { name: /Thông báo/ }), page.getByTestId('owner-avatar-menu')]) {
+      const b = (await loc.boundingBox())!;
+      expect(b.width).toBeGreaterThanOrEqual(44);
+      expect(b.height).toBeGreaterThanOrEqual(44);
+    }
+    await page.getByTestId('owner-avatar-menu').click();
+    const m = (await page.getByRole('menu', { name: 'Tài khoản' }).boundingBox())!;
+    expect(m.x).toBeGreaterThanOrEqual(0);
+    expect(m.x + m.width).toBeLessThanOrEqual(390);
+    await noHorizontalScroll(page);
+  });
+
+  test('Hỏi Gen: ngăn TOÀN MÀN HÌNH (đè cả thanh dưới), Esc đóng', async ({ page }) => {
+    await loginAsOwner(page);
+    await page.goto('/owner');
+    await page.getByTestId('owner-ask-gen').click();
+    const dlg = askDialog(page);
+    await expect(dlg).toBeVisible();
+    const box = (await dlg.boundingBox())!;
+    expect([Math.round(box.x), Math.round(box.y), Math.round(box.width), Math.round(box.height)]).toEqual([0, 0, 390, 844]);
+    await expect(dlg.getByLabel('Câu hỏi cho Gen')).toBeVisible();
+    await noHorizontalScroll(page);
+    await page.keyboard.press('Escape');
+    await expect(dlg).toHaveCount(0);
+  });
+
+  test('/owner/gen (link cũ): Gen chiếm cả màn giữa đầu trang và thanh dưới', async ({ page }) => {
     await loginAsOwner(page);
     await page.goto('/owner/gen');
     const gen = page.getByTestId('owner-gen-panel');
     await expect(gen.getByLabel('Câu hỏi cho Gen')).toBeVisible();
-    const g = await gen.boundingBox();
-    const bar = await tabbar(page).boundingBox();
-    expect(g!.width).toBeGreaterThan(380);
-    expect(g!.height).toBeGreaterThan(500);
-    expect(g!.y + g!.height).toBeLessThanOrEqual(bar!.y + 1);   // không bị thanh dưới che
+    const g = (await gen.boundingBox())!;
+    const bar = (await tabbar(page).boundingBox())!;
+    expect(g.width).toBeGreaterThan(380);
+    expect(g.height).toBeGreaterThan(500);
+    expect(g.y + g.height).toBeLessThanOrEqual(bar.y + 1);         // không bị thanh dưới che
     await expect(page.getByRole('complementary', { name: 'Gợi ý câu hỏi' })).toBeHidden();
     await noHorizontalScroll(page);
   });
@@ -274,29 +349,29 @@ test.describe('v0.1.55 · Mặt tiền Owner (điện thoại 390px)', () => {
   });
 });
 
-test.describe('v0.1.55 · nhân viên không có Mặt tiền', () => {
+test.describe('v0.1.59 · nhân viên không có Mặt tiền', () => {
   test.beforeEach(async ({ page }) => {
     await resetMock(page.request, 'finished');
     await page.setViewportSize({ width: 1440, height: 900 });
   });
 
   for (const email of ['operator@genesis.local', 'manager@genesis.local', 'auditor@genesis.local']) {
-    test(`${email.split('@')[0]}: mở "/" như cũ; mở /owner bị chuyển; không có nút Về Mặt tiền; API Owner 403`, async ({ page }) => {
+    test(`${email.split('@')[0]}: mở "/" như cũ; mở mọi đường /owner/* bị chuyển; không có nút Về Mặt tiền; API Owner 403`, async ({ page }) => {
       const ownerApiCalls: string[] = [];
       page.on('request', (r) => {
         if (r.url().includes('/api/v1/owner/')) ownerApiCalls.push(r.url());
       });
       await loginAs(page, email);
       await page.goto('/');
-      await expect(page).toHaveURL(/\/(overview|inbox)$/);       // màn đầu tiên của vai, như cũ
+      await expect(page).toHaveURL(/\/(overview|inbox)$/);         // màn đầu tiên của vai, như cũ
       await expect(page.locator('aside.sb')).toBeVisible();
       await expect(back(page)).toHaveCount(0);
 
-      await page.goto('/owner');
-      await expect(page).not.toHaveURL(/\/owner/);
-      await expect(page).toHaveURL(/\/(overview|inbox)$/);
-      await page.goto('/owner/quan-he');
-      await expect(page).not.toHaveURL(/\/owner/);
+      for (const path of ['/owner', '/owner/thong-tin', '/owner/quan-he', '/owner/phan-tich', '/owner/viec', '/owner/them']) {
+        await page.goto(path);
+        await expect(page, path).not.toHaveURL(/\/owner/);
+        await expect(page, path).toHaveURL(/\/(overview|inbox)$/);
+      }
       expect(ownerApiCalls).toEqual([]);
 
       for (const path of ['today', 'relations?list=hot', 'tasks']) {
@@ -308,8 +383,10 @@ test.describe('v0.1.55 · nhân viên không có Mặt tiền', () => {
     });
   }
 
-  test('chưa đăng nhập mở /owner ⇒ về trang đăng nhập (next=/owner)', async ({ page }) => {
+  test('chưa đăng nhập mở /owner (và các trụ cột) ⇒ về trang đăng nhập kèm next', async ({ page }) => {
     await page.goto('/owner');
     await expect(page).toHaveURL(/\/login\?next=%2Fowner$/);
+    await page.goto('/owner/thong-tin');
+    await expect(page).toHaveURL(/\/login\?next=%2Fowner%2Fthong-tin$/);
   });
 });

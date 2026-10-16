@@ -1,27 +1,34 @@
 /**
- * v0.1.55 (G5) — Mặt tiền Owner (/owner/*): mô hình thuần, 5 màn × (tải, rỗng, lỗi có "Chi tiết kỹ thuật", có dữ liệu),
- * khung (thanh trái 6 mục / thanh dưới 5 nút < 760px, vai khác Owner về "/", ?gen=), nút "← Về Mặt tiền", cụm route.
- * Không màn nào render object (`[object Object]`); Hôm nay/Quan hệ không có chữ model/token/API; mock-owner khớp hợp đồng.
+ * v0.1.59 (G2) — Khung Mặt tiền Owner 5 trụ cột (/owner/*): mô hình thuần (đường dẫn, nav 5 + Cài đặt, navCounts phòng thủ),
+ * khung (thanh trái ≥ 760px / thanh dưới < 760px, số đếm, nút Hỏi Gen, menu ảnh đại diện, vai khác Owner về "/", ?gen=),
+ * ngăn Hỏi Gen (openAskGen / closeAskGen), FirstRunCard, nút "← Về Mặt tiền", cụm route; vẫn giữ test hợp đồng mock-owner và
+ * các màn Hỏi Gen / Cài đặt. (Đổi tên từ owner-v0155.test.tsx. Test của Hôm nay / Việc / Quan hệ CŨ đã bỏ cùng việc gỡ chúng khỏi
+ * route — G3/G4 xoá hẳn tệp màn; màn mới có test riêng của G3/G4.) Không màn nào render object (`[object Object]`).
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { RouterProvider, createMemoryRouter, useLocation, type RouteObject } from 'react-router-dom';
+import { Navigate, RouterProvider, createMemoryRouter, useLocation, type RouteObject } from 'react-router-dom';
 import { hasIcon } from '@gen-harness/ui';
 import { useGenStore } from '../../src/gen/genStore';
 import { BackToFront } from '../../src/owner/BackToFront';
-import { AskGenScreen } from '../../src/owner/AskGenScreen';
+import { AskGenScreen, closeAskGen, openAskGen, useAskGenStore } from '../../src/owner/AskGenScreen';
 import { MoreScreen } from '../../src/owner/MoreScreen';
 import { OwnerShell } from '../../src/owner/OwnerShell';
-import { RelationsScreen } from '../../src/owner/RelationsScreen';
-import { OwnerTasksScreen } from '../../src/owner/TasksScreen';
-import { TodayScreen } from '../../src/owner/TodayScreen';
+import { AnalyticsScreen } from '../../src/owner/analytics/AnalyticsScreen';
+import { FeedScreen } from '../../src/owner/feed/FeedScreen';
+import { IntelScreen } from '../../src/owner/intel/IntelScreen';
+import { RelationsScreen } from '../../src/owner/relations/RelationsScreen';
+import { WorkScreen } from '../../src/owner/work/WorkScreen';
+import { FirstRunCard } from '../../src/owner/parts';
+import { useUiStore } from '../../src/lib/uiStore';
 import {
   ADVANCED_SETTINGS_PATH,
   OWNER_NAV,
+  OWNER_PATHS,
   OWNER_TABBAR,
   activeNavKey,
   asText,
@@ -30,6 +37,8 @@ import {
   filterValueText,
   kpiCards,
   moneyText,
+  navBadge,
+  navCounts,
   ownerTitle,
   progressText,
   safeLink,
@@ -84,6 +93,8 @@ const server = {
   boss: BOSS as unknown,
   bossMode: 'data' as Mode,
   calls: [] as string[],
+  /** Khác undefined ⇒ GET /owner/today trả thêm trường `nav` này (G1 thêm ở máy chủ thật). */
+  todayNav: undefined as unknown,
 };
 
 const json = (status: number, body: unknown) =>
@@ -101,6 +112,9 @@ function stubApi() {
         if (server.mode === 'hang') return new Promise<Response>(() => undefined);
         server.mock.hooks.scenario?.({ mode: server.mode === 'empty' ? 'empty' : server.mode === 'error' ? 'error' : 'data' } as never);
         const r = callMock(server.mock, url);
+        if (r && r.status === 200 && server.todayNav !== undefined && new URL(url, 'http://x').pathname.endsWith('/owner/today')) {
+          return json(200, { ...(r.body as object), nav: server.todayNav });
+        }
         return r ? json(r.status, r.body) : json(404, { status: 404, code: 'NOT_FOUND', title: 'Không tồn tại' });
       }
       if (url.includes('/boss-checks')) {
@@ -114,9 +128,10 @@ function stubApi() {
   );
 }
 
+/** `mobile` = dưới 760px: các query `(min-width: 760px)` / `(min-width: 1024px)` không khớp; máy tính: khớp cả hai. */
 function setViewport(mobile: boolean) {
   vi.stubGlobal('matchMedia', (q: string) => ({
-    matches: mobile && q.includes('max-width: 760px'), media: q, onchange: null,
+    matches: !mobile && (q.includes('min-width: 760px') || q.includes('min-width: 1024px')), media: q, onchange: null,
     addEventListener: () => undefined, removeEventListener: () => undefined,
     addListener: () => undefined, removeListener: () => undefined, dispatchEvent: () => false,
   }));
@@ -146,26 +161,32 @@ const SHELL_ROUTES: RouteObject[] = [
     path: '/owner',
     element: <OwnerShell />,
     children: [
-      { index: true, element: <TodayScreen /> },
+      { index: true, element: <IntelScreen /> },
+      { path: 'thong-tin', element: <FeedScreen /> },
       { path: 'quan-he', element: <RelationsScreen /> },
-      { path: 'viec', element: <OwnerTasksScreen /> },
+      { path: 'phan-tich', element: <AnalyticsScreen /> },
+      { path: 'viec', element: <WorkScreen /> },
       { path: 'gen', element: <AskGenScreen /> },
       { path: 'them', element: <MoreScreen /> },
+      { path: '*', element: <Navigate to="/owner" replace /> },
     ],
   },
   { path: '/', element: <Where /> },
   { path: '/guide/viec-sep', element: <Where /> },
+  { path: '/guide/5', element: <Where /> },
+  { path: '/help', element: <Where /> },
+  { path: '/login', element: <Where /> },
   { path: '/change-password', element: <Where /> },
 ];
 
 function mountShell(path: string) {
   const router = createMemoryRouter(SHELL_ROUTES, { initialEntries: [path] });
-  render(
+  const { unmount } = render(
     <QueryClientProvider client={client()}>
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
-  return router;
+  return { router, unmount };
 }
 
 /** Không màn nào được để lộ object thô ra chữ. */
@@ -179,6 +200,8 @@ beforeEach(() => {
   server.boss = BOSS;
   server.bossMode = 'data';
   server.calls = [];
+  server.todayNav = undefined;
+  useAskGenStore.setState({ open: false });
   useGenStore.setState({ openByUser: {}, conversationId: null, conversationOwner: null, messages: [], busy: false, coachFocus: false, composerDraft: null });
   vi.stubGlobal('WebSocket', undefined);
   setViewport(false);
@@ -191,22 +214,53 @@ afterEach(() => {
 // ── mô hình thuần ───────────────────────────────────────────────────────────────────────────────────────────────────
 
 describe('ownerModel (thuần)', () => {
-  it('thanh trái 6 mục, Phân tích "sắp có" bị khoá; thanh dưới 5 mục', () => {
-    expect(OWNER_NAV.map((i) => i.label)).toEqual(['Hôm nay', 'Việc', 'Quan hệ', 'Hỏi Gen', 'Phân tích', 'Thêm']);
-    expect(OWNER_NAV.filter((i) => i.soon).map((i) => i.label)).toEqual(['Phân tích']);
-    expect(OWNER_TABBAR.map((i) => i.label)).toEqual(['Hôm nay', 'Việc', 'Quan hệ', 'Hỏi Gen', 'Thêm']);
+  it('thanh trái 5 trụ cột + Cài đặt (vạch ngăn trước Cài đặt); thanh dưới đúng 5 trụ cột; không còn mục "sắp có"', () => {
+    expect(OWNER_NAV.map((i) => i.label)).toEqual(['Tình báo', 'Thông tin', 'Quan hệ', 'Phân tích', 'Việc', 'Cài đặt']);
+    expect(OWNER_NAV.map((i) => i.key)).toEqual(['intel', 'feed', 'relations', 'analytics', 'work', 'settings']);
+    expect(OWNER_NAV.filter((i) => i.separatorBefore).map((i) => i.key)).toEqual(['settings']);
+    expect(OWNER_TABBAR.map((i) => i.label)).toEqual(['Tình báo', 'Thông tin', 'Quan hệ', 'Phân tích', 'Việc']);
     expect(OWNER_TABBAR).toHaveLength(5);
+    expect(JSON.stringify(OWNER_NAV)).not.toContain('sắp có');
+    expect(OWNER_NAV.every((i) => hasIcon(i.icon))).toBe(true);
+  });
+
+  it('OWNER_PATHS: đường mới theo trụ cột; bí danh cũ today/tasks/more trỏ cùng đường', () => {
+    expect(OWNER_PATHS).toMatchObject({
+      intel: '/owner', feed: '/owner/thong-tin', relations: '/owner/quan-he', analytics: '/owner/phan-tich',
+      work: '/owner/viec', gen: '/owner/gen', settings: '/owner/them',
+    });
+    expect(OWNER_PATHS.today).toBe(OWNER_PATHS.intel);
+    expect(OWNER_PATHS.tasks).toBe(OWNER_PATHS.work);
+    expect(OWNER_PATHS.more).toBe(OWNER_PATHS.settings);
   });
 
   it('mục đang sáng + tiêu đề theo đường dẫn', () => {
-    expect(activeNavKey('/owner')).toBe('today');
-    expect(activeNavKey('/owner/')).toBe('today');
+    expect(activeNavKey('/owner')).toBe('intel');
+    expect(activeNavKey('/owner/')).toBe('intel');
+    expect(activeNavKey('/owner/thong-tin')).toBe('feed');
     expect(activeNavKey('/owner/quan-he')).toBe('relations');
-    expect(activeNavKey('/owner/viec')).toBe('tasks');
+    expect(activeNavKey('/owner/phan-tich')).toBe('analytics');
+    expect(activeNavKey('/owner/viec')).toBe('work');
+    expect(activeNavKey('/owner/them')).toBe('settings');
     expect(activeNavKey('/owner/gen')).toBe('gen');
-    expect(activeNavKey('/owner/them')).toBe('more');
-    expect(activeNavKey('/owner/phan-tich')).toBe('today');
-    expect(ownerTitle('/owner/them')).toBe('Thêm');
+    expect(activeNavKey('/owner/khong-co')).toBe('intel');
+    expect(ownerTitle('/owner')).toBe('Tình báo');
+    expect(ownerTitle('/owner/thong-tin')).toBe('Thông tin');
+    expect(ownerTitle('/owner/phan-tich')).toBe('Phân tích');
+    expect(ownerTitle('/owner/them')).toBe('Cài đặt');
+    expect(ownerTitle('/owner/gen')).toBe('Hỏi Gen');
+  });
+
+  it('navCounts đọc phòng thủ today.nav: thiếu/sai kiểu/âm/NaN ⇒ 0, không ném', () => {
+    const zero = { urgent_open: 0, decide: 0 };
+    for (const bad of [undefined, null, 5, 'x', [], {}, { nav: null }, { nav: 7 }, { nav: {} }, { nav: { urgent_open: '3', decide: null } }, { nav: { urgent_open: -2, decide: Number.NaN } }, { nav: { urgent_open: Infinity } }]) {
+      expect(navCounts(bad)).toEqual(zero);
+    }
+    expect(navCounts({ nav: { urgent_open: 3, decide: 4 } })).toEqual({ urgent_open: 3, decide: 4 });
+    expect(navCounts({ nav: { urgent_open: 2.9, decide: 0 }, kpis: {} })).toEqual({ urgent_open: 2, decide: 0 });
+    // mỗi nút tối đa MỘT số: Thông tin ← urgent_open, Việc ← decide, các trụ cột còn lại không có số
+    const c = { urgent_open: 3, decide: 4 };
+    expect(OWNER_NAV.map((i) => navBadge(i.key, c))).toEqual([0, 3, 0, 0, 4, 0]);
   });
 
   it('safeLink chỉ nhận đường dẫn trong Console; asText không bao giờ trả object', () => {
@@ -301,187 +355,6 @@ describe('ownerModel (thuần)', () => {
 
 // ── 5 màn × (tải, rỗng, lỗi, có dữ liệu) ───────────────────────────────────────────────────────────────────────────
 
-describe('Hôm nay (/owner)', () => {
-  it('đang tải: khung chờ, chưa có chữ lỗi', async () => {
-    server.mode = 'hang';
-    mountScreen(<TodayScreen />);
-    expect(await screen.findByTestId('owner-loading')).toBeInTheDocument();
-    expect(screen.queryByTestId('owner-error')).not.toBeInTheDocument();
-  });
-
-  it('có dữ liệu: Cần Sếp duyệt, 4 số, bản tin, câu "Gen lọc giúp", gợi ý, tiến độ — chữ đời thường', async () => {
-    mountScreen(<TodayScreen />);
-    const review = await screen.findByTestId('owner-review');
-    const rows = within(review).getAllByTestId('owner-review-row');
-    expect(rows).toHaveLength(4);
-    expect(rows[0]).toHaveTextContent('Gen đề xuất: Soạn nháp tin gửi đi (cần mã PIN)');
-    expect(rows[1]).toHaveAttribute('href', '/workbench?id=draft-1');
-    expect(rows[3]).toHaveAttribute('href', '/tasks?overdue=true');
-    expect(screen.getByTestId('owner-review-count')).toHaveTextContent('4');
-    const kpis = screen.getByTestId('owner-kpis');
-    expect(within(kpis).getByTestId('owner-kpi-hot')).toHaveTextContent('Khách nóng');
-    expect(within(kpis).getByTestId('owner-kpi-hot')).toHaveTextContent('3');
-    expect(within(kpis).getByTestId('owner-kpi-hot')).toHaveAttribute('href', '/owner/quan-he?list=hot');
-    expect(within(kpis).getByTestId('owner-kpi-open_opps')).toHaveTextContent('2,4 tỷ ₫');
-    expect(screen.getByTestId('owner-briefing')).toHaveTextContent('3 bản nháp chờ Sếp duyệt');
-    expect(screen.getByRole('link', { name: /Mở bản tin/ })).toHaveAttribute('href', '/owner/gen');
-    expect(screen.getByTestId('owner-filter-value')).toHaveTextContent('Tuần này Gen lọc giúp Sếp 128 tin rác/trùng, bớt 94 lượt gọi AI.');
-    const apply = screen.getByTestId('owner-suggest-apply_standard');
-    expect(within(apply).getByRole('link', { name: 'Mở' })).toHaveAttribute('href', '/system?tab=brain#chuan');
-    const bg = screen.getByTestId('owner-suggest-background_key_missing');
-    expect(within(bg).getByRole('link', { name: 'Mở' })).toHaveAttribute('href', '/system?tab=brain');
-    expect(screen.getByTestId('owner-progress')).toHaveTextContent('Việc Sếp cần làm: 1/6 việc bắt buộc đã xong');
-    // Chữ đời thường: không có thuật ngữ kỹ thuật ở Hôm nay.
-    expect(screen.getByTestId('owner-today').textContent ?? '').not.toMatch(/\b(model|token|API)\b/i);
-    noRawObjects();
-  });
-
-  it('rỗng: nói đời thường, không có thẻ bản tin/gợi ý/câu lọc', async () => {
-    server.mode = 'empty';
-    mountScreen(<TodayScreen />);
-    expect(await screen.findByText('Chưa có gì chờ Sếp duyệt')).toBeInTheDocument();
-    expect(screen.queryByTestId('owner-briefing')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('owner-filter-value')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('owner-suggestions')).not.toBeInTheDocument();
-    expect(within(screen.getByTestId('owner-kpis')).getByTestId('owner-kpi-hot')).toHaveTextContent('0');
-    noRawObjects();
-  });
-
-  it('lỗi: câu thân thiện + "Chi tiết kỹ thuật" (chuỗi) + Thử lại; thử lại được', async () => {
-    server.mode = 'error';
-    mountScreen(<TodayScreen />);
-    const err = await screen.findByTestId('owner-error');
-    expect(err).toHaveTextContent('Chi tiết kỹ thuật');
-    expect(err).toHaveTextContent('HTTP 500');
-    expect(err.querySelector('details code')?.textContent).toContain('INTERNAL');
-    noRawObjects();
-    server.mode = 'data';
-    await userEvent.click(within(err).getByRole('button', { name: /Thử lại/ }));
-    expect(await screen.findByTestId('owner-review')).toBeInTheDocument();
-  });
-
-  it('máy chủ trả link lạ/giá trị lạ: không vỡ, không dẫn ra ngoài', async () => {
-    const real = server.mock.handle;
-    server.mock = { ...server.mock, handle: (ctx: P2Ctx) => {
-      if (ctx.path === '/owner/today') {
-        return ctx.reply(200, {
-          needs_review: [{ kind: 'draft', title: { x: 1 }, to: 'https://evil.example', at: 'không phải giờ' }, { kind: '???', title: 'Việc lạ', to: '//evil', at: null }],
-          kpis: { hot: 'x', cooling: null, open_opps: 0, open_value_vnd: 0, overdue_promises: 0 },
-          briefing_latest: null, filter_value: null, suggestions: [{ key: 'apply_standard', title: 'T', body: { b: 1 }, to: 'javascript:alert(1)' }],
-          progress: { required_done: 'a', required_total: 'b' },
-        });
-      }
-      return real(ctx);
-    } } as never;
-    mountScreen(<TodayScreen />);
-    const rows = await screen.findAllByTestId('owner-review-row');
-    expect(rows).toHaveLength(2);
-    for (const r of rows) expect(r.getAttribute('href')).toBe('/owner');
-    expect(screen.getByTestId('owner-suggest-apply_standard').querySelector('a')).toHaveAttribute('href', '/owner');
-    noRawObjects();
-  });
-});
-
-describe('Quan hệ (/owner/quan-he)', () => {
-  it('đang tải', async () => {
-    server.mode = 'hang';
-    mountScreen(<RelationsScreen />, '/owner/quan-he');
-    expect(await screen.findByTestId('owner-loading')).toBeInTheDocument();
-  });
-
-  it('4 danh sách; bấm dòng mở Hồ sơ sống; ?list= chọn danh sách', async () => {
-    const router = mountScreen(<RelationsScreen />, '/owner/quan-he');
-    expect(screen.getAllByRole('tab')).toHaveLength(4);
-    const rows = await screen.findAllByTestId('owner-rel-row');
-    expect(rows).toHaveLength(3);
-    expect(rows[0]).toHaveTextContent('Trần Văn Hậu');
-    expect(rows[0]).toHaveTextContent('Khách hàng · Xưởng gỗ Bình Dương');
-    expect(rows[0]).toHaveTextContent('Độ nóng 91 · đang tăng');
-    expect(rows[0]).toHaveAttribute('href', '/profile?id=p-hau');
-    for (const [list, first] of [['cooling', 'Hoàng Thị Lan và Phạm Quốc Minh'], ['bridges', 'Trần Minh Khoa'], ['matches', 'Ván MDF E1 17mm']] as const) {
-      await userEvent.click(screen.getByTestId(`owner-rel-tab-${list}`));
-      await waitFor(() => expect(screen.getByTestId('owner-rel-panel')).toHaveAttribute('data-list', list));
-      expect((await screen.findAllByTestId('owner-rel-row'))[0]).toHaveTextContent(first);
-      expect(router.state.location.search).toBe(`?list=${list}`);
-    }
-    await userEvent.click(screen.getByTestId('owner-rel-tab-hot'));
-    await waitFor(() => expect(router.state.location.search).toBe(''));
-    noRawObjects();
-  });
-
-  it('?list=cooling mở thẳng danh sách nguội; list lạ rơi về khách nóng', async () => {
-    mountScreen(<RelationsScreen />, '/owner/quan-he?list=cooling');
-    expect(await screen.findByText('42 ngày chưa liên lạc')).toBeInTheDocument();
-    expect(screen.getByTestId('owner-rel-tab-cooling')).toHaveAttribute('aria-selected', 'true');
-    expect(server.calls.some((u) => u.includes('list=cooling'))).toBe(true);
-  });
-
-  it('?list= lạ rơi về khách nóng', async () => {
-    mountScreen(<RelationsScreen />, '/owner/quan-he?list=bậy');
-    expect(await screen.findAllByTestId('owner-rel-row')).toHaveLength(3);
-    expect(screen.getByTestId('owner-rel-tab-hot')).toHaveAttribute('aria-selected', 'true');
-  });
-
-  it('rỗng: chữ đời thường theo từng danh sách', async () => {
-    server.mode = 'empty';
-    mountScreen(<RelationsScreen />, '/owner/quan-he');
-    expect(await screen.findByText('Chưa có khách nóng')).toBeInTheDocument();
-    await userEvent.click(screen.getByTestId('owner-rel-tab-matches'));
-    expect(await screen.findByText('Chưa có cặp nào hợp nhau')).toBeInTheDocument();
-    noRawObjects();
-  });
-
-  it('lỗi: có "Chi tiết kỹ thuật"', async () => {
-    server.mode = 'error';
-    mountScreen(<RelationsScreen />, '/owner/quan-he');
-    const err = await screen.findByTestId('owner-error');
-    expect(err).toHaveTextContent('Chi tiết kỹ thuật');
-    noRawObjects();
-  });
-
-  it('không có thuật ngữ kỹ thuật ở Quan hệ', async () => {
-    mountScreen(<RelationsScreen />, '/owner/quan-he');
-    await screen.findAllByTestId('owner-rel-row');
-    expect(screen.getByTestId('owner-relations').textContent ?? '').not.toMatch(/\b(model|token|API)\b/i);
-  });
-});
-
-describe('Việc (/owner/viec)', () => {
-  it('đang tải', async () => {
-    server.mode = 'hang';
-    mountScreen(<OwnerTasksScreen />, '/owner/viec');
-    expect(await screen.findByTestId('owner-loading')).toBeInTheDocument();
-  });
-
-  it('có dữ liệu: 3 nhóm, đếm + dòng mẫu + link sâu', async () => {
-    mountScreen(<OwnerTasksScreen />, '/owner/viec');
-    const inbox = await screen.findByTestId('owner-group-inbox');
-    expect(screen.getByTestId('owner-group-count-inbox')).toHaveTextContent('7');
-    expect(within(inbox).getAllByTestId('owner-task-row')).toHaveLength(2);
-    expect(screen.getByTestId('owner-group-open-inbox')).toHaveAttribute('href', '/inbox');
-    expect(screen.getByTestId('owner-group-open-desk')).toHaveAttribute('href', '/workbench');
-    expect(screen.getByTestId('owner-group-open-tasks')).toHaveAttribute('href', '/tasks');
-    expect(screen.getByText('Hộp thư đã lọc')).toBeInTheDocument();
-    expect(screen.getByText('Bàn làm việc')).toBeInTheDocument();
-    expect(screen.getByText('Việc & Nhắc hẹn')).toBeInTheDocument();
-    noRawObjects();
-  });
-
-  it('rỗng: một câu chung, không ba hộp rỗng', async () => {
-    server.mode = 'empty';
-    mountScreen(<OwnerTasksScreen />, '/owner/viec');
-    expect(await screen.findByText('Chưa có việc nào')).toBeInTheDocument();
-    expect(screen.queryByTestId('owner-group-inbox')).not.toBeInTheDocument();
-  });
-
-  it('lỗi: có "Chi tiết kỹ thuật"', async () => {
-    server.mode = 'error';
-    mountScreen(<OwnerTasksScreen />, '/owner/viec');
-    expect(await screen.findByTestId('owner-error')).toHaveTextContent('Chi tiết kỹ thuật');
-    noRawObjects();
-  });
-});
-
 describe('Hỏi Gen (/owner/gen)', () => {
   it('đang tải (chưa biết người dùng)', async () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => undefined)));
@@ -557,25 +430,34 @@ describe('Thêm (/owner/them)', () => {
 // ── khung ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 describe('OwnerShell', () => {
-  it('máy tính: thanh trái 6 mục, Phân tích "sắp có" bị khoá, không có thanh dưới', async () => {
+  it('máy tính (≥ 760px): thanh trái 5 trụ cột + Cài đặt đúng testid, vạch ngăn trước Cài đặt, không có thanh dưới', async () => {
     mountShell('/owner');
     const rail = await screen.findByRole('navigation', { name: 'Mặt tiền' });
-    expect(within(rail).getAllByRole('link')).toHaveLength(5);
-    const soon = within(rail).getByRole('button', { name: /Phân tích/ });
-    expect(soon).toBeDisabled();
-    expect(soon).toHaveTextContent('sắp có');
-    expect(within(rail).getByTestId('owner-nav-today')).toHaveAttribute('aria-current', 'page');
-    expect(screen.queryByRole('navigation', { name: 'Thanh dưới' })).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Hôm nay');
+    const links = within(rail).getAllByRole('link');
+    expect(links.map((l) => l.textContent)).toEqual(['Tình báo', 'Thông tin', 'Quan hệ', 'Phân tích', 'Việc', 'Cài đặt']);
+    for (const key of ['intel', 'feed', 'relations', 'analytics', 'work', 'settings']) {
+      expect(within(rail).getByTestId(`owner-nav-${key}`)).toBeInTheDocument();
+    }
+    expect(within(rail).getByTestId('owner-nav-intel')).toHaveAttribute('aria-current', 'page');
+    expect(within(rail).getByTestId('owner-nav-feed')).not.toHaveAttribute('aria-current');
+    // vạch ngăn nằm ngay trước Cài đặt
+    expect(within(rail).getByRole('separator').nextElementSibling).toBe(within(rail).getByTestId('owner-nav-settings'));
+    expect(screen.queryByTestId('owner-tabbar')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Tình báo');
+    expect(screen.getByTestId('owner-ask-gen')).toBeInTheDocument();
+    expect(screen.getByTestId('owner-avatar-menu')).toBeInTheDocument();
+    expect(screen.getByTestId('owner-frame-intel')).toHaveTextContent('Đang hoàn thiện');
   });
 
-  it('< 760px: thanh dưới đúng 5 nút, không có thanh trái; bấm chuyển màn', async () => {
+  it('< 760px: thanh dưới đúng 5 nút đúng testid, không có thanh trái; bấm chuyển màn', async () => {
     setViewport(true);
-    const router = mountShell('/owner');
-    const bar = await screen.findByRole('navigation', { name: 'Thanh dưới' });
+    const { router } = mountShell('/owner');
+    const bar = await screen.findByTestId('owner-tabbar');
     const items = within(bar).getAllByRole('link');
     expect(items).toHaveLength(5);
-    expect(items.map((i) => i.textContent)).toEqual(['Hôm nay', 'Việc', 'Quan hệ', 'Hỏi Gen', 'Thêm']);
+    expect(items.map((i) => i.textContent)).toEqual(['Tình báo', 'Thông tin', 'Quan hệ', 'Phân tích', 'Việc']);
+    for (const key of ['intel', 'feed', 'relations', 'analytics', 'work']) expect(within(bar).getByTestId(`owner-tabbar-${key}`)).toBeInTheDocument();
+    expect(within(bar).queryByTestId('owner-tabbar-settings')).not.toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: 'Mặt tiền' })).not.toBeInTheDocument();
     await userEvent.click(within(bar).getByTestId('owner-tabbar-relations'));
     await waitFor(() => expect(router.state.location.pathname).toBe('/owner/quan-he'));
@@ -583,16 +465,159 @@ describe('OwnerShell', () => {
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Quan hệ');
   });
 
+  it('số đếm: Thông tin = urgent_open, Việc = decide (mỗi nút tối đa một số)', async () => {
+    setViewport(true);
+    server.todayNav = { urgent_open: 3, decide: 4 };
+    mountShell('/owner');
+    const bar = await screen.findByTestId('owner-tabbar');
+    await waitFor(() => expect(within(screen.getByTestId('owner-tabbar-feed')).getByText('3')).toBeInTheDocument());
+    expect(within(screen.getByTestId('owner-tabbar-work')).getByText('4')).toBeInTheDocument();
+    for (const key of ['intel', 'relations', 'analytics']) expect(within(screen.getByTestId(`owner-tabbar-${key}`)).queryByText(/^\d+\+?$/)).toBeNull();
+    expect(within(bar).getAllByText(/^\d+\+?$/)).toHaveLength(2);
+    noRawObjects();
+  });
+
+  it('thanh trái cũng có số đếm; chạm trần 999 ⇒ "999+"', async () => {
+    server.todayNav = { urgent_open: 1500, decide: 2 };
+    mountShell('/owner');
+    const feed = await screen.findByTestId('owner-nav-feed');
+    await waitFor(() => expect(within(feed).getByText('999+')).toBeInTheDocument());
+    expect(within(screen.getByTestId('owner-nav-work')).getByText('2')).toBeInTheDocument();
+    expect(within(screen.getByTestId('owner-nav-intel')).queryByText(/\d/)).toBeNull();
+  });
+
+  it('thiếu today.nav (máy chủ cũ) ⇒ khung vẫn dựng, không có số', async () => {
+    mountShell('/owner');
+    await screen.findByTestId('owner-nav-feed');
+    await waitFor(() => expect(server.calls.some((u) => u.includes('/owner/today'))).toBe(true));
+    expect(within(screen.getByTestId('owner-nav-feed')).queryByText(/\d/)).toBeNull();
+    expect(within(screen.getByTestId('owner-nav-work')).queryByText(/\d/)).toBeNull();
+  });
+
+  it('mọi đường /owner/* render trong khung (tiêu đề là h1, có nút Hỏi Gen và menu ảnh đại diện); đường lạ về /owner', async () => {
+    const cases: Array<[string, string, string]> = [
+      ['/owner', 'Tình báo', 'owner-frame-intel'],
+      ['/owner/thong-tin', 'Thông tin', 'owner-frame-feed'],
+      ['/owner/quan-he', 'Quan hệ', 'owner-frame-relations'],
+      ['/owner/phan-tich', 'Phân tích', 'owner-frame-analytics'],
+      ['/owner/viec', 'Việc', 'owner-frame-work'],
+      ['/owner/gen', 'Hỏi Gen', 'owner-gen-panel'],
+      ['/owner/them', 'Cài đặt', 'owner-more'],
+    ];
+    for (const [path, title, testId] of cases) {
+      const { unmount } = mountShell(path);
+      expect(await screen.findByRole('heading', { level: 1, name: title }), path).toBeInTheDocument();
+      expect(await screen.findByTestId(testId), path).toBeInTheDocument();
+      expect(screen.getByTestId('owner-ask-gen')).toBeInTheDocument();
+      expect(screen.getByTestId('owner-avatar-menu')).toBeInTheDocument();
+      noRawObjects();
+      unmount();
+    }
+    const router = mountShell('/owner/khong-co-trang-nay').router;
+    await waitFor(() => expect(router.state.location.pathname).toBe('/owner'));
+    expect(await screen.findByTestId('owner-frame-intel')).toBeInTheDocument();
+  });
+
+  it('nút Hỏi Gen mở ngăn (hộp thoại), Esc đóng; ngăn nhúng khung chat Gen', async () => {
+    mountShell('/owner');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await userEvent.click(await screen.findByTestId('owner-ask-gen'));
+    const dlg = await screen.findByRole('dialog', { name: 'Hỏi Gen' });
+    expect(within(dlg).getByLabelText('Gen — trợ lý quản trị')).toBeInTheDocument();
+    expect(within(dlg).getByLabelText('Câu hỏi cho Gen')).toBeInTheDocument();
+    expect(useAskGenStore.getState().open).toBe(true);
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(useAskGenStore.getState().open).toBe(false);
+  });
+
+  it('nút × của khung Gen trong ngăn đóng ngăn; mở lại được', async () => {
+    mountShell('/owner');
+    await userEvent.click(await screen.findByTestId('owner-ask-gen'));
+    const dlg = await screen.findByRole('dialog', { name: 'Hỏi Gen' });
+    await userEvent.click(within(dlg).getByRole('button', { name: 'Đóng khung Gen' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('owner-ask-gen'));
+    expect(await screen.findByRole('dialog', { name: 'Hỏi Gen' })).toBeInTheDocument();
+  });
+
+  it('Gen tắt: ngăn Hỏi Gen giải thích + link Bộ não AI (không có khung chat)', async () => {
+    server.me = ME({ features: { gen: false } });
+    mountShell('/owner');
+    await userEvent.click(await screen.findByTestId('owner-ask-gen'));
+    const dlg = await screen.findByRole('dialog', { name: 'Hỏi Gen' });
+    expect(within(dlg).getByText('Gen đang tắt')).toBeInTheDocument();
+    expect(within(dlg).getByRole('link', { name: 'Mở Bộ não AI' })).toHaveAttribute('href', '/system?tab=brain');
+    expect(within(dlg).queryByLabelText('Câu hỏi cho Gen')).not.toBeInTheDocument();
+  });
+
+  it('ở trang /owner/gen: nút Hỏi Gen chỉ đưa con trỏ vào ô nhập, không mở ngăn thứ hai', async () => {
+    mountShell('/owner/gen');
+    const input = await screen.findByLabelText('Câu hỏi cho Gen');
+    await userEvent.click(screen.getByTestId('owner-ask-gen'));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText('Câu hỏi cho Gen')).toHaveLength(1);
+    expect(input).toHaveFocus();
+  });
+
+  it('openAskGen(prefill) khi đang ở một màn: ngăn mở và câu được ĐIỀN SẴN vào ô nhập của Gen, không gửi', async () => {
+    mountShell('/owner/thong-tin');
+    await screen.findByTestId('owner-frame-feed');
+    act(() => openAskGen('Soạn giúp tôi tin trả lời khách hỏi giá'));
+    const dlg = await screen.findByRole('dialog', { name: 'Hỏi Gen' });
+    await waitFor(() => expect(within(dlg).getByLabelText('Câu hỏi cho Gen')).toHaveValue('Soạn giúp tôi tin trả lời khách hỏi giá'));
+    expect(useGenStore.getState().messages).toHaveLength(0);
+    expect(server.calls.some((u) => u.includes('/gen/ask') || u.includes('/gen/turns'))).toBe(false);
+    act(() => closeAskGen());
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('menu ảnh đại diện: Cài đặt · Trợ giúp · Đổi giao diện sáng/tối · Đăng xuất; đổi giao diện dùng lại uiStore', async () => {
+    const { router } = mountShell('/owner');
+    await userEvent.click(await screen.findByTestId('owner-avatar-menu'));
+    const menu = await screen.findByRole('menu', { name: 'Tài khoản' });
+    expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual([
+      'Cài đặt', 'Trợ giúp', expect.stringContaining('Đổi giao diện sáng/tối'), 'Đăng xuất',
+    ]);
+    // đổi giao diện: tối (mặc định) ⇒ sáng, lưu theo người dùng; menu đóng
+    await userEvent.click(within(menu).getByRole('menuitem', { name: /Đổi giao diện sáng\/tối/ }));
+    expect(useUiStore.getState().themeByUser.u1).toBe('light');
+    await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+    // Cài đặt → /owner/them
+    await userEvent.click(screen.getByTestId('owner-avatar-menu'));
+    await userEvent.click(within(await screen.findByRole('menu', { name: 'Tài khoản' })).getByRole('menuitem', { name: 'Cài đặt' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/owner/them'));
+  });
+
+  it('menu ảnh đại diện: Esc đóng; Trợ giúp → /help', async () => {
+    const { router } = mountShell('/owner');
+    await userEvent.click(await screen.findByTestId('owner-avatar-menu'));
+    await screen.findByRole('menu', { name: 'Tài khoản' });
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('owner-avatar-menu'));
+    await userEvent.click(within(await screen.findByRole('menu', { name: 'Tài khoản' })).getByRole('menuitem', { name: 'Trợ giúp' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/help'));
+  });
+
+  it('menu ảnh đại diện: Đăng xuất gọi đăng xuất rồi về trang đăng nhập', async () => {
+    const { router } = mountShell('/owner');
+    await userEvent.click(await screen.findByTestId('owner-avatar-menu'));
+    await userEvent.click(within(await screen.findByRole('menu', { name: 'Tài khoản' })).getByRole('menuitem', { name: 'Đăng xuất' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/login'));
+    expect(server.calls.some((u) => u.includes('/auth/logout'))).toBe(true);
+  });
+
   it('vai khác Owner mở /owner/* ⇒ chuyển "/"', async () => {
     server.me = ME({}, 'operator');
-    const router = mountShell('/owner/quan-he');
+    const { router } = mountShell('/owner/quan-he');
     await waitFor(() => expect(router.state.location.pathname).toBe('/'));
     expect(server.calls.some((u) => u.includes('/owner/'))).toBe(false);          // không gọi API Owner
   });
 
   it('mật khẩu tạm ⇒ /change-password', async () => {
     server.me = ME({ must_change_password: true });
-    const router = mountShell('/owner');
+    const { router } = mountShell('/owner');
     await waitFor(() => expect(router.state.location.pathname).toBe('/change-password'));
   });
 
@@ -602,23 +627,73 @@ describe('OwnerShell', () => {
     expect(await screen.findByTestId('owner-shell-error')).toHaveTextContent('Chi tiết kỹ thuật');
   });
 
-  it('?gen=coach: Gen bật ⇒ về Hôm nay (/owner) và đặt cờ thẻ Hôm nay của Sếp; Gen tắt ⇒ /guide/viec-sep', async () => {
-    const router = mountShell('/owner/viec?gen=coach');
+  it('đang hỏi tài khoản ⇒ khung chờ owner-boot', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => undefined)));
+    mountShell('/owner');
+    expect(await screen.findByTestId('owner-boot')).toBeInTheDocument();
+  });
+
+  it('?gen=coach: Gen bật ⇒ ở lại Tình báo (/owner), bỏ tham số, mở ngăn Hỏi Gen (nơi có thẻ Hôm nay của Sếp)', async () => {
+    const { router } = mountShell('/owner/viec?gen=coach');
     await waitFor(() => expect(router.state.location.pathname).toBe('/owner'));
     expect(router.state.location.search).toBe('');
-    expect(useGenStore.getState().coachFocus).toBe(true);
+    expect(await screen.findByRole('dialog', { name: 'Hỏi Gen' })).toBeInTheDocument();
   });
 
   it('?gen=coach với Gen tắt ⇒ /guide/viec-sep như hiện nay', async () => {
     server.me = ME({ features: { gen: false } });
-    const router = mountShell('/owner?gen=coach');
+    const { router } = mountShell('/owner?gen=coach');
     await waitFor(() => expect(router.state.location.pathname).toBe('/guide/viec-sep'));
   });
 
-  it('?gen=<mã hội thoại> (Bản tin từ chuông) ⇒ mở Hỏi Gen', async () => {
-    const router = mountShell('/owner?gen=0192aaaa-bbbb-4ccc-8ddd-eeeeffff0000');
+  it('?gen=<mã hội thoại> (Bản tin từ chuông) ⇒ mở Hỏi Gen (trang /owner/gen vẫn mở được)', async () => {
+    const { router } = mountShell('/owner?gen=0192aaaa-bbbb-4ccc-8ddd-eeeeffff0000');
     await waitFor(() => expect(router.state.location.pathname).toBe('/owner/gen'));
     expect(router.state.location.search).toBe('');
+    expect(await screen.findByTestId('owner-gen-panel')).toBeInTheDocument();
+  });
+});
+
+describe('Hỏi Gen: hợp đồng openAskGen / closeAskGen', () => {
+  it('openAskGen(prefill) đặt composer draft và mở ngăn; closeAskGen đóng', () => {
+    expect(useAskGenStore.getState().open).toBe(false);
+    openAskGen('Nhờ Gen soạn tin cho khách này');
+    expect(useGenStore.getState().composerDraft).toBe('Nhờ Gen soạn tin cho khách này');
+    expect(useAskGenStore.getState().open).toBe(true);
+    closeAskGen();
+    expect(useAskGenStore.getState().open).toBe(false);
+  });
+
+  it('openAskGen() không có prefill thì không đụng composer draft', () => {
+    useGenStore.getState().setComposerDraft('câu đang soạn');
+    openAskGen();
+    expect(useGenStore.getState().composerDraft).toBe('câu đang soạn');
+    openAskGen('');
+    expect(useGenStore.getState().composerDraft).toBe('câu đang soạn');
+    expect(useAskGenStore.getState().open).toBe(true);
+  });
+});
+
+describe('FirstRunCard (ngày đầu)', () => {
+  it('đúng một thẻ: tiêu đề, một câu, nút chính "Nối Zalo" → /guide/5, link phụ mở ngăn Hỏi Gen', async () => {
+    const router = mountScreen(<><FirstRunCard /><Where /></>, '/owner');
+    const card = await screen.findByTestId('first-run-card');
+    expect(screen.getAllByTestId('first-run-card')).toHaveLength(1);
+    expect(within(card).getByRole('heading', { name: 'Nối Zalo để Gen bắt đầu đọc tin' })).toBeInTheDocument();
+    expect(within(card).getByText('Sau khi nối, ở đây Sếp sẽ thấy tin quan trọng, khách cần chăm và số liệu tuần')).toBeInTheDocument();
+    expect(within(card).getByRole('link', { name: 'Nối Zalo' })).toHaveAttribute('href', '/guide/5');
+    // link phụ: mở ngăn Hỏi Gen, KHÔNG chuyển trang
+    await userEvent.click(within(card).getByRole('link', { name: 'Xem Gen làm được gì' }));
+    expect(useAskGenStore.getState().open).toBe(true);
+    expect(router.state.location.pathname).toBe('/owner');
+    expect(card.textContent ?? '').not.toMatch(/\b(model|token|API|P1|P2|score|pipeline|failover)\b/i);
+    noRawObjects();
+  });
+
+  it('bấm "Nối Zalo" đi tới /guide/5', async () => {
+    const router = mountScreen(<FirstRunCard />, '/owner');
+    await userEvent.click(await screen.findByRole('link', { name: 'Nối Zalo' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/guide/5'));
   });
 });
 
@@ -655,14 +730,14 @@ describe('biểu tượng', () => {
 });
 
 describe('cụm route', () => {
-  it('/owner khai báo tay ngoài screens.json, đặt trước "/" (AppShell), có đủ 5 con + đường lạ về Hôm nay', () => {
+  it('/owner khai báo tay ngoài screens.json, đặt trước "/" (AppShell), có đủ 7 con + đường lạ về /owner', () => {
     const root = routes[0].children ?? [];
     const idxOwner = root.findIndex((r) => r.path === '/owner');
     const idxHome = root.findIndex((r) => r.path === '/');
     expect(idxOwner).toBeGreaterThanOrEqual(0);
     expect(idxOwner).toBeLessThan(idxHome);
     const kids = root[idxOwner].children ?? [];
-    expect(kids.map((k) => (k.index ? 'index' : k.path))).toEqual(['index', 'quan-he', 'viec', 'gen', 'them', '*']);
+    expect(kids.map((k) => (k.index ? 'index' : k.path))).toEqual(['index', 'thong-tin', 'quan-he', 'phan-tich', 'viec', 'gen', 'them', '*']);
     const consolePaths = (root[idxHome].children ?? []).map((c) => c.path);
     expect(consolePaths).not.toContain('owner');
     expect(consolePaths.at(-1)).toBe('*');
