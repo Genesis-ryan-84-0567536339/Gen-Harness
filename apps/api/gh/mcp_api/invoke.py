@@ -152,6 +152,11 @@ class McpCallFailed(ApiError):
         self.cause = cause
 
 
+# Q8-1 (F074): tool ghi mới dừng ở bản nháp — chưa có bước gọi tool sau khi duyệt. Câu này nói thật điều đó
+# (duyệt ở Bàn làm việc cũng bị chặn, xem `drafts.MCP_WRITE_UNSUPPORTED`), không hứa "sẽ thực hiện".
+HELD_WRITE_SUMMARY = "Chờ duyệt ở Bàn làm việc — chưa hỗ trợ thực thi tool ghi nên hệ thống ngoài chưa bị gọi"
+
+
 def redact(message: str, token: str | None) -> str:
     """Máy chủ ngoài có thể lặp lại header Authorization trong thân lỗi — xoá token trước khi log / trả / phát WS."""
     return message.replace(token, "[đã che]") if token else message
@@ -209,12 +214,14 @@ async def invoke_tool(db: AsyncSession, redis: Any, client: McpClient, *, org_id
     if t.access == "write" and not approved_write:
         draft = await create_draft(db, org_id=org_id, kind="mcp_write", title=f"Gọi tool {t.name}",
                                    body_text=f"Gọi tool MCP ghi '{t.name}' trên máy chủ '{t.server_name}' với "
-                                   f"tham số {orjson.dumps(mask_for_model(args)).decode()}", action_key="mcp.write",
+                                   f"tham số {orjson.dumps(mask_for_model(args)).decode()}. "
+                                   "Lưu ý: hệ thống chưa hỗ trợ thực thi tool ghi — bản nháp này chỉ để xem và huỷ.",
+                                   action_key="mcp.write",
                                    agent_id=agent_uuid(agent_key),
                                    sources=[{"label": t.server_name, "ref": {"type": "mcp_server",
                                             "id": str(t.server_id)}}], redis=redis)
         outcome = "held_for_approval" if draft["status"] == "pending" else "blocked"
-        summary = "Chờ duyệt ở Bàn làm việc" if outcome == "held_for_approval" else (draft["hold_reason"] or
+        summary = HELD_WRITE_SUMMARY if outcome == "held_for_approval" else (draft["hold_reason"] or
                   "Bị chặn bởi chính sách")
         item = await log_call(db, redis, org_id=org_id, tool_id=tool_id, agent_key=agent_key, args=args,
                               outcome=outcome, result_summary=summary, latency_ms=elapsed(), draft_id=draft["id"])

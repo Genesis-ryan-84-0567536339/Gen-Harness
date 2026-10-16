@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import type { DraftItem, DraftPage, DraftUpdatedEvent } from '@gen-harness/contracts';
 import { api } from '../../lib/api';
 import { qk } from '../../lib/queries';
@@ -11,6 +11,8 @@ export const qk3 = {
   views: (screen?: string) => ['views', screen ?? '*'] as const,
   drafts: ['drafts'] as const,
   draftList: (status: string, kind?: string) => ['drafts', 'list', status, kind ?? ''] as const,
+  /** Danh sách phân trang của Bàn làm việc (v0.1.61): nằm dưới `drafts` nên mọi sự kiện nháp đều làm mới. */
+  draftPages: (status: string, kind?: string) => ['drafts', 'pages', status, kind ?? ''] as const,
   draft: (id: string) => ['drafts', 'one', id] as const,
 };
 
@@ -43,6 +45,15 @@ export const useDrafts = (status: 'pending' | 'decided' | 'all' = 'pending', kin
     queryFn: ({ signal }) => api.drafts.list({ status, kind }, signal),
   });
 
+/** Danh sách nháp theo trang (con trỏ `next_cursor`) — Bàn làm việc gộp các trang đã tải, nút "Tải thêm" lấy trang kế. */
+export const useDraftsPaged = (status: 'pending' | 'decided' | 'all' = 'pending', kind?: string) =>
+  useInfiniteQuery({
+    queryKey: qk3.draftPages(status, kind),
+    queryFn: ({ pageParam, signal }) => api.drafts.list({ status, kind, cursor: pageParam, limit: 50 }, signal),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last: DraftPage) => last.next_cursor ?? undefined,
+  });
+
 export const useDraft = (id: string | null) =>
   useQuery({
     queryKey: qk3.draft(id ?? ''),
@@ -56,11 +67,19 @@ onRealtimeEvent('draft.new', (qc, data) => {
   qc.setQueryData<DraftPage>(qk3.draftList('pending'), (p) =>
     p && !p.items.some((i) => i.id === item.id) ? { ...p, items: [item, ...p.items], total: p.total + 1 } : p,
   );
+  void qc.invalidateQueries({ queryKey: qk3.drafts });
   void qc.invalidateQueries({ queryKey: qk.navigation });
 });
 onRealtimeEvent('draft.updated', (qc, data) => {
   const ev = data as DraftUpdatedEvent;
   void qc.invalidateQueries({ queryKey: qk3.drafts });
   void qc.invalidateQueries({ queryKey: qk3.draft(ev.id) });
+  void qc.invalidateQueries({ queryKey: qk.navigation });
+});
+// Gửi lỗi (v0.1.61, F048): chuông đã do `notification.new` lo; ở đây chỉ làm mới để thẻ "Gửi lỗi" thấy ngay.
+onRealtimeEvent('draft.failed', (qc, data) => {
+  const ev = data as { id?: string };
+  void qc.invalidateQueries({ queryKey: qk3.drafts });
+  if (ev.id) void qc.invalidateQueries({ queryKey: qk3.draft(ev.id) });
   void qc.invalidateQueries({ queryKey: qk.navigation });
 });
