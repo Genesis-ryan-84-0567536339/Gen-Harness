@@ -147,12 +147,13 @@ describe('Đội ngũ', () => {
     expect(screen.queryByRole('note')).toBeNull();
   });
 
-  it('chưa có nhân viên: vẫn có liên kết (không ngõ cụt), ghi chú nói cách đánh dấu nhân viên + link Quy tắc sàng lọc', async () => {
+  it('chưa có nhân viên: vẫn có liên kết (không ngõ cụt), ghi chú nói cách đánh dấu nhân viên ở hồ sơ + link Khách & Nhóm (v0.1.64)', async () => {
     renderWith(<TeamScreen />, 'owner', (qc) => qc.setQueryData(qk.navigation, buildNavigation(new Set(), true, { hasStaff: false })));
     const note = await screen.findByRole('note');
     expect(note).toHaveTextContent('Chưa có nhân viên nào nên thanh bên tạm ẩn Đánh giá và Chăm sóc.');
-    expect(note).toHaveTextContent('person_type = staff');
-    expect(screen.getByRole('link', { name: 'Mở Quy tắc sàng lọc' })).toHaveAttribute('href', '/rules');
+    expect(note).toHaveTextContent('Đánh dấu là nhân viên');
+    expect(note).not.toHaveTextContent('person_type');
+    expect(screen.getByRole('link', { name: 'Mở Khách & Nhóm' })).toHaveAttribute('href', '/directory');
     expect(screen.getByRole('link', { name: /Đánh giá con người/ })).toHaveAttribute('href', '/people');
     expect(screen.getByRole('link', { name: /Chất lượng chăm sóc/ })).toHaveAttribute('href', '/care');
   });

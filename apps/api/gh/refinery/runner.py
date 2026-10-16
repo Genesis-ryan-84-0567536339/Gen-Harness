@@ -26,6 +26,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from gh import realtime
+from gh.chassis import actionlog
 from gh.chassis.bus import CLEAN_READY, EventBus
 from gh.data.common import iso, live_person, raw_code
 from gh.gen import decider as decmod
@@ -43,6 +44,8 @@ MAX_ATTEMPTS = 3
 PREFILTER_JEV_BUDGET_S = 20.0
 ATTENTION_TYPES = {"Complained", "MentionsCompetitor", "WentSilent"}
 OPEN_THREAD_TYPES = {"PromisedDelivery", "ScheduledMeeting", "AskedStatus", "RequestedSample", "SentQuotation"}
+#: Giá trị `core.persons.person_type` quy tắc sàng lọc được phép đặt (khớp bảng lookup / hợp đồng PersonType).
+PERSON_TYPES = frozenset({"customer", "partner", "staff", "candidate", "learner", "supplier"})
 RULE_KIND_ALERT = {"risk": "repeated_complaint", "competition": "competitor", "hr": "people_signal",
                    "intent": "opportunity_signal", "custom": "rule_alert", "hygiene": "rule_alert"}
 
@@ -69,9 +72,26 @@ class Ev:
     person_id: uuid.UUID | None
     person_code: str | None
     ref: str = ""
+    group_name: str | None = None
+    person_name: str | None = None
     outcome: Outcome | None = None
     sets: dict[str, Any] = field(default_factory=dict)
     mentions: bool = False          # tin tag trực tiếp Gen/agent — lọc trước (J2) không bao giờ bỏ qua
+
+
+def alert_title(label: str, group_name: str | None, person_name: str | None, personnel: bool) -> str:
+    """Tiêu đề cảnh báo do quy tắc sinh: tên sự kiện tiếng Việt + nơi xảy ra, không lộ mã nội bộ (`Complained`).
+    Tin riêng: kèm tên người, trừ tín hiệu nhân sự (không đưa tên người vào tiêu đề)."""
+    if group_name:
+        return f"{label} · nhóm {group_name}"
+    if person_name and not personnel:
+        return f"{label} · tin riêng của {person_name}"
+    return f"{label} · tin riêng"
+
+
+async def event_labels(db: AsyncSession) -> dict[str, str]:
+    rows = (await db.execute(text("SELECT code, label_vi FROM core.lookup WHERE kind = 'event_type'"))).all()
+    return {r.code: r.label_vi for r in rows}
 
 
 def run_out(r: Any) -> dict[str, Any]:
@@ -184,8 +204,8 @@ class Refinery:
         ids = [c.event_id for c in claimed]
         rows = (await db.execute(text("""
             SELECT e.id, e.received_at, e.seq, e.occurred_at, e.kind, e.body_text, e.direction, e.group_id,
-                   e.sender_identity_id, e.mentions_agent, g.code AS group_code, p.id AS person_id,
-                   p.code AS person_code
+                   e.sender_identity_id, e.mentions_agent, g.code AS group_code, g.name AS group_name,
+                   p.id AS person_id, p.code AS person_code, p.display_name AS person_name
             FROM raw.events e LEFT JOIN core.groups g ON g.id = e.group_id
             LEFT JOIN core.person_identities pi ON pi.id = e.sender_identity_id
             LEFT JOIN core.persons p ON p.id = pi.person_id
@@ -197,14 +217,16 @@ class Refinery:
                 live = await live_person(db, pid)
                 if live != pid:
                     pid = live
-                    r_code = (await db.execute(text("SELECT code FROM core.persons WHERE id = :i"),
-                                               {"i": live})).scalar_one()
+                    lp = (await db.execute(text("SELECT code, display_name FROM core.persons WHERE id = :i"),
+                                           {"i": live})).one()
+                    r_code, r_name = lp.code, lp.display_name
                 else:
-                    r_code = r.person_code
+                    r_code, r_name = r.person_code, r.person_name
             else:
-                r_code = None
+                r_code, r_name = None, None
             ev = Ev(r.id, r.received_at, r.seq, r.occurred_at, r.kind, r.body_text or "", r.direction,
-                    r.group_id, r.group_code, pid, r_code, mentions=bool(r.mentions_agent))
+                    r.group_id, r.group_code, pid, r_code, group_name=r.group_name, person_name=r_name,
+                    mentions=bool(r.mentions_agent))
             evs.append(ev)
             senders[r.id] = r.sender_identity_id
         return evs, senders
@@ -245,7 +267,9 @@ class Refinery:
             log.exception("Lượt sàng lọc %s lỗi", run_id)
             st.status, st.error = "failed", str(exc)[:500]
             async with self.sm() as db:
-                await db.execute(text("""UPDATE refinery.event_state SET state = 'pending'
+                # Lỗi hạ tầng của cả lượt: hoàn lại lần thử đã tính lúc nhận (chỉ JSON sai định dạng mới tính — F055).
+                await db.execute(text("""UPDATE refinery.event_state SET state = 'pending',
+                                                attempts = GREATEST(attempts - 1, 0)
                                          WHERE run_id = :r AND state = 'processing'"""), {"r": run_id})
                 await db.commit()
         async with self.sm() as db:
@@ -390,7 +414,11 @@ class Refinery:
                                ev.occurred_at.isoformat(), ev.kind, ev.text, hints)
 
     async def _release(self, evs: list[Ev], st: RunStats, reason: str, count_error: bool = False) -> None:
-        """Trả tin về pending (model chết / trả sai); quá số lần thử → `error`."""
+        """Trả tin về pending (model chết / trả sai); quá số lần thử → `error`.
+
+        F055: chỉ lần model trả SAI ĐỊNH DẠNG (`count_error`) mới tính vào `attempts`; model không khả dụng là lỗi hạ
+        tầng — hoàn lại lần thử đã cộng lúc nhận (`_claim`), để vài lượt model chết không đẩy tin vào `error`.
+        Tin `error` được bộ lập lịch tự nhận lại sau một lúc (`scheduler.requeue_errors`)."""
         async with self.sm() as db:
             for ev in evs:
                 attempts = (await db.execute(text("""SELECT attempts FROM refinery.event_state
@@ -399,9 +427,11 @@ class Refinery:
                 final = count_error and attempts >= MAX_ATTEMPTS
                 await db.execute(text("""
                     UPDATE refinery.event_state SET state = :s, updated_at = now(),
+                           attempts = CASE WHEN :refund THEN GREATEST(attempts - 1, 0) ELSE attempts END,
                            detail = detail || CAST(:d AS jsonb)
                     WHERE event_id = :e AND event_received_at = :r"""),
                     {"s": "error" if final else "pending", "e": ev.event_id, "r": ev.received_at,
+                     "refund": not count_error,
                      "d": orjson.dumps({"last_error": reason[:300]}).decode()})
                 if final:
                     st.errors += 1
@@ -435,6 +465,7 @@ class Refinery:
         touched: set[tuple[str, uuid.UUID]] = set()
         async with self.sm() as db:
             w = await scoring.weights(db, org_id)
+            labels = await event_labels(db)
             for u in ex.units:
                 evs = [by_ref[r] for r in u.evidence]
                 first = evs[0]
@@ -465,13 +496,16 @@ class Refinery:
                             best[ev.ref] = ("lowconf", u.confidence, event_type)
                     continue
                 entities = dict(u.entities)
-                if out["sets"].get("person_type"):
-                    entities["person_type"] = out["sets"]["person_type"]
+                set_type = out["sets"].get("person_type")
+                if set_type:
+                    entities["person_type"] = set_type
                 unit_id, observed_at = await self._insert_unit(
                     db, org_id, st.run_id, evs, first, person_id, group_id, event_type, side, u, entities, scores,
                     score, applied)
                 new_units.append((unit_id, observed_at, u.conclusion))
                 st.unit_ids.append(str(unit_id))
+                if person_id and set_type:
+                    await self._write_person_type(db, org_id, person_id, str(set_type), unit_id)
                 if person_id:
                     touched.add(("person", person_id))
                 if group_id:
@@ -484,7 +518,9 @@ class Refinery:
                     kinds = {h.rule.kind for h in applied if any("alert" in o for o in h.rule.outputs)}
                     kind = next(iter(kinds), "custom")
                     await raise_alert(db, org_id, alert_type=RULE_KIND_ALERT.get(kind, "rule_alert"),
-                                      priority=out["alert"], title=f"{event_type} · {first.group_code or 'tin riêng'}",
+                                      priority=out["alert"],
+                                      title=alert_title(labels.get(event_type, event_type), first.group_name,
+                                                        first.person_name, kind == "hr"),
                                       summary=u.conclusion, subject_type="person" if person_id else "group",
                                       subject_id=person_id or group_id,
                                       evidence=[{"type": "meaning_unit", "id": str(unit_id)}] +
@@ -526,6 +562,22 @@ class Refinery:
             await self._raw_state(org_id, ev, state, et or ("Noise" if state == "discarded" else None),
                                   round(conf, 3) if conf else None)
         await self._embed(org_id, new_units)
+
+    async def _write_person_type(self, db: AsyncSession, org_id: uuid.UUID, person_id: uuid.UUID, ptype: str,
+                                 unit_id: uuid.UUID) -> None:
+        """F045: kết quả quy tắc "set person_type" ghi ngược vào hồ sơ người. CHỈ nâng từ 'unknown' và không chạm hồ sơ
+        Sếp đã tự đặt loại (`attrs.person_type_locked`) — giá trị Sếp chọn luôn thắng quy tắc."""
+        if ptype not in PERSON_TYPES:
+            return
+        changed = (await db.execute(text("""
+            UPDATE core.persons SET person_type = :t, updated_at = now()
+            WHERE id = :p AND person_type = 'unknown' AND deleted_at IS NULL AND merged_into_id IS NULL
+              AND COALESCE(attrs ->> 'person_type_locked', '') <> 'true'
+            RETURNING id"""), {"t": ptype, "p": person_id})).scalar()
+        if changed:
+            await actionlog.record(db, org_id=org_id, actor_type="agent", actor_id=AGENT_KEY,
+                                   action="person.type_inferred", target_type="person", target_id=str(person_id),
+                                   detail={"person_type": ptype, "meaning_unit": str(unit_id)})
 
     async def _insert_unit(self, db: AsyncSession, org_id: uuid.UUID, run_id: uuid.UUID, evs: list[Ev], first: Ev,
                            person_id: uuid.UUID | None, group_id: uuid.UUID | None, event_type: str,

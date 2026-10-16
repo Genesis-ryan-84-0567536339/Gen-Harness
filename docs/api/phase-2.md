@@ -11,8 +11,12 @@ Quyền: màn dữ liệu cần `data.read`; ghi (quy tắc, lịch, chạy ngay
 `GET /data/pipeline` →
 ```json
 {"channels_live": 2, "groups_listening": 42, "raw_total": 18412, "raw_pending": 4204,
- "interval_seconds": 900, "count_threshold": 500, "clean_total": 14208}
+ "raw_error": 0, "interval_seconds": 900, "count_threshold": 500, "clean_total": 14208}
 ```
+`raw_error` (v0.1.64): số tin ở trạng thái "Lỗi xử lý" (model trả sai định dạng đủ 3 lần). Bộ lập lịch tự đưa tin
+`error` về `pending` sau 30 phút, tối đa 3 lần; hết lần vẫn nằm ở `error` và hiện ở dải pipeline.
+Quy tắc sàng lọc có kết quả `set person_type` (R-05 …) ghi ngược vào `core.persons.person_type` — chỉ nâng từ
+`unknown` và không đè loại Sếp đã tự đặt ở hồ sơ.
 
 ## Kho dữ liệu thô (`raw`)
 
