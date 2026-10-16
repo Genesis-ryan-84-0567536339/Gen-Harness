@@ -355,7 +355,8 @@ export function applyEvent(qc: QueryClient, e: RealtimeEvent): void {
             : c,
         ),
       );
-      if (d.state === 'active' || d.state === 'logged_out' || d.state === 'expired') {
+      // 'error' (mất mạng, bridge đang thử nối lại): `resumable` (nút "Nối lại bằng phiên đã lưu") do máy chủ tính ⇒ phải tải lại.
+      if (d.state === 'active' || d.state === 'logged_out' || d.state === 'expired' || d.state === 'error') {
         void qc.invalidateQueries({ queryKey: qk2.channels });
         void qc.invalidateQueries({ queryKey: qk2.channelGroups(d.type) });
         void qc.invalidateQueries({ queryKey: qk2.credentials });
