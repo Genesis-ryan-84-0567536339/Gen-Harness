@@ -1,4 +1,4 @@
-# Gen-Harness — Lộ trình tổng thể (cập nhật 16/10/2026, sau v0.1.61)
+# Gen-Harness — Lộ trình tổng thể (cập nhật 17/10/2026, sau v0.1.62)
 
 Nguồn chuẩn tiến độ. Mỗi đợt = 1 PR = 1 bản phát hành. CI xanh mới tạo bản thử (prerelease); E2E cài thật xanh mới tự
 nâng thành bản chính thức (latest); lịch tự cập nhật đêm đợi bản chính thức ra đủ 24 giờ. genh chỉ kiểm SHA-256 theo
@@ -38,10 +38,11 @@ Chi tiết từng bản ở [CHANGELOG.md](../CHANGELOG.md); tóm tắt theo ch�
 - **v0.1.59 (16/10, bản vá)**: sửa quét QR WhatsApp (chưa kiểm với máy chủ WhatsApp thật, Nợ #35) — mã WhatsApp vẽ lớn, xử lý `companion_reg_refresh`, socket lỗi thử lại có giãn cách thay vì mở lại vô hạn, phiên bản WA Web mới (yêu cầu tự nhận là bridge), Baileys ghim `7.0.0-rc14`, thẻ kênh nói lý do lỗi tiếng Việt; thẻ "Hôm nay của Sếp" đọc lại ngay sau Kiểm tra nguồn CLI xanh ([v0.1.59.md](releases/v0.1.59.md)).
 - **v0.1.60 (16/10)**: **Mặt tiền Owner v2** — 5 trụ cột có số thật (Tình báo, Thông tin, Quan hệ, Phân tích, Việc), API chỉ đọc `/owner/brief|feed|insights|proposals`, hệ hình ảnh mới + lính gác thiết kế; **Thiết lập một màn 3 bước**, mọi "Chọn model" về `/setup?buoc=nguon-ai`, Cài đặt 4 khối (Nợ #28 xong; [v0.1.60.md](releases/v0.1.60.md)).
 - **v0.1.61 (16/10)**: **Đợt A sửa lỗi sau kiểm kê** — mã PIN cho người được giao quyền (tự đặt lần đầu) + phiên PIN hết hạn thật, bảng quyền đổi cả cột + tên vai trò tiếng Việt + mẫu agent (migration 0036), gửi lỗi/mcp_write/tin 1-1 trung thực + nút Gửi lại, gộp người đủ bảng, thẻ Cập nhật, lưới chống tái phát (`check_terms.py` + Playwright duyệt mọi route); còn Nợ #38–#41 ([v0.1.61.md](releases/v0.1.61.md)).
+- **v0.1.62 (17/10)**: **Đợt A phần 2 + Antigravity phân lớp + kênh bền + sức khoẻ** — Hộp thư/Việc/Nhật ký/Khách & Nhóm xem hết (con trỏ, tìm ở máy chủ, gán BOT hàng loạt), lỗi sao lưu nói tiếng người, che OTP/mật khẩu trước khi gửi model, Cung–Cầu không ghép bừa, tài liệu khớp mã + `check_doc_facts.py`; **Antigravity (agy) dùng cho lớp core/nội bộ, chưa dùng cho ngoại giao (`core.reply`, agent giao tiếp người ngoài) và Gen nhân viên — chờ hộp riêng v0.1.63**; kênh Zalo/WhatsApp bền (mất mạng không xoá phiên, nút Nối lại, đăng xuất khi phiên lỗi), thẻ Sức khoẻ canh bridge + hàng lỗi có lối xử lý; `prctl` chống dump, timeout/flock agy, Dockerfile luôn cài mã mới + CI so băm; môi trường dev cục bộ ([dev-local.md](dev-local.md)); Nợ #42–#45 ([v0.1.62.md](releases/v0.1.62.md)).
 
-## Tiếp theo (sau v0.1.61)
+## Tiếp theo (sau v0.1.62)
 Kế hoạch tổng của đợt kiểm toán kết thúc ở v0.1.50; không còn đợt đánh số sẵn. Thứ tự đề xuất:
-0. **Bản kế tiếp**: Boss dùng thử Mặt tiền v2 (v0.1.60) và đợt A (v0.1.61: người được giao quyền tự đặt PIN, nút Gửi lại) rồi góp ý; đợt B theo Nợ #38–#41 khi Boss chọn; Boss gửi kết quả "Thử 12 câu mẫu" của Jev (HANDOFF › Boss phải làm — v0.1.55) ⇒ chốt ngưỡng lọc trước; Owner quét thử WhatsApp QR (Nợ #35); dọn còn lại (Nợ #29, #36).
+0. **Kế hoạch v0.1.63 – v0.1.70** (8 bản, mỗi bản ≤ 4 gói không chồng tệp; push theo 4 mốc M1 = v0.1.63–64, M2 = v0.1.65, M3 = v0.1.66–67, M4 = v0.1.68–70): **v0.1.63** hộp riêng Antigravity (`agy-box`, không khoá/DB/bí mật) cho ngoại giao + sàng lọc tin người lạ · **v0.1.64** Telegram 2 chiều (Nợ #13) + sàng lọc ghi loại người · **v0.1.65** chế độ nghe & danh bạ (migration duy nhất) · **v0.1.66** model hiển thị = model chạy · **v0.1.67** agent làm và nói thật · **v0.1.68** một danh sách việc, thiết lập nói thật · **v0.1.69** chuông có vòng đời + mặc định đúng QD · **v0.1.70** câu chữ sạch, hạ baseline Nợ #39/#40. Sếp dùng thử đợt A + Antigravity phân lớp (v0.1.62), đăng nhập lại Antigravity nếu báo hết hạn; Jev: gửi kết quả "Thử 12 câu mẫu" (HANDOFF › Boss phải làm — v0.1.55) để chốt ngưỡng lọc; Owner quét thử WhatsApp QR (Nợ #35); dọn còn lại (Nợ #29, #36).
    **Dùng thử Gen hướng dẫn một tuần** (3 bước ở [HANDOFF](reports/HANDOFF-v0.1.1.md) › Boss phải làm — v0.1.54), rồi nói cho Claude biết thẻ có đúng việc, chuông có phiền không; các ý để sau nằm ở mục Nợ #20–#25.
 1. **Boss nghiệm thu thật** các tính năng chưa từng chạy với tài khoản thật (danh sách và cách làm ở [HANDOFF](reports/HANDOFF-v0.1.1.md) › Việc dở): Gen-hub quyền đọc + ghi Kho,
    Telegram, Truy cập từ xa (Tailscale), Facebook trả lời — từ v0.1.55 đều là tuỳ chọn (chỉ "nguồn AI" bắt buộc). Kết quả tự ghi ở Việc Sếp cần làm.
@@ -69,7 +70,7 @@ Việc đã hứa hoặc đã biết mà chưa làm. Mỗi dòng ghi điều ki�
 | 10 | **F-92** chú thích "CHỖ CẮM v0.1.30" trong mã | Đã gỡ số bản ở **v0.1.47**; `test_plug_comments_v0147.py` chặn chú thích kiểu cũ quay lại. Đóng, giữ để tra |
 | 11 | Gen ghi ra Gen-hub **ngoài Kho** (nháp Gmail, tạo sự kiện Lịch, kanban/warroom); Gen soạn mail/tạo lịch có xác nhận | Hoãn; cần QD mới, dùng chung khung permit của v0.1.50. Hiện Gmail/Lịch/Drive/Tasks chỉ đọc |
 | 12 | Watchdog ghi sự cố vào Kho | Hoãn (cùng lý do). Claude đọc sự cố qua gói chẩn đoán và `GET /boss-checks` |
-| 13 | Boss nhắn lại Gen qua Telegram (2 chiều); Telegram làm kênh khách (F-28) | Hoãn: cần xác thực người gửi và chống lệnh giả; một chiều đã đủ cho Bản tin/cảnh báo |
+| 13 | Boss nhắn lại Gen qua Telegram (2 chiều); Telegram làm kênh khách (F-28) | **Đang làm — v0.1.64** (xác thực đúng `chat_id` của Sếp, chống lệnh giả; Gen chỉ đề xuất, không nhận mã PIN qua Telegram). Telegram làm kênh khách vẫn hoãn |
 | 14 | **F-80** cổng API Trang FB/IG/Zalo OA/TikTok/LinkedIn/X; nền tảng mạng xã hội mới | Đóng băng tới khi Facebook cá nhân chạy thật ≥ 2 tuần và Boss xác nhận có Trang/OA cần dùng |
 | 15 | Bảo mật hoãn: F-50 Redis ACL, F-51 superuser sidecar, F-53 CA có NameConstraints | Xem lại khi mở truy cập từ xa rộng hơn |
 | 16 | F-84 phần còn lại (duyệt nháp, đề xuất Deal/Vụ việc, stream), F-68 mở Gen cho vai trò khác | Hoãn; chờ có nhân viên dùng thật |
@@ -86,8 +87,7 @@ Việc đã hứa hoặc đã biết mà chưa làm. Mỗi dòng ghi điều ki�
 | 27 | **`genh auto-update disable` khi không có phiên systemd `--user`** (chạy qua `sudo`/`su`/ssh không có `XDG_RUNTIME_DIR`, hoặc tài khoản khác tài khoản đã bật lịch) (v0.1.53) | Chưa làm. Hiện genh hỏi lại trạng thái, báo "CHƯA tắt được" và thoát 1 (không nói dối) nhưng chưa tự dò `XDG_RUNTIME_DIR`/`loginctl` để tắt hộ; Sếp phải chạy lại đúng tài khoản trong phiên đăng nhập |
 | 29 | **Dọn còn lại của v0.1.55**: ẩn giới hạn agent + hạn lưu dữ liệu vào Nâng cao (màn agents/storage); xoá hội thoại ở Lịch sử Gen chưa xoá lựa chọn model đã nhớ (`forgetChoice`, tự giới hạn 50 hội thoại) | Chưa làm, nhỏ |
 | 32 | **Vì sao nguồn Antigravity CLI của Sếp mất dòng model** (máy lên v0.1.57, v0.1.58 chỉ làm hệ thống tự lành) | **Chưa rõ.** Từ v0.1.54 đến v0.1.57 không có mã nào xoá model của nguồn CLI (chỉ `system_api/routes.py` chặn xoá nguồn CLI và `seed_demo.py` dọn nguồn mẫu). Sau khi máy lên v0.1.58 đọc Action Log (`provider.model_set`, `provider.deleted`, `provider.model_auto`) và hỏi `SELECT * FROM agent.models` để loại trừ một đường xoá dữ liệu chưa biết; có nguyên văn lỗi agy thật thì đối chiếu với `(available: …)` đã giả định |
-| 33 | **Mở Antigravity CLI cho mọi agent** (Owner chọn "mở thẳng" 16/10) | Chưa có trong v0.1.59; sẽ ra ở bản kế tiếp. Đang chờ mở quyền thi công |
-| 34 | **Tách agy ra container riêng không gắn khoá** (bước an toàn tiếp theo) | Chưa làm. Làm sau Nợ #33 |
+| 34 | **Tách agy ra container riêng không gắn khoá** (bước an toàn tiếp theo của "mở thẳng") | **Đang làm — v0.1.63** (`agy-box`: không khoá, DB hay bí mật; ngoại giao + sàng lọc tin người lạ chạy ở đây). Từ v0.1.62 agy trong tiến trình chỉ dùng cho lớp core/nội bộ |
 | 35 | **Kiểm WhatsApp QR với máy chủ WhatsApp thật** (v0.1.59) | Chưa kiểm được: máy kiểm thử bị chặn mạng tới máy chủ WhatsApp. Điều kiện mở: Owner quét thử theo mục "Việc Boss phải làm" của v0.1.59 rồi báo kết quả (ghi vào `docs/releases/v0.1.59.md`) |
 | 36 | **Mã chết trình thiết lập cũ** (v0.1.60): `Step1Welcome`, `Step2Owner`, `Step3Org`, `ComingSoonStep`, `Step12Finish` (chỉ `test/unit/legacy-wizard.tsx` còn dùng) và ba bản đăng nhập CLI ở `BossChecksPage` chưa gộp về `CliLoginPanel` | Chưa làm, nhỏ — dọn khi sửa trình thiết lập lần tới |
 | 37 | **Bảng "Cần chăm" ở Quan hệ, máy tính 1024px** (v0.1.60): cột hồ sơ chiếm 4/12 nên bảng phải cuộn ngang mới thấy "Cơ hội mở" và nút "Nhờ Gen soạn tin" (ở 1440/1920 đủ chỗ; lính gác bố cục chấp nhận vì là vùng cuộn có chủ đích) | Chưa làm, nhỏ — ở 1024 đổi bảng sang danh sách xếp chồng hoặc đưa hồ sơ xuống dưới |
@@ -95,6 +95,19 @@ Việc đã hứa hoặc đã biết mà chưa làm. Mỗi dòng ghi điều ki�
 | 39 | **Chữ cấm còn trong baseline `check_terms`** (v0.1.61): 51 chỗ ("khóa", "Kho tri thức", "nhập PIN", "Agent & Model" làm tên màn, tên vai tiếng Anh trong câu, "Nghe im lặng"…) ở `.github/scripts/terms.json` › `baseline` | Chưa làm, dọn dần: baseline chỉ được giảm (sửa xong thì hạ số trong `terms.json`). Gắn khi chạm tệp có chữ cấm |
 | 40 | **Lỗi hiện trạng của route-crawl** (v0.1.61): 44 mục trong `terms.json` › `crawl_baseline` (khoá `cỡ\|route\|luật`) — lỗi console/4xx/5xx/chữ cấm có sẵn lúc dựng lưới; "DƯ" (baseline cao hơn thực tế) chỉ cảnh báo, `CRAWL_STRICT_STALE=1` để bắt đỏ | Chưa làm. Sửa gốc từng mục rồi hạ baseline (`CRAWL_LOWER_BASELINE=1`); khi ổn định bật `CRAWL_STRICT_STALE=1` trong CI |
 | 41 | **Tên tệp còn hậu tố `v016x`** (v0.1.61): migration `0036_v016x_danh_muc`, `test_danh_muc_v016x`, `test_sua_review_dot_a_v016x`, `route-crawl-v016x.spec.ts` (đợt lên kế hoạch trước khi chốt số bản) | Không đổi: đổi tên migration đã phát hành làm lệch lịch sử alembic; test/spec đổi tên khi chạm lần tới |
+| 42 | **`list_promises` con trỏ `due_at`** (v0.1.62): phân trang theo `due_at` có thể rơi dòng trùng `due_at` ở ranh giới trang (Hộp thư/Việc đã sang cặp `(created_at, id)`) | Chưa làm — gói sau v0.1.62; đổi sang cặp `(due_at, id)` |
+| 43 | **Nút "Chạy lại tin lỗi"** (v0.1.62): tin vào hàng lỗi (DLQ) đã có Phát lại/Xoá ở Sức khoẻ, nhưng tin sàng lọc lỗi (`raw_error`) chưa có nút chạy lại thủ công và Sức khoẻ chưa đếm số tin lỗi | Chưa làm — gắn gói B6 (v0.1.64) |
+| 44 | **Allowlist egress cho `agy-out`** (v0.1.63): hộp agy ra Internet qua proxy chỉ cho tên miền Google; cần thử agy có theo `HTTPS_PROXY` không. Kèm: hộp về mạng vẫn tới được `api:8000` qua `agy-bus` | Chưa làm. Mặc định chấp nhận ở v0.1.63 vì API đòi xác thực; sau đó cho api chỉ nghe `agy-bus` ở cổng riêng / không nhận yêu cầu từ hộp |
+| 45 | **Chuyển cả core vào hộp agy** (v0.1.62): Gen của Sếp vẫn chạy agy trong tiến trình api và đọc tin người ngoài khi đọc Hộp thư (rủi ro còn lại của "agy cho lớp core") | Chưa làm — khi hộp riêng ổn định |
+
+### Câu hỏi mở — mặc định đã chọn (16/10/2026; Sếp sửa nếu muốn khác)
+- Tin riêng 1-1: lưu im lặng, không tự trả lời (làm cùng v0.1.65). Nhóm mới: Console hỏi khi kết nối kênh (Im lặng / Không nghe); chưa chọn = `pending` — không lưu tin, vẫn thu thành viên.
+- Gen của nhân viên (không phải Owner): chưa dùng Antigravity tới khi có hộp riêng (v0.1.63), sau đó dùng qua hộp. Agent không gắn kênh/nhóm/người = nội bộ ⇒ agy trong tiến trình. Hộp tắt ⇒ chuyển nguồn AI kế, không quay về agy trong tiến trình.
+- Sàng lọc tin người lạ (`core.refinery`): đề xuất chuyển vào hộp riêng ở v0.1.63.
+- Nút "Nối lại" Zalo/WhatsApp: không đòi mã PIN; có bước hỏi lại khi phiên bị thay chỗ.
+- Cầu thiếu tên hàng (A11): giữ mở cơ hội `raw_signal` để không mất khách.
+- Telegram: không có nút Duyệt, không nhận mã PIN qua Telegram (chỉ liên kết mở Console).
+- Giữ Jev (Q7). Push theo 4 mốc M1–M4 thay cho mỗi bản một lần push.
 
 ## Bản phản ứng (hotfix)
 Các bản sửa nóng thật, không nằm trong kế hoạch đợt. Đối chiếu `git log origin/main` và nhánh `hotfix/*`:

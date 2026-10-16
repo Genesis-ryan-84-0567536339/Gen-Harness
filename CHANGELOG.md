@@ -7,6 +7,12 @@ Ngày = ngày Release trên GitHub theo giờ Việt Nam; tiêu đề trong `doc
 (v0.1.32–v0.1.34, v0.1.40, v0.1.46) hoặc vài ngày (v0.1.47, v0.1.48: làm 03/10, phát hành 09/10).
 Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) ghi ở [ROADMAP › Bản phản ứng](docs/ROADMAP.md).
 
+## v0.1.62 — Đợt A phần 2, Antigravity phân lớp theo kiến trúc, kênh bền, sức khoẻ, dev cục bộ (17/10/2026)
+- **Xem hết & tìm ở máy chủ**: Hộp thư, Việc, Nhật ký (câu tiếng Việt, ẩn `http.*`), Khách & Nhóm (con trỏ `(created_at, id)`, gán BOT hàng loạt theo bộ lọc, xuất/ẩn danh hoá một người); lỗi sao lưu và 403 nói tiếng người; Cung–Cầu không ghép bừa; che OTP/mật khẩu (kể cả mẫu Việt Nam) trước khi gửi model.
+- **Antigravity phân lớp**: agy dùng cho lớp core/nội bộ (Gen của Sếp, Bản tin, sàng lọc, agent không gắn kênh); chưa dùng cho ngoại giao (`core.reply`, agent giao tiếp người ngoài) và Gen nhân viên — chờ hộp riêng v0.1.63; thêm `prctl` chống dump môi trường, timeout việc nền + khoá tệp token, ca canary đọc `/proc/1/environ`.
+- **Kênh bền & sức khoẻ**: mất mạng không xoá phiên Zalo/WhatsApp, nút Nối lại (hỏi lại khi phiên bị mở nơi khác), phiên lỗi có nút Đăng xuất; Sức khoẻ canh bridge im lặng, hàng lỗi có Phát lại/Xoá (mã PIN); Dockerfile api luôn cài mã mới + CI so băm; chỉ api sinh mã thiết lập; môi trường dev riêng (`docs/dev-local.md`).
+- Chi tiết: [docs/releases/v0.1.62.md](docs/releases/v0.1.62.md)
+
 ## v0.1.61 — Đợt A sửa lỗi sau kiểm kê: mã PIN cho người được giao quyền, bảng quyền, nháp & gửi tin trung thực, lưới chống tái phát (16/10/2026)
 - **Mã PIN & quyền**: người được giao quyền duyệt tự đặt mã PIN lần đầu ở Tài khoản của tôi (hộp PIN nói rõ "chưa có mã PIN"); phiên PIN hết hạn thật (xem/WebSocket không gia hạn); bảng quyền đổi cả cột, "Soạn nháp" tách khỏi "Duyệt & gửi"; tên vai trò tiếng Việt thống nhất; mẫu agent bước 8 trùng máy chủ (migration 0036, chạy lại an toàn).
 - **Nháp & gửi tin trung thực**: gửi lỗi có chuông + thẻ "Gửi lỗi" + nút Gửi lại; tin 1-1 đi đúng tài khoản; nháp công cụ ghi (mcp_write) không còn giả "đã làm"; gộp người dời đủ bảng (cơ hội, deal, việc, nháp, phân quyền…) và đảo ngược chính xác.
