@@ -96,7 +96,7 @@ const server = {
   coachMode: 'data' as Mode,
   aiDone: true,
   calls: [] as string[],
-  /** Khác undefined ⇒ GET /owner/today trả thêm trường `nav` này (G1 thêm ở máy chủ thật). */
+  /** Khác undefined ⇒ GET /owner/today trả trường `nav` này thay cho của mock; `null` ⇒ BỎ hẳn `nav` (giả máy chủ cũ). */
   todayNav: undefined as unknown,
 };
 
@@ -125,6 +125,11 @@ function stubApi() {
         server.mock.hooks.scenario?.({ mode: server.mode === 'empty' ? 'empty' : server.mode === 'error' ? 'error' : 'data' } as never);
         const r = callMock(server.mock, url);
         if (r && r.status === 200 && server.todayNav !== undefined && new URL(url, 'http://x').pathname.endsWith('/owner/today')) {
+          if (server.todayNav === null) {
+            const { nav: _omit, ...rest } = r.body as Record<string, unknown>;
+            void _omit;
+            return json(200, rest);
+          }
           return json(200, { ...(r.body as object), nav: server.todayNav });
         }
         return r ? json(r.status, r.body) : json(404, { status: 404, code: 'NOT_FOUND', title: 'Không tồn tại' });
@@ -474,7 +479,8 @@ describe('OwnerShell', () => {
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Tình báo');
     expect(screen.getByTestId('owner-ask-gen')).toBeInTheDocument();
     expect(screen.getByTestId('owner-avatar-menu')).toBeInTheDocument();
-    expect(screen.getByTestId('owner-frame-intel')).toHaveTextContent('Đang hoàn thiện');
+    // G3 thay khung tạm bằng màn Tình báo thật: ô đầu tiên là "Việc phải quyết".
+    expect(await screen.findByTestId('owner-frame-intel')).toHaveTextContent('Việc phải quyết');
   });
 
   it('< 760px: thanh dưới đúng 5 nút đúng testid, không có thanh trái; bấm chuyển màn', async () => {
@@ -515,6 +521,7 @@ describe('OwnerShell', () => {
   });
 
   it('thiếu today.nav (máy chủ cũ) ⇒ khung vẫn dựng, không có số', async () => {
+    server.todayNav = null;
     mountShell('/owner');
     await screen.findByTestId('owner-nav-feed');
     await waitFor(() => expect(server.calls.some((u) => u.includes('/owner/today'))).toBe(true));
