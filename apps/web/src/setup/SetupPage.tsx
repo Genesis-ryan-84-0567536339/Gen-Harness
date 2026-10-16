@@ -135,27 +135,32 @@ export function SetupPage() {
   }
 
   const onState = (s: SetupState) => queryClient.setQueryData(qk.setupState, s);
+  // Đi tới một bước bằng URL (replace). Bước tiến lên phải đổi `?buoc=` rõ ràng: từ Xong vẫn được quay lại Nguồn AI nên
+  // `?buoc=nguon-ai` còn hiệu lực dù bước 4 đã xong.
+  const goView = (view: SetupView) => {
+    const next = new URLSearchParams(params);
+    next.delete('step');
+    next.set('buoc', view);
+    setParams(next, { replace: true });
+  };
   const onAiSaved = (s: SetupState) => {
     void queryClient.invalidateQueries({ queryKey: FOLLOW_UP_KEY });
     if (data.finished) {
       toast('Đã lưu nguồn AI — Gen dùng được ngay.', 'ok');
       setExitTo('/owner');
+    } else {
+      goView('xong');
     }
     onState(s);
   };
   const onLater = () => {
     storeAiLater();
     setAiLater(true);
+    goView('xong');
   };
   const onFinished = (s: SetupState, to: string) => {
     setExitTo(to);
     onState(s);
-  };
-  const goAiSource = () => {
-    const next = new URLSearchParams(params);
-    next.delete('step');
-    next.set('buoc', 'nguon-ai');
-    setParams(next, { replace: true });
   };
 
   return (
@@ -190,7 +195,7 @@ export function SetupPage() {
           ) : view === 'nguon-ai' ? (
             <StepAiSource finished={data.finished} onSaved={onAiSaved} onLater={data.finished ? undefined : onLater} />
           ) : (
-            <StepDone state={data} aiLater={aiLater} onFinished={onFinished} onBack={goAiSource} />
+            <StepDone state={data} aiLater={aiLater} onFinished={onFinished} onBack={() => goView('nguon-ai')} />
           )}
         </div>
       </main>

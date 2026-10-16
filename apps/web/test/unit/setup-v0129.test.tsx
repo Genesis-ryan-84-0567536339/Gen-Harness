@@ -50,7 +50,7 @@ describe('Bước 4 để sau', () => {
     expect(confirm).toHaveBeenCalled();
   });
 
-  it('dải "Chưa có model" ở Tổng quan khi mục 4 chưa xong, nút mở /guide/4; có model thì ẩn', async () => {
+  it('dải "Chưa có model" ở Tổng quan khi mục 4 chưa xong, nút mở /setup?buoc=nguon-ai (v0.1.59); có model thì ẩn', async () => {
     let done = false;
     vi.stubGlobal(
       'fetch',
@@ -63,7 +63,7 @@ describe('Bước 4 để sau', () => {
     const { unmount } = renderUi(<NoModelBanner />);
     const banner = await screen.findByTestId('no-model');
     expect(banner).toHaveTextContent('Chưa có model');
-    expect(screen.getByRole('link', { name: /Chọn model/ })).toHaveAttribute('href', '/guide/4');
+    expect(screen.getByRole('link', { name: /Chọn model/ })).toHaveAttribute('href', '/setup?buoc=nguon-ai');
     unmount();
     done = true;
     renderUi(<NoModelBanner />);

@@ -14,7 +14,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Button, Icon, Segmented } from '@gen-harness/ui';
 import type { CoachTodo } from '@gen-harness/contracts';
 import { executeUiAction } from '../gen/director';
-import { COACH_TITLE, coachUnavailable, requiredText, showMe, type CoachStep } from '../gen/coachModel';
+import { coachUnavailable, requiredText, showMe, type CoachStep } from '../gen/coachModel';
 import { useCoachToday } from '../gen/coachQueries';
 import { FOLLOW_UP_KEY } from '../guide/guideContent';
 import { api } from '../lib/api';
@@ -141,7 +141,7 @@ export function MoreScreen() {
 
       <Panel
         title="Việc nên làm tiếp"
-        kicker={progress && typeof progress.required_total === 'number' && progress.required_total > 0 ? requiredText(progress.required_done, progress.required_total) : COACH_TITLE}
+        kicker={progress && typeof progress.required_total === 'number' && progress.required_total > 0 ? requiredText(progress.required_done, progress.required_total) : 'Gen nhắc những việc còn dở'}
         flush
       >
         <div data-testid="owner-more-todo">

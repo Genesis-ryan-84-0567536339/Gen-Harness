@@ -8,6 +8,7 @@ import type { BindingsPage, CliProfile, Provider, SetupStepStatus } from '@gen-h
 import { ApiScreen } from '../../src/screens/api/ApiScreen';
 import { CliCard } from '../../src/screens/system/CliCard';
 import { Step4Brain } from '../../src/setup/Step4Brain';
+import { StepAiSource } from '../../src/setup/one/StepAiSource';
 import { SETUP_STEPS } from '../../src/setup/steps';
 import { qk } from '../../src/lib/queries';
 import { queryClient } from '../../src/lib/queryClient';
@@ -295,6 +296,36 @@ describe('v0.1.38 F-22 — Antigravity CLI chỉ dùng cho Gen của Sếp', () 
     );
     await screen.findByTestId('setup-cli-scope-antigravity_cli');
     await screen.findByText('Gemini API', { selector: '.setup-row__title' });
+    expect(screen.queryByTestId('setup-agy-only-hint')).toBeNull();
+  });
+
+  it('v0.1.59 — màn Nguồn AI của Thiết lập một màn dùng chung CliLoginPanel: chỉ có Antigravity CLI sẵn sàng → cùng câu nhắc; có khoá API sẵn sàng → không nhắc', async () => {
+    const agyProfile: CliProfile = { id: 'a', email: 'an@example.vn', plan_label: null, active: true, expires_at: null, state: 'ok' };
+    const renderStep = (providers: Provider[]) => {
+      queryClient.clear();
+      queryClient.setDefaultOptions({ queries: { retry: false, staleTime: Infinity } });
+      mockFetch((c) => {
+        if (c.url.includes('/cli/profiles')) return json(200, c.url.includes('kind=claude_code_cli') ? [] : [agyProfile]);
+        if (c.url.endsWith('/providers') && c.method === 'GET') return json(200, providers);
+        return json(200, []);
+      });
+      return render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <StepAiSource onSaved={() => {}} onLater={() => {}} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+    };
+    const first = renderStep([PROVIDERS[0]]);
+    expect(await screen.findByTestId('setup-cli-scope-antigravity_cli')).toHaveTextContent(SCOPE_RE);
+    expect(await screen.findByTestId('setup-agy-only-hint')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Tiếp tục/ })).toBeEnabled(); // Antigravity có model ⇒ Gen dùng được ngay
+    first.unmount();
+
+    renderStep(PROVIDERS);
+    await screen.findByTestId('setup-cli-scope-antigravity_cli');
+    await screen.findByText('Gemini API', { selector: '.setup-one__prov-name' });
     expect(screen.queryByTestId('setup-agy-only-hint')).toBeNull();
   });
 });
