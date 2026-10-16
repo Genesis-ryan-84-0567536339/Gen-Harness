@@ -145,13 +145,24 @@ test.describe('v0.1.59 · Việc', () => {
     // ba mục nằm trọn trong khung Segmented và trong màn (ảnh v0.1.60: "Gen đề xuất (4)" từng bị cắt ở mép phải)
     const box = (await group.boundingBox())!;
     expect(box.x + box.width).toBeLessThanOrEqual(390);
+    const heights = new Set<number>();
     for (const opt of await group.getByRole('radio').all()) {
       const r = (await opt.boundingBox())!;
       expect(r.x).toBeGreaterThanOrEqual(box.x);
       expect(r.x + r.width).toBeLessThanOrEqual(box.x + box.width + 0.5);
       expect(r.height).toBeGreaterThanOrEqual(44);
+      heights.add(Math.round(r.height));
       expect(await opt.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+      // nhãn một dòng: mọi hộp chữ của nút nằm sát một mép trên (xuống dòng ⇒ lệch ≈ một dòng chữ 14px)
+      const tops = await opt.evaluate((el) => {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        return Array.from(range.getClientRects(), (x) => x.top);
+      });
+      expect(Math.max(...tops) - Math.min(...tops), `nhãn "${await opt.innerText()}" xuống dòng`).toBeLessThan(6);
     }
+    // ba tab cùng chiều cao
+    expect(heights.size).toBe(1);
     await group.getByRole('radio', { name: /^Hôm nay/ }).click();
     await expect(page.getByTestId('work-today')).toBeVisible();
     await expect(page.getByTestId('work-decide')).toHaveCount(0);

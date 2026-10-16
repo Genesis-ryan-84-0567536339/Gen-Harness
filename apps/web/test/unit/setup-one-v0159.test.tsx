@@ -455,6 +455,16 @@ describe('Bước 2 · Nguồn AI', () => {
     expect(screen.queryByTestId('setup-ai-ready')).toBeNull();
   });
 
+  it('chưa đăng nhập Google: "Chưa đăng nhập" chỉ hiện MỘT lần trong thẻ Google (không lặp ở dòng trạng thái và pill cạnh nút)', async () => {
+    startServer({ done: [1, 2, 3], session: true, agyProfiles: [] });
+    renderAt('/setup');
+    await screen.findByRole('heading', { name: 'Nối nguồn AI cho Gen' });
+    const google = await screen.findByTestId('setup-ai-google');
+    await waitFor(() => expect(within(google).getByText('Chưa đăng nhập')).toBeInTheDocument());
+    expect(within(google).getAllByText('Chưa đăng nhập')).toHaveLength(1);
+    expect(within(google).getByRole('button', { name: /Đăng nhập/ })).toBeInTheDocument();
+  });
+
   it('Dán khoá Gemini → Kiểm tra (PIN do hộp PIN lo) → "Đã chạy được" → Tiếp tục gửi PUT 4 {provider_ids} → bước Xong "Đã chạy"', async () => {
     const user = userEvent.setup();
     startServer({ done: [1, 2, 3], session: true });

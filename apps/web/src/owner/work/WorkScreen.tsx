@@ -4,7 +4,7 @@
  * Khối nào lỗi thì chỉ khối đó báo (OwnerError), khối khác vẫn chạy. Gen chỉ ĐỀ XUẤT — duyệt/xác nhận đi qua DraftDecide/ProposalDecide
  * (mã PIN do client tự hỏi); "Tạo nhắc" chỉ tạo việc của Sếp.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Segmented, useMediaQuery } from '@gen-harness/ui';
 import { DEFAULT_TZ } from '../../lib/format';
 import { useOrgTimezone } from '../../lib/permissions';
@@ -17,8 +17,18 @@ import './work.css';
 
 type Tab = 'decide' | 'today' | 'suggest';
 
-/** "Cần quyết (4)" — chưa biết số (đang tải) thì chỉ có chữ. */
-const tabLabel = (text: string, n: number | null): string => (n === null ? text : `${text} (${n})`);
+/**
+ * "Cần quyết (4)" — số đếm nằm trong span cỡ 12px để nhãn luôn MỘT dòng (ba tab cùng chiều cao ở 390px). Tên truy cập vẫn là
+ * "Cần quyết (4)". Chưa biết số (đang tải) thì chỉ có chữ.
+ */
+const tabLabel = (text: string, n: number | null): ReactNode =>
+  n === null ? (
+    text
+  ) : (
+    <>
+      {text} <span className="work-seg__n">({n})</span>
+    </>
+  );
 
 export function WorkScreen(): JSX.Element {
   useEffect(() => {

@@ -9,11 +9,14 @@
  * Phần 4: Phân tích — "Chưa tính được" (không "0 ₫"), đang gom dữ liệu không có huy hiệu chênh lệch, ngày đầu, bảng 9 chỉ số, 7/30 ngày.
  * Máy chủ giả: `fetch` toàn cục (cùng khuôn owner-actions-v0159.test.tsx) — KHÔNG gọi Gen-hub / Kho thật.
  */
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join, relative, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
+import { hasIcon } from '@gen-harness/ui';
 import type { ReactElement } from 'react';
 import type {
   DraftDetail,
@@ -1203,6 +1206,8 @@ describe('Phân tích (/owner/phan-tich)', () => {
     const card = await screen.findByTestId('an-empty-listen');
     expect(screen.queryByTestId('first-run-card')).toBeNull();
     expect(card).toHaveTextContent('Chưa có tin nào — bật nhóm lắng nghe để Gen bắt đầu đọc');
+    // Ô biểu tượng đầu thẻ phải VẼ được hình (svg), không phải ô xám trơn (tên icon lạ ⇒ span rỗng).
+    expect(card.querySelector('.gh-state__tile svg')).not.toBeNull();
     expect(screen.getByTestId('an-empty-listen-cta')).toHaveAttribute('href', '/guide/6');
     expect(screen.queryByTestId('an-table-card')).toBeNull();
   });
@@ -1287,5 +1292,26 @@ describe('Mặt tiền không dùng chữ kỹ thuật', () => {
       queryClient.clear();
       setViewport(true);
     }
+  });
+});
+
+function tsxFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    if (statSync(p).isDirectory()) out.push(...tsxFiles(p));
+    else if (/\.tsx$/.test(name)) out.push(p);
+  }
+  return out;
+}
+
+describe('Biểu tượng Mặt tiền: mọi "ph ph-…" đều có trong iconRegistry (tên lạ = ô xám trơn, không hình)', () => {
+  it('apps/web/src/owner/**/*.tsx chỉ dùng biểu tượng có trong bảng', () => {
+    const root = resolve(__dirname, '../../src/owner');
+    const missing = tsxFiles(root).flatMap((f) => {
+      const src = readFileSync(f, 'utf8');
+      return [...src.matchAll(/\bph ph-[a-z0-9-]+/g)].filter((m) => !hasIcon(m[0])).map((m) => `${relative(root, f)}: ${m[0]}`);
+    });
+    expect(missing, `Biểu tượng không có trong iconRegistry.ts:\n${missing.join('\n')}`).toEqual([]);
   });
 });

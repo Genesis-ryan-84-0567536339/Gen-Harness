@@ -71,13 +71,15 @@
 /* Tên đề xuất của Gen: cùng cỡ với tên nháp (14px) — khối ProposalDecide mặc định dùng 18px cho tiêu đề ngăn. */
 .work-proposal .owner-act__title { font-size: var(--fs-14); line-height: var(--lh-14); }
 
-/* Điện thoại: chọn mục bằng Segmented (Console) — số đo Mặt tiền, vùng chạm ≥ 44px, ba mục vừa một hàng. */
-.work .gh-seg { gap: var(--sp-1); padding: var(--sp-1); border-color: var(--border); border-radius: var(--r-8); background: var(--surface); }
+/* Điện thoại: chọn mục bằng Segmented (Console) — số đo Mặt tiền, vùng chạm ≥ 44px, ba mục vừa một hàng.
+ * Nhãn KHÔNG xuống dòng: ba tab cùng chiều cao; nếu không vừa thì khung Segmented tự cuộn ngang (trang không cuộn). */
+.work .gh-seg { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: var(--sp-1); padding: var(--sp-1); border-color: var(--border); border-radius: var(--r-8); background: var(--surface); }
+.work .gh-seg::-webkit-scrollbar { display: none; }
 .work .gh-seg__opt {
-  height: auto; min-height: var(--tap); padding: 0 var(--sp-2); border-radius: var(--r-8);
+  height: auto; min-height: var(--tap); align-self: stretch; padding: 0 var(--sp-2); border-radius: var(--r-8);
   font-size: var(--fs-14); line-height: var(--lh-14); color: var(--text-2);
-  /* Ba mục chia đều MỘT hàng; nhãn dài ("Gen đề xuất (4)") xuống hai dòng trong nút thay vì bị cắt mất ở mép phải (ảnh 390px). */
-  flex: 1 1 0; min-width: 0; white-space: normal; text-align: center; overflow-wrap: anywhere;
+  flex: 1 0 auto; min-width: 0; white-space: nowrap;
 }
+.work-seg__n { font-size: var(--fs-12); line-height: var(--lh-12); font-weight: var(--fw-400); color: var(--text-3); }
 .work .gh-seg__opt:hover { color: var(--text); }
 .work .gh-seg__opt[aria-checked='true'] { background: var(--accent-soft); color: var(--accent-ink); font-weight: var(--fw-600); }

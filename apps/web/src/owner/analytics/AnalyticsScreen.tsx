@@ -454,7 +454,7 @@ export function AnalyticsScreen(): JSX.Element {
             ) : (
               <Card data-testid="an-empty-listen">
                 <EmptyState
-                  icon="ph ph-ear"
+                  icon="ph ph-broadcast"
                   title="Chưa có tin nào — bật nhóm lắng nghe để Gen bắt đầu đọc"
                   description="Zalo đã nối nhưng mọi nhóm đang ở “Không nghe”. Bật nghe một nhóm là số liệu sẽ hiện ở đây."
                   action={

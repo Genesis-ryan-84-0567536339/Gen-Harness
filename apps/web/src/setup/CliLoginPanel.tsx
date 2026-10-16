@@ -48,9 +48,12 @@ export function CliLoginPanel({ kind, onlyAgyReady = false, bare = false }: { ki
               {active ? cliMeta(active, now) : claude ? txt.empty : 'Đăng nhập Google để hệ thống dùng AI qua tài khoản của Sếp.'}
             </div>
           </div>
-          <StateChip color={chip.tone} border={chip.tone === N4 ? N8 : chip.tone} dot size="md">
-            {chip.label}
-          </StateChip>
+          {/* Chưa có tài khoản thì tiêu đề dòng đã nói trạng thái (Chưa đăng nhập / Chưa bật) — không vẽ thêm pill cùng chữ. */}
+          {active ? (
+            <StateChip color={chip.tone} border={chip.tone === N4 ? N8 : chip.tone} dot size="md">
+              {chip.label}
+            </StateChip>
+          ) : null}
           {!login.active ? (
             <Button
               variant={active && active.state !== 'expired' ? 'secondary' : 'primary'}
