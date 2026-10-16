@@ -119,6 +119,7 @@ on:
       - "VERSION"
       - ".github/workflows/e2e-install.yml"
       - ".github/scripts/e2e_data.sh"
+      - ".github/scripts/e2e_agy_box.sh"
   push:
     branches: [main, "claude/**"]
     paths:
@@ -133,6 +134,7 @@ on:
       - "VERSION"
       - ".github/workflows/e2e-install.yml"
       - ".github/scripts/e2e_data.sh"
+      - ".github/scripts/e2e_agy_box.sh"
 
 # Nhóm theo ĐÚNG đối tượng được kiểm: workflow_run theo commit Release
 # (head_sha), dispatch theo tag, pr/push theo ref. Chỉ pr/push được huỷ lượt
@@ -528,6 +530,11 @@ jobs:
             echo "::error::genh status thấy dịch vụ không healthy — xem bảng ở trên" >&2
             exit 1
           fi
+
+      # v0.1.63: hộp riêng Antigravity — cài mới phải tự sinh gh_agy_key, agy-box healthy, và trong box không có khoá master/
+      # DB/Redis, không thấy mạng lõi (script tự bỏ qua tag < v0.1.63 khi chạy tay cho bản cũ).
+      - name: agy-box (v0.1.63+) — khoá tự sinh, healthy, cô lập
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/e2e_agy_box.sh"
 
       # v0.1.46 (F-27/F-21): cổng mặc định chỉ nghe 127.0.0.1; `genh remote` đổi chế độ. Chỉ kiểm khi genh có lệnh
       # `genh remote` (genh help) — chạy tay workflow cho tag cũ không bị đỏ vì tính năng bản đó chưa có.
@@ -1458,6 +1465,21 @@ jobs:
           echo "::add-mask::$pw"
           echo "pw=$pw" >>"$GITHUB_OUTPUT"
 
+      # v0.1.63: bản cũ < v0.1.63 chưa có gh_agy_key ⇒ genh mới phải tự sinh khi nâng cấp; bản cũ đã có thì giữ nguyên
+      # (so sha256, không in khoá).
+      - name: Ghi lại gh_agy_key TRƯỚC khi nâng cấp (bản cũ < v0.1.63 chưa có → genh mới tự sinh)
+        id: agykey
+        run: |
+          set -euo pipefail
+          f="$GEN_HARNESS_HOME/secrets/gh_agy_key"
+          if [ -s "$f" ]; then
+            echo "before=present" >>"$GITHUB_OUTPUT"
+            echo "sha=$(sha256sum "$f" | cut -d' ' -f1)" >>"$GITHUB_OUTPUT"
+          else
+            echo "before=absent" >>"$GITHUB_OUTPUT"
+            echo "sha=" >>"$GITHUB_OUTPUT"
+          fi
+
       # v0.1.38 (F-22): tệp GIẢ (không phải phiên thật) ở đường dẫn cũ của phiên Claude Code trong agy_state — sau nâng
       # cấp api phải tự chuyển nó sang volume claude_state và xoá /var/lib/gh/agy/claude.
       - name: Cài tệp giả ở đường dẫn phiên Claude cũ (F-22)
@@ -1734,6 +1756,26 @@ jobs:
           done
           r="$(probe browser browser-redis 6379)"; echo "browser → browser-redis:6379: $r"
           [ "$r" = "reach" ] || { echo "::error::browser không tới được browser-redis" >&2; exit 1; }
+
+      # v0.1.63: nâng cấp từ bản chưa có box lên bản có box ⇒ gh_agy_key được sinh TRƯỚC `docker compose up`, agy-box healthy
+      # và cô lập; bản cũ đã có khoá thì khoá giữ nguyên.
+      - name: agy-box sau nâng cấp (v0.1.63+) — khoá tự sinh/giữ nguyên, healthy, cô lập
+        env:
+          GENH: ${{ env.GEN_HARNESS_HOME }}/bin/genh
+          MODE: release
+          AGY_KEY_BEFORE: ${{ steps.agykey.outputs.before }}
+          AGY_KEY_SHA_BEFORE: ${{ steps.agykey.outputs.sha }}
+        run: |
+          set -euo pipefail
+          bash "$GITHUB_WORKSPACE/.github/scripts/e2e_agy_box.sh"
+          f="$GEN_HARNESS_HOME/secrets/gh_agy_key"
+          if [ "$AGY_KEY_BEFORE" = "present" ]; then
+            [ "$(sha256sum "$f" | cut -d' ' -f1)" = "$AGY_KEY_SHA_BEFORE" ] \
+              || { echo "::error::gh_agy_key bị ĐỔI khi nâng cấp — phải giữ nguyên khoá đang dùng." >&2; exit 1; }
+            echo "OK: gh_agy_key có sẵn ở bản cũ và giữ nguyên sau nâng cấp."
+          else
+            echo "OK: bản cũ ($PREV_TAG) chưa có gh_agy_key — genh $TAG đã tự sinh khi nâng cấp."
+          fi
 
       - name: Kiểm dữ liệu/bí mật KHÔNG bị tạo lại (app_db_password không đổi)
         run: |
