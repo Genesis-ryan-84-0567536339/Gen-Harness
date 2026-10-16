@@ -153,6 +153,12 @@ export function BackupPanel() {
             </ol>
           ) : null}
           {rv.body ? <p className="upd-body">{rv.body}</p> : null}
+          {rv.technical ? (
+            <details className="tech-detail">
+              <summary>Chi tiết kỹ thuật</summary>
+              <code>{rv.technical}</code>
+            </details>
+          ) : null}
           {rv.command ? <code className="mono bk-cmd">{rv.command}</code> : null}
         </div>
       ) : null}
@@ -168,7 +174,7 @@ export function BackupPanel() {
               <Icon name="ph ph-circle-notch" size={13} className="spin" /> {jv.text}
             </p>
           ) : jv.kind !== 'none' ? (
-            <InlineError>{jv.text}</InlineError>
+            <InlineError detail={jv.kind === 'failed' ? jv.technical : null}>{jv.text}</InlineError>
           ) : null}
           {runNow.isError ? <InlineError>{errorText(runNow.error)}</InlineError> : null}
 

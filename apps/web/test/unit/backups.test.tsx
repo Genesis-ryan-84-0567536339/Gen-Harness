@@ -81,7 +81,9 @@ describe('backupModel', () => {
     expect(scheduleText(null)).toBe('Chưa đặt lịch tự động');
     expect(downloadName(KEY1)).toBe('gen-harness-20260928T190000Z-1a2b3c4d.pgcustom.enc');
     expect(jobView({ state: 'running' }).kind).toBe('working');
-    expect(jobView({ state: 'failed', message: 'pg_dump lỗi' })).toEqual({ kind: 'failed', text: 'Sao lưu chưa thành công: pg_dump lỗi' });
+    expect(jobView({ state: 'failed', message: 'Chưa sao lưu được — thử lại.', technical: 'pg_dump lỗi' })).toEqual({
+      kind: 'failed', text: 'Chưa sao lưu được — thử lại.', technical: 'pg_dump lỗi',
+    });
   });
 
   it('tiến trình khôi phục: requested → running → api tắt → xong thì tải lại', () => {
@@ -95,7 +97,8 @@ describe('backupModel', () => {
     expect(steps(undefined, true)).toEqual(['done', 'active', 'todo']);
     expect(steps({ ...IDLE, state: 'done', finished_at: '2026-09-29T09:59:00Z' })).toBe('finished');
     const failed = restoreView({ ...IDLE, state: 'failed', message: 'pg_restore lỗi', finished_at: '2026-09-29T09:00:00Z' }, { waiting: false, offline: false, now: NOW });
-    expect(failed.kind === 'failed' && failed.body).toBe('pg_restore lỗi');
+    expect(failed.kind === 'failed' && failed.technical).toBe('pg_restore lỗi');
+    expect(failed.kind === 'failed' && failed.body).not.toMatch(/pg_restore/);
     const stalled = restoreView({ ...IDLE, state: 'stalled', key: KEY1 }, { waiting: false, offline: false, now: NOW });
     expect(stalled.kind === 'stalled' && stalled.command).toBe(`~/.gen-harness/bin/genh restore ${KEY1}`);
     expect(restoreView(IDLE, { waiting: false, offline: false }).kind).toBe('hidden');
@@ -145,9 +148,23 @@ describe('<BackupPanel>', () => {
     const user = userEvent.setup();
     renderPanel();
     await user.click(await screen.findByRole('button', { name: 'Sao lưu ngay' }));
-    await screen.findByText('Đang chờ worker nhận việc sao lưu…');
+    await screen.findByText('Đang chờ Bộ xử lý nền nhận việc sao lưu…');
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
-    await waitFor(() => expect(screen.queryByText('Đang chờ worker nhận việc sao lưu…')).toBeNull(), { timeout: 4000 });
+    await waitFor(() => expect(screen.queryByText('Đang chờ Bộ xử lý nền nhận việc sao lưu…')).toBeNull(), { timeout: 4000 });
+  });
+
+  it('Sao lưu lỗi: câu thân thiện hiện sẵn, lỗi gốc chỉ nằm trong "Chi tiết kỹ thuật"', async () => {
+    const friendly = 'Chưa sao lưu được — thử lại; nếu vẫn lỗi gửi gói chẩn đoán.';
+    mockFetch((c) => (c.url.endsWith('/system/backups')
+      ? json(200, { ...PAGE, job: { state: 'failed', message: friendly, technical: 'pg_dump: error: FATAL password' } })
+      : json(404)));
+    renderPanel();
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).getByText(friendly)).toBeTruthy();
+    expect(within(alert).getByText('Chi tiết kỹ thuật')).toBeTruthy();
+    const code = within(alert).getByText('pg_dump: error: FATAL password');
+    expect(code.closest('details')).not.toBeNull();
+    expect(alert.textContent).not.toMatch(/worker/i);
   });
 
   it('Tải về gọi GET /system/backups/download?key=… và lưu tệp', async () => {

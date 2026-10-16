@@ -364,7 +364,10 @@ export interface BackupJob {
   started_at?: string;
   finished_at?: string;
   key?: string;
+  /** Câu thân thiện cho Sếp (F106). */
   message?: string | null;
+  /** Lỗi gốc (stderr pg_dump, đã che mật khẩu) — chỉ hiện trong "Chi tiết kỹ thuật". */
+  technical?: string | null;
 }
 export type RestoreState = 'idle' | 'requested' | 'running' | 'done' | 'failed' | 'stalled';
 export interface BackupRestoreStatus {
