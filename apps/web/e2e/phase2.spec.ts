@@ -324,7 +324,9 @@ test('auditor is read-only', async ({ page }) => {
   await expect(page.getByRole('button', { name: /Quét lại QR/ })).toHaveCount(0);
 });
 
-test('setup steps 4–7 and 12 against the mock', async ({ page }) => {
+// v0.1.59 (g5-thiet-lap): Thiết lập MỘT màn, 3 bước — Nguồn AI (bước 4) và Xong (bước 12) ở trình thiết lập; kênh / nhóm / sàng lọc
+// (bước 5–7) mở ở Hướng dẫn thiết lập (/guide/n, "Nối Zalo ngay" dẫn thẳng /guide/5). Bước 8–11 chưa làm ⇒ "để sau" khi Hoàn tất.
+test('setup: Nguồn AI + Xong ở trình thiết lập, bước 5–7 ở Hướng dẫn, against the mock', async ({ page }) => {
   test.setTimeout(120_000);
   await page.setViewportSize({ width: 1440, height: 900 });
   await resetMock(page.request, 'fresh');
@@ -338,7 +340,7 @@ test('setup steps 4–7 and 12 against the mock', async ({ page }) => {
   const next = page.getByRole('button', { name: /Tiếp tục/ });
 
   // Bước 4 — Antigravity CLI via URL + code.
-  await expect(page.getByRole('heading', { name: 'Bộ não AI' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Nối nguồn AI cho Gen' })).toBeVisible();
   await expect(next).toBeDisabled();
   await page.getByRole('button', { name: 'Đăng nhập', exact: true }).click();
   // v0.1.45 (F-20): thêm tài khoản CLI cần mã PIN (`cli.switch_account`).
@@ -348,13 +350,20 @@ test('setup steps 4–7 and 12 against the mock', async ({ page }) => {
   await page.getByLabel('Mã xác thực').fill('4/0AbCd-EfGh');
   await page.getByRole('button', { name: 'Xác nhận' }).click();
   await expect(page.getByText('a@example.test').first()).toBeVisible({ timeout: 5000 });
-  await page.screenshot({ path: join(outDir, 'setup-step4-1440.png'), fullPage: true });
+  await page.screenshot({ path: join(outDir, 'setup-ai-source-1440.png'), fullPage: true });
   await expect(next).toBeEnabled();
   await next.click();
   // Phiên PIN của bước 4 hết hạn → bước 5 vẫn phải hỏi PIN cho đăng nhập kênh.
   await page.request.post('/api/v1/__mock/pin_expire', { data: {} });
 
-  // Bước 5 — risk warning, PIN, QR, scan.
+  // Bước Xong — lần sàng lọc đầu chạy trực tiếp; "Nối Zalo ngay" ghi Hoàn tất rồi mở thẳng /guide/5.
+  await expect(page.getByRole('heading', { name: 'Xong rồi, thưa Sếp' })).toBeVisible();
+  await expect(page.getByTestId('setup-done-first-run')).toContainText('Gen');
+  await page.screenshot({ path: join(outDir, 'setup-done-1440.png'), fullPage: true });
+  await page.getByRole('button', { name: /Nối Zalo ngay/ }).click();
+  await expect(page).toHaveURL(/\/guide\/5$/);
+
+  // Bước 5 — risk warning, PIN, QR, scan (mở ở Hướng dẫn thiết lập).
   await expect(page.getByRole('heading', { name: 'Kết nối kênh' })).toBeVisible();
   await expect(next).toBeDisabled();
   const zalo = page.getByRole('article', { name: 'Kênh Zalo' });
@@ -370,8 +379,10 @@ test('setup steps 4–7 and 12 against the mock', async ({ page }) => {
   await expect(zalo).toContainText('Đang kết nối', { timeout: 8000 });
   await expect(next).toBeEnabled();
   await next.click();
+  await expect(page).toHaveURL(/\/guide$/);
 
   // Bước 6 — every group starts at Không nghe.
+  await page.goto('/guide/6');
   await expect(page.getByRole('heading', { name: 'Chọn nhóm lắng nghe' })).toBeVisible();
   const mode = page.getByLabel('Chế độ lắng nghe của Vận hành Genesis — Quý 4');
   await expect(mode).toHaveValue('off');
@@ -379,8 +390,10 @@ test('setup steps 4–7 and 12 against the mock', async ({ page }) => {
   await mode.selectOption('tagged_only');
   await expect(next).toBeEnabled();
   await next.click();
+  await expect(page).toHaveURL(/\/guide$/);
 
   // Bước 7 — presets + weights.
+  await page.goto('/guide/7');
   await expect(page.getByRole('heading', { name: 'Sàng lọc dữ liệu' })).toBeVisible();
   // v0.1.55: từng quy tắc R-01…R-06 nằm trong "Nâng cao — lịch sàng lọc và từng quy tắc" (đóng sẵn) — mở ra mới thấy.
   await expect(page.getByText('R-06').first()).toBeHidden();
@@ -395,39 +408,11 @@ test('setup steps 4–7 and 12 against the mock', async ({ page }) => {
   await expect(page.getByText('Trọng số chấm điểm · tổng 100%')).toBeVisible();
   await expect(next).toBeEnabled();
   await next.click();
+  await expect(page).toHaveURL(/\/guide$/);
 
-  // Bước 8–9 đã có form thật (v0.1.15: 5–11 là tuỳ chọn, "Để sau" bỏ qua được). v0.1.55 (Thiết lập gọn): form 8 điền sẵn theo mẫu nên
-  // "Tiếp tục" bật ngay, bước 9 chỉ còn một dòng ghi chú (không còn ô tích); ở đây vẫn để sau cả hai (luồng tạo agent có test riêng).
-  const skip = page.getByRole('button', { name: 'Để sau', exact: true });
-  await expect(page.getByRole('heading', { name: 'Agent đầu tiên' })).toBeVisible();
-  await expect(page.getByLabel('Tên agent')).toBeVisible();
-  await expect(next).toBeEnabled();
-  await skip.click();
-  await expect(page.getByRole('heading', { name: 'Tự trị & ranh giới' })).toBeVisible();
-  await expect(page.getByRole('checkbox')).toHaveCount(0);
-  await expect(next).toBeEnabled();
-  await skip.click();
-
-  // Bước 10–11: v0.1.55 — bước 10 là thẻ gợi ý có nút chính "Để sau"; sao lưu mặc định hằng ngày 02:00 vẫn hợp lệ — 8–9 đã
-  // "để sau" nên không kéo trang quay lại. Luồng điền/thấy mật khẩu tạm thật của bước 10 có test riêng ở flows.spec.ts
-  // "Trình thiết lập bước 10–11".
-  await expect(page.getByRole('heading', { name: 'Mời đội ngũ' })).toBeVisible();
-  await expect(page.getByText('Sắp có')).toHaveCount(0);
-  await expect(page.getByTestId('step10-suggestion')).toBeVisible();
-  await skip.click();
-  await expect(page.getByRole('heading', { name: 'Sao lưu' })).toBeVisible();
-  await expect(page.getByLabel('Giờ chạy (HH:MM)')).toHaveValue('02:00');
-  await next.click();
-
-  // Bước 12 — lần sàng lọc đầu chạy trực tiếp; 1–4 (bắt buộc) đã xong nên không còn cảnh báo chặn Hoàn tất.
-  await expect(page.getByRole('heading', { name: 'Hoàn tất' })).toBeVisible();
-  await expect(page.getByText('Bước 12/12')).toBeVisible();
-  await expect(page.getByText(/Còn bước bắt buộc chưa xong/)).toHaveCount(0);
-  await expect(page.getByText('Lần sàng lọc đầu tiên đã xong.')).toBeVisible({ timeout: 15_000 });
-  await page.screenshot({ path: join(outDir, 'setup-step12-1440.png'), fullPage: true });
-  await page.getByRole('button', { name: /Vào Console/ }).click();
-  await expect(page).toHaveURL(/\/owner$/);
+  // Hoàn tất đã ghi: 1–4, 5–7 (vừa làm ở Hướng dẫn) và 12 xong; 8–11 chưa làm ⇒ "để sau" (dùng mặc định) — làm tiếp ở Hướng dẫn.
   const state = await apiCall(page, 'GET', '/setup/state');
   expect(state.finished).toBe(true);
-  expect(state.steps.filter((s: { status: string }) => s.status === 'skipped').map((s: { n: number }) => s.n)).toEqual([8, 9, 10]);
+  expect(state.steps.filter((s: { status: string }) => s.status === 'skipped').map((s: { n: number }) => s.n)).toEqual([8, 9, 10, 11]);
+  expect(state.steps.filter((s: { status: string }) => s.status === 'done').map((s: { n: number }) => s.n)).toEqual([1, 2, 3, 4, 5, 6, 7, 12]);
 });

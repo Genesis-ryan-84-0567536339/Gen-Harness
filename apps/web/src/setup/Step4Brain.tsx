@@ -4,17 +4,14 @@ import type { CliKind, Provider, ProviderKind, ProviderTestResult } from '@gen-h
 import { Button, Dialog, EmptyState, Icon, IconButton, SelectField, TextField } from '@gen-harness/ui';
 import { api } from '../lib/api';
 import { qk2, useCliProfiles, useProviders } from '../lib/dataQueries';
-import { emailInitials, fmtDMClock, fmtInt, fmtLatency } from '../lib/format';
+import { fmtDMClock, fmtInt, fmtLatency } from '../lib/format';
 import { queryClient } from '../lib/queryClient';
-import { useNow } from '../lib/useNow';
 import { errorDetail, errorText } from '../lib/errorText';
 import { CardError, FriendlyErrorText, InlineError, PinHint, SkeletonLines, StateChip } from '../screens/common';
 import { PROVIDER_KIND_LABEL, PROVIDER_PRESETS, choiceText, isCliKind, providerStatus, testOkText } from '../screens/api/apiModel';
 import { ModelPicker } from '../screens/api/ModelPicker';
-import { ClaudeRiskNotice, CliLoginPanel } from '../screens/system/CliCard';
 import { CliDiagnose } from '../screens/system/CliDiagnose';
-import { useCliLogin } from '../screens/system/useCliLogin';
-import { CLI_ADD_PIN_TEXT, CLI_TEXT, cliAccountLabel, cliChip, cliMeta } from '../screens/system/systemModel';
+import { CliLoginPanel } from './CliLoginPanel';
 import { providerHasModel, providerReady, testedModels } from './phase2Model';
 import { StepFrame } from './StepFrame';
 import { describeError, type StepProps } from './types';
@@ -144,8 +141,8 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip
           }}
         />
       ) : null}
-      <CliAccountSection kind="antigravity_cli" onlyAgyReady={onlyAgyReady} />
-      <CliAccountSection kind="claude_code_cli" />
+      <CliLoginPanel kind="antigravity_cli" onlyAgyReady={onlyAgyReady} />
+      <CliLoginPanel kind="claude_code_cli" />
 
       <div className="setup-section">
         <div className="setup-section__title">Khoá API · thứ tự dùng</div>
@@ -365,74 +362,5 @@ export function SkipBrainDialog({
         </ul>
       </div>
     </Dialog>
-  );
-}
-
-/**
- * Bước 4 · tài khoản CLI (v0.1.31): Antigravity (Google) và Claude Code (gói Claude, tuỳ chọn — QD-12 Owner tự quyết).
- * Hết hạn thật → nút "Đăng nhập lại"; token ngắn hạn quá giờ mà CLI tự gia hạn → "Đang hoạt động".
- */
-function CliAccountSection({ kind, onlyAgyReady = false }: { kind: CliKind; onlyAgyReady?: boolean }) {
-  const profiles = useCliProfiles(kind);
-  const login = useCliLogin(kind);
-  const now = useNow(60_000);
-  const txt = CLI_TEXT[kind];
-  const active = profiles.data?.find((p) => p.active);
-  const chip = cliChip(active);
-  const claude = kind === 'claude_code_cli';
-  return (
-    <div className="setup-section" data-testid={`setup-cli-${kind}`}>
-      <div className="setup-section__title">{claude ? 'Claude Code CLI · gói Claude (tuỳ chọn)' : 'Tài khoản Google · Antigravity CLI'}</div>
-      {claude && !active ? <ClaudeRiskNotice /> : null}
-      {profiles.isPending ? (
-        <SkeletonLines rows={1} padding="0" />
-      ) : profiles.isError ? (
-        <CardError error={profiles.error} onRetry={() => void profiles.refetch()} retrying={profiles.isFetching} />
-      ) : (
-        <div className="setup-row">
-          <div className={active ? 'cli-avatar' : 'cli-avatar cli-avatar--empty'} aria-hidden>
-            {active ? emailInitials(active.email) : '—'}
-          </div>
-          <div className="setup-row__main">
-            <div className="setup-row__title" title={active ? cliAccountLabel(active) : undefined}>{active ? cliAccountLabel(active) : claude ? 'Chưa bật' : 'Chưa đăng nhập'}</div>
-            <div className="cli-meta">
-              {active ? cliMeta(active, now) : claude ? txt.empty : 'Đăng nhập Google để hệ thống dùng AI qua tài khoản của Sếp.'}
-            </div>
-          </div>
-          <StateChip color={chip.tone} border={chip.tone === N4 ? N8 : chip.tone} dot size="md">
-            {chip.label}
-          </StateChip>
-          {!login.active ? (
-            <Button
-              variant={active && active.state !== 'expired' ? 'secondary' : 'primary'}
-              className="btn-28"
-              icon="ph ph-user-switch"
-              onClick={() => login.start.mutate()}
-            >
-              {active?.state === 'expired' ? 'Đăng nhập lại' : active ? txt.add : txt.login}
-            </Button>
-          ) : null}
-          {/* v0.1.45 (F-20): POST /cli/login cần phiên PIN — báo trước, hộp PIN tự mở khi gặp 423. */}
-          {!login.active ? <PinHint text={CLI_ADD_PIN_TEXT} title={CLI_ADD_PIN_TEXT} /> : null}
-        </div>
-      )}
-      <CliLoginPanel login={login} />
-      {txt.scope ? (
-        <div className="risk-box" role="note" data-testid={`setup-cli-scope-${kind}`}>
-          <Icon name="ph ph-shield-warning" size={16} color="var(--color-warn)" />
-          <div className="risk-box__text">
-            {txt.scope}
-            {onlyAgyReady ? (
-              <>
-                {' '}
-                <strong data-testid="setup-agy-only-hint">
-                  Gen dùng được ngay; muốn hệ thống tự sàng lọc tin, trực việc và trò chuyện thử agent ở bước 8, thêm một khoá API hoặc Claude Code CLI.
-                </strong>
-              </>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-    </div>
   );
 }

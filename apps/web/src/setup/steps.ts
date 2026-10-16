@@ -1,3 +1,5 @@
+import type { SetupState } from '@gen-harness/contracts';
+
 /** The 12 setup steps — docs/handoff/06 "12 bước". */
 export interface StepMeta {
   n: number;
@@ -121,3 +123,86 @@ export const CURRENCIES = [
   { value: 'CNY', label: 'CNY — Nhân dân tệ (¥)' },
   { value: 'KRW', label: 'KRW — Won Hàn Quốc (₩)' },
 ];
+
+// ─── v0.1.59 (g5-thiet-lap) — Thiết lập MỘT màn, 3 bước ────────────────────────────────────────────────────────────
+// Máy chủ vẫn có 12 bước (chỉ 1, 2, 3 và 12 bắt buộc); giao diện gom thành: 1 Tài khoản (PUT 1 → 2 → 3) · 2 Nguồn AI (PUT 4)
+// · 3 Xong (PUT 12). Bước 5–11 làm sau ở Hướng dẫn thiết lập (/guide/5…/guide/11). Mọi hàm dưới đây là hàm THUẦN.
+
+export type SetupView = 'tai-khoan' | 'nguon-ai' | 'xong';
+
+/** Thanh bước "1 Tài khoản · 2 Nguồn AI · 3 Xong". */
+export const SETUP_VIEWS: ReadonlyArray<{ key: SetupView; n: 1 | 2 | 3; label: string }> = [
+  { key: 'tai-khoan', n: 1, label: 'Tài khoản' },
+  { key: 'nguon-ai', n: 2, label: 'Nguồn AI' },
+  { key: 'xong', n: 3, label: 'Xong' },
+];
+
+/** Đích DUY NHẤT của mọi nút "Chọn model" / "Đổi nguồn AI" (kể cả việc nên làm tiếp của Gen hướng dẫn `model.missing`). */
+export const AI_SOURCE_PATH = '/setup?buoc=nguon-ai';
+
+/** Khoá sessionStorage: Sếp đã bấm "Làm sau" ở bước Nguồn AI (chỉ trong phiên trình duyệt này). */
+export const AI_LATER_KEY = 'gh_setup_ai_later';
+
+export const setupViewPath = (view: SetupView): string => `/setup?buoc=${view}`;
+
+/** Giá trị `?buoc=` hợp lệ; còn lại ⇒ null. */
+export function parseView(v: string | null | undefined): SetupView | null {
+  return v === 'tai-khoan' || v === 'nguon-ai' || v === 'xong' ? v : null;
+}
+
+/**
+ * Ánh xạ `?step=` cũ (12 bước): 1–3 → tai-khoan · 4 → nguon-ai · 12 → xong · 5–11 → 'guide' (mở /guide/n khi đã xong;
+ * chưa xong thì về bước hiện tại). Giá trị ngoài 1–12 ⇒ null.
+ */
+export function legacyStepView(step: number): SetupView | 'guide' | null {
+  if (!Number.isInteger(step)) return null;
+  if (step >= 1 && step <= 3) return 'tai-khoan';
+  if (step === 4) return 'nguon-ai';
+  if (step >= 5 && step <= 11) return 'guide';
+  return step === 12 ? 'xong' : null;
+}
+
+const stepStatus = (state: SetupState, n: number) => state.steps.find((s) => s.n === n)?.status;
+
+/** Bước 1–3 (mã thiết lập, tài khoản Owner, tổ chức) đã xong. */
+export function accountReady(state: SetupState): boolean {
+  return state.finished || state.current_step >= 4 || [1, 2, 3].every((n) => stepStatus(state, n) === 'done');
+}
+
+/** Bước 4 (nguồn AI) đã xong hoặc đã được để sau ở máy chủ. */
+export function aiSettled(state: SetupState): boolean {
+  const st = stepStatus(state, 4);
+  return st === 'done' || st === 'skipped';
+}
+
+/**
+ * Bước đang làm của một thiết lập CHƯA xong: 1–3 chưa đủ → tai-khoan; đủ 1–3 → nguon-ai, trừ khi bước 4 đã xong hoặc Sếp đã
+ * chọn "Làm sau" (`aiLater`, sessionStorage) → xong.
+ */
+export function defaultView(state: SetupState, aiLater: boolean): SetupView {
+  if (!accountReady(state)) return 'tai-khoan';
+  return aiSettled(state) || aiLater ? 'xong' : 'nguon-ai';
+}
+
+export type SetupRoute = { kind: 'view'; view: SetupView } | { kind: 'guide'; n: number } | { kind: 'owner' };
+
+/**
+ * Nơi trang `/setup` phải ở, theo `?buoc=` (mới) hoặc `?step=` (cũ) và trạng thái máy chủ.
+ * - Chưa xong: chỉ bước hiện tại (hoặc quay lại Nguồn AI từ bước Xong); bước xa hơn/không hợp lệ ⇒ bước hiện tại;
+ *   `?step=5..11` ⇒ bước hiện tại.
+ * - Đã xong: chỉ `nguon-ai` mở được (máy chủ cho lưu bước 4 sau Hoàn tất); `?step=5..11` ⇒ /guide/n; còn lại ⇒ /owner.
+ */
+export function resolveSetupRoute(i: { buoc?: string | null; step?: string | null; state: SetupState; aiLater: boolean }): SetupRoute {
+  const stepNo = i.step ? Number(i.step) : NaN;
+  const requested = parseView(i.buoc) ?? (i.step ? legacyStepView(stepNo) : null);
+  if (i.state.finished) {
+    if (requested === 'nguon-ai') return { kind: 'view', view: 'nguon-ai' };
+    if (requested === 'guide') return { kind: 'guide', n: stepNo };
+    return { kind: 'owner' };
+  }
+  const current = defaultView(i.state, i.aiLater);
+  if (requested && requested !== 'guide' && (requested === current || (current === 'xong' && requested === 'nguon-ai'))) {
+    return { kind: 'view', view: requested };
+  }
+  return { kind: 'view', view: current };
+}

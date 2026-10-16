@@ -220,3 +220,71 @@ export async function askGen(page: Page, question: string, cardTitle: string): P
   await expect(card).toBeVisible();
   return card;
 }
+
+// ─── v0.1.59 (g5-thiet-lap) — Thiết lập MỘT màn, 3 bước ────────────────────────────────────────────────────────────
+
+/** Đích DUY NHẤT của mọi nút "Chọn model" / "Đổi nguồn AI" (khớp `AI_SOURCE_PATH` của src/setup/steps.ts). */
+export const AI_SOURCE_PATH = '/setup?buoc=nguon-ai';
+
+/** Điền form Tài khoản (bước 1) trên màn Thiết lập — chưa bấm "Tiếp tục". `org` mặc định "Genesis Trading". */
+export async function fillSetupAccount(page: Page, opts: { org?: string } = {}): Promise<void> {
+  await page.getByLabel('Tên Sếp').fill('Anh Nguyễn Văn A (Chủ)');
+  await page.getByLabel('Email').fill('owner@example.test');
+  await page.getByLabel('Mật khẩu', { exact: true }).fill('mot-cau-rat-dai-de-nho-2026');
+  await page.getByLabel('Mã PIN (6 số) — chữ số 1/6').click();
+  await page.keyboard.type(OWNER.pin);
+  await page.getByLabel('Nhập lại mã PIN — chữ số 1/6').click();
+  await page.keyboard.type(OWNER.pin);
+  await page.getByLabel('Tên doanh nghiệp').fill(opts.org ?? 'Genesis Trading');
+}
+
+/** Bước Nguồn AI: đăng nhập Google (Antigravity) qua mã xác thực — hộp PIN + liên kết + mã, rồi đợi tài khoản hiện. */
+export async function loginGoogleInSetup(page: Page): Promise<void> {
+  const google = page.getByTestId('setup-ai-google');
+  await google.getByRole('button', { name: 'Đăng nhập', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' })).toBeVisible();
+  await page.keyboard.type(OWNER.pin);
+  await expect(page.getByRole('link', { name: 'Mở trang đăng nhập Google' })).toBeVisible({ timeout: 5000 });
+  await page.getByLabel('Mã xác thực').fill('4/0AbCd-EfGh');
+  await page.getByRole('button', { name: 'Xác nhận' }).click();
+  await expect(google.getByText('a@example.test').first()).toBeVisible({ timeout: 5000 });
+}
+
+/**
+ * Đi tới bước 3 (Xong) của Thiết lập một màn BẰNG GIAO DIỆN, từ mock `fresh`: mở /setup?token=…, điền Tài khoản, rồi Nguồn AI
+ * ("Làm sau" khi `skipAi`, không thì đăng nhập Google). Dừng ở bước Xong (chưa bấm nút nào) để test chọn "Vào Mặt tiền" /
+ * "Nối Zalo ngay".
+ */
+export async function setupOneToDone(page: Page, opts: { skipAi?: boolean } = {}): Promise<void> {
+  await page.goto(`/setup?token=${SETUP_TOKEN}`);
+  await expect(page.getByRole('heading', { name: 'Tạo tài khoản Sếp' })).toBeVisible();
+  await fillSetupAccount(page);
+  await page.getByRole('button', { name: /Tiếp tục/ }).click();
+  await expect(page.getByRole('heading', { name: 'Nối nguồn AI cho Gen' })).toBeVisible();
+  if (opts.skipAi) {
+    await page.getByRole('button', { name: 'Làm sau' }).click();
+  } else {
+    await loginGoogleInSetup(page);
+    const next = page.getByRole('button', { name: /Tiếp tục/ });
+    await expect(next).toBeEnabled();
+    await next.click();
+  }
+  await expect(page.getByRole('heading', { name: 'Xong rồi, thưa Sếp' })).toBeVisible();
+}
+
+/** Thiết lập một màn từ đầu tới hết: `setupOneToDone` rồi "Vào Mặt tiền" ⇒ /owner. */
+export async function finishSetupOne(page: Page, opts: { skipAi?: boolean } = {}): Promise<void> {
+  await setupOneToDone(page, opts);
+  await page.getByRole('button', { name: /Vào Mặt tiền/ }).click();
+  await expect(page).toHaveURL(/\/owner$/);
+}
+
+/**
+ * Đang ở Mặt tiền (/owner$) và khung Mặt tiền hiện: thanh trái (`owner-nav-*`, máy tính) hoặc thanh dưới (`owner-tabbar`, điện
+ * thoại) — đúng ở cả khung cũ lẫn khung mới.
+ * TODO(v0159-integ): khi gộp G2, chuyển sang khẳng định `owner-nav-intel` (Tình báo) là trang đầu.
+ */
+export async function expectOwnerFront(page: Page): Promise<void> {
+  await expect(page).toHaveURL(/\/owner$/);
+  await expect(page.locator('[data-testid^="owner-nav-"]:visible, [data-testid="owner-tabbar"]:visible').first()).toBeVisible();
+}

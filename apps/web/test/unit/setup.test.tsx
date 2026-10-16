@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
@@ -20,6 +20,7 @@ import { isAvailable, isReachable, mergeSteps } from '../../src/setup/stepState'
 import { missingRequiredSteps } from '../../src/setup/phase2Model';
 import { SetupPage } from '../../src/setup/SetupPage';
 import { queryClient } from '../../src/lib/queryClient';
+import { LegacyWizard } from './legacy-wizard';
 
 describe('setup validation', () => {
   it('step 1 needs a token', () => {
@@ -148,59 +149,78 @@ function renderSetup(path = '/setup') {
   );
 }
 
-describe('<SetupPage>', () => {
+/** Khung thử cho bước 5–12 của máy chủ (SetupPage nay chỉ còn 3 bước) — xem legacy-wizard.tsx. */
+function renderLegacy() {
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={['/guide']}>
+        <LegacyWizard />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+/** Điền đủ form Tài khoản (bước 1 của Thiết lập một màn). */
+async function fillAccount(user: ReturnType<typeof userEvent.setup>, opts: { org?: boolean } = {}) {
+  await user.type(await screen.findByLabelText('Tên Sếp'), 'Anh Nguyễn Văn A');
+  await user.type(screen.getByLabelText('Email'), 'owner@example.test');
+  await user.type(screen.getByLabelText('Mật khẩu'), 'mot-cau-rat-dai-de-nho-2026');
+  await user.click(screen.getByLabelText('Mã PIN (6 số) — chữ số 1/6'));
+  await user.keyboard('246810');
+  await user.click(screen.getByLabelText('Nhập lại mã PIN — chữ số 1/6'));
+  await user.keyboard('246810');
+  if (opts.org !== false) await user.type(screen.getByLabelText('Tên doanh nghiệp'), 'Genesis Trading');
+}
+
+describe('<SetupPage> — Thiết lập một màn, 3 bước', () => {
   beforeEach(() => {
     queryClient.clear();
     sessionStorage.clear();
     vi.unstubAllGlobals();
   });
 
-  it('loads progress from GET /setup/state and shows the 12-step rail', async () => {
+  it('loads progress from GET /setup/state and shows the 3-step bar (no 12-step rail)', async () => {
     mockFetch(() => json(200, stateAt(1)));
     renderSetup();
-    expect(await screen.findByRole('heading', { name: 'Bước 1' })).toBeInTheDocument();
-    expect(screen.getAllByRole('listitem')).toHaveLength(12);
-    expect(screen.getByText('Bước 1/12')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Tạo tài khoản Sếp' })).toBeInTheDocument();
+    const bar = screen.getByRole('list', { name: 'Các bước thiết lập' });
+    expect(within(bar).getAllByRole('listitem')).toHaveLength(3);
+    expect(bar).toHaveTextContent('Tài khoản');
+    expect(bar).toHaveTextContent('Nguồn AI');
+    expect(bar).toHaveTextContent('Xong');
+    expect(within(bar).getByText('Tài khoản').closest('li')).toHaveAttribute('aria-current', 'step');
+    expect(screen.queryByText('Bước 1/12')).toBeNull();
+    expect(screen.queryByLabelText('Các bước thiết lập', { selector: 'aside' })).toBeNull();
   });
 
-  it('step 1: token prefilled from ?token=, Tiếp tục enabled only with a token, PUT then advances', async () => {
+  it('step 1: token prefilled from ?token= (no token field), Tiếp tục enabled only when the form is complete, PUT 1 sends the token', async () => {
     const user = userEvent.setup();
-    let state = stateAt(1);
+    const state = stateAt(1);
     const fetchSpy = mockFetch((url, init) => {
-      if (url.endsWith('/setup/steps/1') && init.method === 'PUT') {
-        state = stateAt(2, [1]);
-        return json(200, state);
-      }
+      if (url.endsWith('/setup/steps/1') && init.method === 'PUT') return json(200, stateAt(2, [1]));
+      if (url.endsWith('/setup/steps/2') && init.method === 'PUT') return json(422, { status: 422, code: 'VALIDATION_ERROR', title: 'Dữ liệu chưa hợp lệ', errors: { email: 'Email đã được dùng.' } });
       return json(200, state);
     });
     renderSetup('/setup?token=GH-SETUP-7Q4K');
-    const token = await screen.findByLabelText('Mã thiết lập');
-    expect(token).toHaveValue('GH-SETUP-7Q4K');
+    await screen.findByRole('heading', { name: 'Tạo tài khoản Sếp' });
+    expect(screen.queryByLabelText('Mã thiết lập')).toBeNull(); // mã đã có từ ?token= — chỉ hiện ô khi thiếu
     const next = screen.getByRole('button', { name: /Tiếp tục/ });
-    expect(next).toBeEnabled();
-
-    await user.clear(token);
     expect(next).toBeDisabled();
-    await user.tab(); // leave the field → inline error
-    expect(await screen.findByText(/Nhập mã thiết lập/)).toBeInTheDocument();
-
-    await user.type(token, 'GH-SETUP-7Q4K');
-    // v0.1.28 (UX V3): không còn lựa chọn English (chưa có bản dịch) — luôn gửi "vi".
+    // v0.1.28 (UX V3): không còn lựa chọn English; v0.1.43 (F-23): không còn 'Cách bắt đầu' (dữ liệu mẫu).
     expect(screen.queryByRole('radio', { name: 'English' })).toBeNull();
-    // v0.1.43 (F-23): bỏ hẳn 'Cách bắt đầu' (dữ liệu mẫu) — luôn bắt đầu trống.
     expect(screen.queryByText('Cách bắt đầu')).toBeNull();
-    expect(screen.queryByRole('radio', { name: /Dùng dữ liệu mẫu/ })).toBeNull();
-    expect(screen.queryByRole('radio', { name: /Bắt đầu trống/ })).toBeNull();
-    expect(screen.queryAllByRole('radio')).toHaveLength(0);
+    await fillAccount(user);
+    expect(next).toBeEnabled();
     await user.click(next);
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Bước 2' })).toBeInTheDocument());
+    const err = await screen.findByText('Email đã được dùng.');
+    expect(err).toHaveClass('gh-field__error'); // lỗi gắn đúng ô Email
     const put = fetchSpy.mock.calls.find(([u, i]) => String(u).endsWith('/setup/steps/1') && i?.method === 'PUT')!;
     expect(JSON.parse(String(put[1]!.body))).toEqual({ token: 'GH-SETUP-7Q4K', language: 'vi', mode: 'empty' });
     expect(sessionStorage.getItem('gh_setup_token')).toBe('GH-SETUP-7Q4K');
   });
 
-  it('step 1: 403 SETUP_TOKEN_INVALID shows an 11px inline error on the field', async () => {
+  it('step 1: 403 SETUP_TOKEN_INVALID shows an inline error on the (now visible) token field', async () => {
     const user = userEvent.setup();
     mockFetch((url, init) =>
       url.endsWith('/setup/steps/1') && init.method === 'PUT'
@@ -208,21 +228,23 @@ describe('<SetupPage>', () => {
         : json(200, stateAt(1)),
     );
     renderSetup('/setup?token=WRONG');
-    await user.click(await screen.findByRole('button', { name: /Tiếp tục/ }));
+    await fillAccount(user);
+    await user.click(screen.getByRole('button', { name: /Tiếp tục/ }));
     const err = await screen.findByText(/không hợp lệ hoặc đã hết hạn/);
     expect(err).toHaveClass('gh-field__error');
     expect(screen.getByLabelText('Mã thiết lập')).toHaveAttribute('aria-invalid', 'true');
   });
 
-  it('step 2: Tiếp tục stays disabled until password ≥ 12 and both PINs match', async () => {
+  it('step 2 fields: Tiếp tục stays disabled until password ≥ 12 and both PINs match', async () => {
     const user = userEvent.setup();
     sessionStorage.setItem('gh_setup_token', 'GH-1');
     mockFetch(() => json(200, stateAt(2, [1])));
     renderSetup();
-    await screen.findByRole('heading', { name: 'Bước 2' });
+    await screen.findByRole('heading', { name: 'Tạo tài khoản Sếp' });
     const next = screen.getByRole('button', { name: /Tiếp tục/ });
-    await user.type(screen.getByLabelText('Tên hiển thị'), 'Anh Nguyễn Văn A');
+    await user.type(screen.getByLabelText('Tên Sếp'), 'Anh Nguyễn Văn A');
     await user.type(screen.getByLabelText('Email'), 'owner@genesis.vn');
+    await user.type(screen.getByLabelText('Tên doanh nghiệp'), 'Genesis Trading');
     await user.type(screen.getByLabelText('Mật khẩu'), 'ngan');
     await user.tab();
     expect(await screen.findByText(/ít nhất 12 ký tự \(hiện 4\)/)).toBeInTheDocument();
@@ -230,16 +252,15 @@ describe('<SetupPage>', () => {
 
     await user.click(screen.getByLabelText('Mã PIN (6 số) — chữ số 1/6'));
     await user.keyboard('246810');
-    await user.click(screen.getByLabelText('Nhập lại PIN — chữ số 1/6'));
+    await user.click(screen.getByLabelText('Nhập lại mã PIN — chữ số 1/6'));
     await user.keyboard('246811');
     expect(next).toBeDisabled();
     await user.tab();
     expect(await screen.findByText('Hai lần nhập PIN chưa khớp.')).toBeInTheDocument();
 
-    await user.click(screen.getByLabelText('Nhập lại PIN — chữ số 6/6'));
+    await user.click(screen.getByLabelText('Nhập lại mã PIN — chữ số 6/6'));
     await user.keyboard('{Backspace}0');
     expect(next).toBeEnabled();
-    expect(screen.getByText('yêu cầu PIN khi')).toBeInTheDocument();
   });
 
   it('optional steps (10–11, phase 4.6) can be skipped via POST /setup/steps/{n}/skip; required ones cannot', async () => {
@@ -252,7 +273,7 @@ describe('<SetupPage>', () => {
       if (url.includes('/setup/')) return json(200, state);
       return json(404, { status: 404, code: 'NOT_FOUND', title: 'Không tồn tại' });
     });
-    renderSetup();
+    renderLegacy();
     await screen.findByRole('heading', { name: 'Bước 10' });
     // v0.1.55 (G2): bước 10 là thẻ gợi ý — "Để sau" (bỏ qua) hoặc "Mời ngay" (mở form thật); không có nút Tiếp tục.
     expect(screen.getByTestId('step10-suggestion')).toBeInTheDocument();
@@ -283,7 +304,7 @@ describe('<SetupPage>', () => {
       if (url.includes('/setup/')) return json(200, state);
       return json(404, { status: 404, code: 'NOT_FOUND', title: 'Không tồn tại' });
     });
-    renderSetup();
+    renderLegacy();
     await screen.findByRole('heading', { name: 'Bước 10' });
     await user.click(screen.getByRole('button', { name: 'Mời ngay' }));
     // Form mời thật (giai đoạn 4.6): bỏ trống danh sách vẫn Tiếp tục được.
@@ -315,7 +336,7 @@ describe('<SetupPage>', () => {
       if (url.includes('/setup/')) return json(200, state);
       return json(200, []);
     });
-    renderSetup();
+    renderLegacy();
     expect(await screen.findByText('Còn bước bắt buộc chưa xong: 4')).toBeInTheDocument();
     expect(await screen.findByText('1.244')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Vào Console/ }));
@@ -339,7 +360,7 @@ describe('<SetupPage>', () => {
       if (url.includes('/setup/')) return json(200, state);
       return json(200, []);
     });
-    renderSetup();
+    renderLegacy();
     const next = await screen.findByRole('button', { name: /Tiếp tục/ });
     await waitFor(() => expect(next).toBeEnabled());
     await user.click(next);
@@ -374,7 +395,7 @@ describe('<SetupPage>', () => {
       if (url.includes('/setup/')) return json(200, state);
       return json(404, { status: 404, code: 'NOT_FOUND', title: 'Không tồn tại' });
     });
-    renderSetup();
+    renderLegacy();
     await screen.findByRole('heading', { name: 'Bước 8' });
     await user.selectOptions(screen.getByLabelText('Mẫu'), 'secretary');
     expect(screen.getByLabelText('Tên agent')).toHaveValue('Thư ký');

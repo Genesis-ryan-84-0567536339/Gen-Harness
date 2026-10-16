@@ -92,9 +92,21 @@ const server = {
   meFails: false,
   boss: BOSS as unknown,
   bossMode: 'data' as Mode,
+  /** v0.1.59: Cài đặt đọc GET /gen/coach/today (Việc nên làm tiếp) và GET /setup/follow-up (bước 4 = nguồn AI). */
+  coachMode: 'data' as Mode,
+  aiDone: true,
   calls: [] as string[],
   /** Khác undefined ⇒ GET /owner/today trả thêm trường `nav` này (G1 thêm ở máy chủ thật). */
   todayNav: undefined as unknown,
+};
+
+const COACH_TODAY = {
+  date: '2026-10-16', enabled: true, snoozed_until: null, tip: null, lesson: null, unseen: false,
+  progress: { required_done: 1, required_total: 2, lessons_done: 0, lessons_total: 19, stable: false, stable_since: null },
+  todos: [
+    { key: 'model.missing', level: 'P0', title: 'Gen chưa có nguồn AI để trả lời', why: 'Chưa có nguồn AI thì Gen chưa tóm tắt được tin.', link: '/setup?buoc=nguon-ai', can_dismiss: false },
+    { key: 'boss.hub', level: 'P1', title: 'Nối Gen-hub', why: 'Để Gen đọc Kho dữ liệu.', target: 'boss_checks.row.hub', can_dismiss: true },
+  ],
 };
 
 const json = (status: number, body: unknown) =>
@@ -121,6 +133,12 @@ function stubApi() {
         if (server.bossMode === 'hang') return new Promise<Response>(() => undefined);
         if (server.bossMode === 'error') return problem500();
         return json(200, server.bossMode === 'empty' ? { ...BOSS, rows: [] } : server.boss);
+      }
+      if (url.includes('/setup/follow-up')) return json(200, [{ n: 4, key: 'brain', title: 'Bộ não AI', status: 'skipped', done: server.aiDone }]);
+      if (url.includes('/gen/coach/today')) {
+        if (server.coachMode === 'hang') return new Promise<Response>(() => undefined);
+        if (server.coachMode === 'error') return problem500();
+        return json(200, server.coachMode === 'empty' ? { ...COACH_TODAY, todos: [] } : COACH_TODAY);
       }
       if (url.includes('/notifications')) return json(200, { items: [], unread: 0 });
       return json(404, { status: 404, code: 'NOT_FOUND', title: 'Không tồn tại' });
@@ -199,6 +217,8 @@ beforeEach(() => {
   server.meFails = false;
   server.boss = BOSS;
   server.bossMode = 'data';
+  server.coachMode = 'data';
+  server.aiDone = true;
   server.calls = [];
   server.todayNav = undefined;
   useAskGenStore.setState({ open: false });
@@ -389,37 +409,45 @@ describe('Hỏi Gen (/owner/gen)', () => {
   });
 });
 
-describe('Thêm (/owner/them)', () => {
-  it('đang tải trạng thái kết nối', async () => {
-    server.bossMode = 'hang';
+describe('Cài đặt (/owner/them) — v0.1.59: 4 khối', () => {
+  it('đang tải việc nên làm tiếp', async () => {
+    server.coachMode = 'hang';
     mountScreen(<MoreScreen />, '/owner/them');
-    expect(await screen.findByTestId('owner-loading')).toBeInTheDocument();
+    expect((await screen.findAllByTestId('owner-loading')).length).toBeGreaterThan(0);
   });
 
-  it('có dữ liệu: một dòng mỗi dịch vụ, Facebook → /social, Cài đặt nâng cao → /overview (không phải "/")', async () => {
+  it('có dữ liệu: đúng 4 khối; Việc nên làm tiếp là MỘT danh sách (Chưa + nút), không còn khối Kết nối; nâng cao đúng 3 lối', async () => {
     mountScreen(<MoreScreen />, '/owner/them');
-    const rows = await screen.findAllByTestId('owner-conn-row');
-    expect(rows.map((r) => r.querySelector('.owner-row__title')?.textContent)).toEqual(['Gen-hub', 'Facebook', 'Google / Antigravity', 'Jev']);
-    expect(rows[0]).toHaveTextContent('Đã kết nối');
-    expect(rows[1]).toHaveTextContent('Chưa kết nối');
-    expect(rows[1]).toHaveAttribute('href', '/social');
-    expect(rows[2]).toHaveAttribute('href', '/guide/viec-sep');
-    const adv = screen.getByTestId('owner-advanced');
-    expect(adv).toHaveAttribute('href', ADVANCED_SETTINGS_PATH);
-    expect(adv.getAttribute('href')).toBe('/overview');
-    expect(adv.getAttribute('href')).not.toBe('/');
+    const rows = await screen.findAllByTestId('owner-more-todo-row');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent('Gen chưa có nguồn AI để trả lời');
+    expect(rows[0]).toHaveTextContent('Khẩn · Chưa');
+    expect(rows[1]).toHaveTextContent('Quan trọng · Chưa');
+    expect(within(rows[0]).getByRole('button', { name: /Làm ngay/ })).toBeInTheDocument();
+    expect(screen.queryByTestId('owner-connections')).toBeNull();
+    expect(screen.queryByTestId('owner-conn-row')).toBeNull();
+    expect(screen.queryByRole('link', { name: /Hướng dẫn thiết lập/ })).toBeNull();
+    // Nguồn AI: trạng thái + "Đổi nguồn AI" → màn Thiết lập nguồn AI.
+    expect(screen.getByTestId('owner-more-ai-status')).toHaveTextContent('Đã chạy');
+    expect(screen.getByRole('link', { name: /Đổi nguồn AI/ })).toHaveAttribute('href', '/setup?buoc=nguon-ai');
+    // Cài đặt nâng cao: đúng 3 lối vào; "Mở Console đầy đủ" → /overview (không phải "/").
+    const adv = within(screen.getByTestId('owner-more-advanced')).getAllByRole('link');
+    expect(adv.map((a) => a.getAttribute('href'))).toEqual(['/api', '/system?tab=brain', ADVANCED_SETTINGS_PATH]);
+    expect(screen.getByTestId('owner-advanced')).toHaveAttribute('href', '/overview');
+    expect(screen.getByTestId('owner-advanced').getAttribute('href')).not.toBe('/');
     noRawObjects();
   });
 
-  it('rỗng: chưa có dịch vụ nào', async () => {
-    server.bossMode = 'empty';
+  it('rỗng: hết việc ⇒ một dòng "Đã xong"; vẫn còn Cài đặt nâng cao', async () => {
+    server.coachMode = 'empty';
     mountScreen(<MoreScreen />, '/owner/them');
-    expect(await screen.findByText('Chưa có dịch vụ nào để hiện')).toBeInTheDocument();
+    const row = await screen.findByTestId('owner-more-todo-row');
+    expect(row).toHaveTextContent('Đã xong');
     expect(screen.getByTestId('owner-advanced')).toBeInTheDocument();       // lối vào Cài đặt nâng cao luôn có
   });
 
   it('lỗi: có "Chi tiết kỹ thuật", vẫn còn Cài đặt nâng cao', async () => {
-    server.bossMode = 'error';
+    server.coachMode = 'error';
     mountScreen(<MoreScreen />, '/owner/them');
     expect(await screen.findByTestId('owner-error')).toHaveTextContent('Chi tiết kỹ thuật');
     expect(screen.getByTestId('owner-advanced')).toBeInTheDocument();

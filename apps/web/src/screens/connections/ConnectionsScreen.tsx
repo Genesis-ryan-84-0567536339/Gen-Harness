@@ -8,6 +8,7 @@ import { api } from '../../lib/api';
 import { useChannels, useCliProfiles, useProviders } from '../../lib/dataQueries';
 import { useCan } from '../../lib/permissions';
 import { useMe } from '../../lib/queries';
+import { AI_SOURCE_PATH } from '../../setup/steps';
 import { CardError, Panel, ScreenHead, SkeletonLines } from '../common';
 import { HubLinkCard } from '../mcp/HubLinkCard';
 import { useMcpServers } from '../mcp/queries';
@@ -119,7 +120,7 @@ function BrainCard() {
           Mở Bộ não AI
         </Link>
         {isOwner ? (
-          <Link to="/guide/4" className="conn-card__guide">
+          <Link to={AI_SOURCE_PATH} className="conn-card__guide">
             Hướng dẫn
           </Link>
         ) : null}

@@ -98,7 +98,8 @@ const EXTRA_DEFS: Record<string, Def> = {
     title: 'Chưa có model cho Gen',
     why: 'Không có model thì Gen và việc sàng lọc không chạy được.',
     level: 'P0',
-    target: 'api.bindings',
+    // v0.1.59: như máy chủ (`TODO_LINKS`) — đích là MỘT TRANG (Thiết lập nguồn AI), không phải phần tử cần làm sáng ⇒ `link`, không `target`.
+    link: '/setup?buoc=nguon-ai',
   },
   'backup.unset': {
     title: 'Chưa đặt lịch sao lưu tự động',

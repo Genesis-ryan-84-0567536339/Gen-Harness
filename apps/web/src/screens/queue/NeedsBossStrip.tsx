@@ -6,6 +6,7 @@ import { FOLLOW_UP_KEY } from '../../guide/guideContent';
 import { api } from '../../lib/api';
 import { useCan } from '../../lib/permissions';
 import { useMe } from '../../lib/queries';
+import { AI_SOURCE_PATH } from '../../setup/steps';
 import { sortIssues } from '../system/healthModel';
 import { useSystemHealth } from '../system/queries';
 import { NoModelNotice } from './NoModelBanner';
@@ -70,7 +71,7 @@ function StripBody({ noModel, issues }: { noModel: boolean; issues: ReturnType<t
         <Icon name="ph ph-hand-palm" size={14} />
         Cần Sếp xử lý
       </h2>
-      {noModel ? <NoModelNotice to="/guide/4" /> : null}
+      {noModel ? <NoModelNotice to={AI_SOURCE_PATH} /> : null}
       {issues.length ? (
         <ul className="needs-boss__list">
           {issues.map((i) => (
