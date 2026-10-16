@@ -59,10 +59,7 @@ DETAIL_KEYS = frozenset({"latency_ms", "probe_model", "models_count", "models_so
                          "expected_masked", "account_match", "code_shape", "credentials_file", "job_status",
                          "exposed_tools", "missing_tools", "target_profile", "from_profile",
                          "login_source", "bot_username", "chat_masked", "opened_from", "access_mode",
-                         "read_scopes", "read_missing", "write_scopes", "write_missing",
-                         # v0.1.59: nguồn của bằng chứng — "provider_test" = ghi tự động từ nút Kiểm tra kết nối của
-                         # nguồn CLI (chuỗi tĩnh, không mang dữ liệu); bản bằng chứng ngầm dùng "model_calls" / key.
-                         "via"})
+                         "read_scopes", "read_missing", "write_scopes", "write_missing"})
 
 SOCIAL_FAILED_MSG = "Lượt đọc Facebook chưa thành công — mở trang Mạng xã hội xem lý do rồi bấm Đọc ngay lần nữa"
 SOCIAL_HALTED_MSG = ("Đọc mạng xã hội đang bị dừng (Dừng tất cả) — bật lại ở trang Tài khoản mạng xã hội rồi bấm "

@@ -699,7 +699,7 @@ async def _record_cli_probe_evidence(db: AsyncSession, user: service.CurrentUser
     API KHÔNG gọi hàm này: test của chúng chỉ liệt kê model, không phải lượt sinh văn bản."""
     from gh.boss_checks import routes as boss_routes
 
-    detail = {**boss_routes._call_detail(result), "via": "provider_test"}
+    detail = boss_routes._call_detail(result)
     await boss_service.record(db, user.org_id, "ai_source", "pass", detail=detail, user_id=user.id)
     await boss_service.record(db, user.org_id, CLI_CALL_CHECK[kind], "pass", detail=detail, user_id=user.id)
     if kind == climod.CLAUDE:

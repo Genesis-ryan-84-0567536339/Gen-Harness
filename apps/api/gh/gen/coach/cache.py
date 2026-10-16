@@ -20,8 +20,9 @@ log = logging.getLogger("gh.gen.coach")
 async def invalidate(redis: Any, org_id: uuid.UUID) -> None:
     """Xoá cache tín hiệu coach của `org_id`. `redis` None hoặc lỗi ⇒ bỏ qua + ghi cảnh báo, không ném."""
     if redis is None:
+        log.warning("Không làm mới được cache Gen hướng dẫn (%s): chưa có Redis", org_id)
         return
     try:
         await redis.delete(CACHE_KEY.format(org_id))
-    except Exception:  # noqa: BLE001 — cache chỉ là tối ưu; lỗi Redis không được chặn thao tác của Sếp
-        log.warning("Không làm mới được cache Gen hướng dẫn (%s)", org_id, exc_info=True)
+    except Exception as exc:  # noqa: BLE001 — cache chỉ là tối ưu; lỗi Redis không được chặn thao tác của Sếp
+        log.warning("Không làm mới được cache Gen hướng dẫn (%s): %s", org_id, type(exc).__name__)
