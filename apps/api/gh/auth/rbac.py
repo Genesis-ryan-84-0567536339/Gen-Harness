@@ -20,12 +20,14 @@ class RoleDef:
     meta: str
 
 
+# v0.1.61 (F107): tên vai trò tiếng Việt ngay ở nguồn — chuông, toast, chân trang, hộp mời đều lấy `core.roles.name` nên
+# mọi màn gọi một tên (migration 0036 đổi tên ở máy đã cài). Mã vai trò (`code`) mới là khoá so sánh; không so theo tên.
 ROLES = (
     RoleDef(OWNER, "Owner — Sếp", "thấy toàn cảnh"),
-    RoleDef(MANAGER, "Manager", "thấy team mình"),
-    RoleDef(OPERATOR, "Operator", "thấy hàng đợi việc"),
-    RoleDef(AGENT_STAFF, "Agent nhân viên", "chỉ khách được phân"),
-    RoleDef(AUDITOR, "Auditor", "xem, không hành động"),
+    RoleDef(MANAGER, "Quản lý", "thấy team mình"),
+    RoleDef(OPERATOR, "Vận hành", "thấy hàng đợi việc"),
+    RoleDef(AGENT_STAFF, "Nhân viên phụ trách", "chỉ khách được phân"),
+    RoleDef(AUDITOR, "Kiểm soát", "xem, không hành động"),
 )
 
 # Cột ma trận của thiết kế → các quyền thuộc cột đó.

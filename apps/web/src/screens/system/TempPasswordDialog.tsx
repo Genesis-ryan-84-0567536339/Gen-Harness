@@ -5,6 +5,7 @@ import { errorDetail } from '../../lib/errorText';
 import { toast } from '../../lib/toast';
 import { COPY_FAILED_TEXT } from './accessModel';
 import { useAccess } from './queries';
+import { roleLabel } from './systemModel';
 import { inviteMessage } from './usersModel';
 
 /**
@@ -95,7 +96,7 @@ export function TempPasswordDialog({ title, result, onClose }: { title: string; 
         <Icon name="ph ph-user-plus" size={15} color="var(--color-accent-300)" />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="invite-result-row__name">
-            {result.user.display_name} · {result.user.role.name}
+            {result.user.display_name} · {roleLabel(result.user.role.code, result.user.role.name)}
           </div>
           <div className="invite-result-row__email">{result.user.email}</div>
         </div>

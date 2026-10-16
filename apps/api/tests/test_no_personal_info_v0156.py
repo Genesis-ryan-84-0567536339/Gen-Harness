@@ -153,7 +153,7 @@ def test_migration_0035_follows_0034_and_has_single_head() -> None:
     script = ScriptDirectory.from_config(cfg)
     rev = script.get_revision("0035")
     assert rev is not None and rev.down_revision == "0034"
-    assert script.get_heads() == ["0035"]
+    assert len(script.get_heads()) == 1   # v0.1.61: đầu cây đã lên 0036; chỉ cần còn đúng một head
 
 
 @pytest.mark.parametrize("name", ["lessons.json", "tips.json"])

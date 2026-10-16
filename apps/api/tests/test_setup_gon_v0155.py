@@ -174,7 +174,7 @@ async def test_step8_template_only_has_no_try_chat_and_step9_defaults(owner_api:
     api: Api = owner_api
     good = await _provider(api, db, "Nguồn tốt", ok=True, tested=["qwen2.5-7b"])
     assert (await api.send("PUT", "/setup/steps/4", {"provider_ids": [good]})).status_code == 200
-    r = await api.send("PUT", "/setup/steps/8", {"template": "sales"})
+    r = await api.send("PUT", "/setup/steps/8", {"template": "commercial"})
     assert r.status_code == 200, r.text
     agent = r.json()["agent"]
     assert agent["name"] == setup_routes.STEP8_DEFAULT_NAME
@@ -182,7 +182,7 @@ async def test_step8_template_only_has_no_try_chat_and_step9_defaults(owner_api:
     assert agent["try_reasons"] == []
     row = (await db.execute(text("SELECT name, role_desc, template FROM agent.identities"))).one()
     assert (row.name, row.role_desc, row.template) == (setup_routes.STEP8_DEFAULT_NAME,
-                                                       setup_routes.STEP8_DEFAULT_ROLE, "sales")
+                                                       setup_routes.STEP8_DEFAULT_ROLE, "commercial")
     assert int((await db.execute(text("SELECT count(*) FROM agent.model_calls"))).scalar_one()) == 0   # không gọi model
     # Bước 9: thiếu `ack_boundaries` hoặc `false` ⇒ API vẫn đòi xác nhận (F-N2: không xác nhận ngầm).
     for body in ({}, {"ack_boundaries": False}, {"autonomy_level": 4}):
