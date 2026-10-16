@@ -62,7 +62,10 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 COPY apps/api/pyproject.toml apps/api/uv.lock ./
 RUN --mount=from=ghcr.io/astral-sh/uv:0.12.23@sha256:61d393e44e249f2e4b526b6c7ddcecce245946826e608e11c93ad4f5bba55b21,source=/uv,target=/usr/local/bin/uv --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --no-install-project
 COPY apps/api/gh ./gh
-RUN --mount=from=ghcr.io/astral-sh/uv:0.12.23@sha256:61d393e44e249f2e4b526b6c7ddcecce245946826e608e11c93ad4f5bba55b21,source=/uv,target=/usr/local/bin/uv --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --no-editable
+# Gói R (rà soát v0.1.62): uv đánh khoá cache wheel của gói cục bộ theo pyproject.toml (không theo mã), nên khi VERSION/
+# pyproject không đổi mà mã `gh` đổi, cache mount dùng lại wheel `gen-harness-api` CŨ ⇒ ảnh chạy mã cũ (đã gặp trên dev:
+# site-packages lệch 14 tệp). `--reinstall-package` (kèm làm mới cache của gói đó) buộc dựng lại wheel từ mã vừa COPY.
+RUN --mount=from=ghcr.io/astral-sh/uv:0.12.23@sha256:61d393e44e249f2e4b526b6c7ddcecce245946826e608e11c93ad4f5bba55b21,source=/uv,target=/usr/local/bin/uv --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --no-editable --reinstall-package gen-harness-api
 COPY apps/api/alembic.ini ./
 COPY apps/api/migrations ./migrations
 COPY db/sql /app/db/sql

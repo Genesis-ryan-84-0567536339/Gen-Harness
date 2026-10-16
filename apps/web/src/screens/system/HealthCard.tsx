@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { PinCancelledError, type SystemHealth } from '@gen-harness/contracts';
 import { Button } from '@gen-harness/ui';
-import { errorText } from '../../lib/errorText';
+import { errorDetail, errorText } from '../../lib/errorText';
 import { useCan, useOrgTimezone } from '../../lib/permissions';
 import { useMe } from '../../lib/queries';
 import { useNow } from '../../lib/useNow';
@@ -190,7 +190,9 @@ function QueueActions({ queues, canManage }: { queues: HealthQueue[]; canManage:
         </p>
       ) : null}
       {failed ? (
-        <InlineError>{failed instanceof PinCancelledError ? 'Chưa làm — cần nhập mã PIN.' : errorText(failed)}</InlineError>
+        <InlineError detail={errorDetail(failed)}>
+          {failed instanceof PinCancelledError ? 'Chưa làm — cần nhập mã PIN.' : errorText(failed)}
+        </InlineError>
       ) : null}
     </div>
   );

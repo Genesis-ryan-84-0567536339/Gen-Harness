@@ -165,6 +165,15 @@ async def test_people_search_cannot_probe_masked_digits_for_non_owner(owner_api:
     assert shown["total"] == 1                                 # Owner thấy đủ
     by_code = (await operator.get("/directory/people?q=PT-SO1")).json()
     assert by_code["total"] == 1 and "0912345678" not in by_code["items"][0]["name"]
+    # Cửa sổ 1–3 chữ số cũng không được dò: mask_text để lộ 3 số cuối, nên chỉ cần dò từng cửa sổ 3 số là dựng lại được.
+    for window in ("678", "912", "5", "345", "0"):
+        probe = (await operator.get(f"/directory/people?q={window}")).json()
+        assert probe["total"] == 0, window
+        owner_probe = (await owner_api.get(f"/directory/people?q={window}")).json()
+        assert owner_probe["total"] >= 1, window                 # Owner vẫn tìm theo tên có số
+    # Tên không có chữ số vẫn tìm được với vai dưới Owner
+    plain = (await operator.get("/directory/people?q=Khách")).json()
+    assert plain["total"] >= 1
 
 
 # ═══ Thao tác BOT hàng loạt theo bộ lọc ═════════════════════════════════════

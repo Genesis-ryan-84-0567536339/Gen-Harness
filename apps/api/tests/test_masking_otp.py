@@ -36,6 +36,20 @@ THU_CO_BI_MAT = [
     ("https://x.example.com/cb?access_token=abcDEF123456&state=1", "abcDEF123456"),
     ("https://x.example.com/u?API_KEY=k3y-v4lue-0001", "k3y-v4lue-0001"),
     ("Mở https://x.example.com/reset-password/Qm9zc1NlY3JldFRva2VuMTIz để đặt lại", "Qm9zc1NlY3JldFRva2VuMTIz"),
+    # Gói R (rà soát v0.1.62): biến thể có từ đệm lạ, không dấu, từ khoá kích hoạt/truy cập, fragment URL
+    ("Ma OTP giao dich cua Quy khach la 123456", "123456"),
+    ("Mã xác thực (OTP) của bạn là 123456", "123456"),
+    ("Mã OTP giao dịch của Quý khách là 654321", "654321"),
+    ("Ma kich hoat cua ban la 123456", "123456"),
+    ("Mã kích hoạt: 123456", "123456"),
+    ("Mã truy cập: 123456", "123456"),
+    ("Ma dang nhap 1234", "1234"),
+    ("Mã đăng nhập 1234", "1234"),
+    ("Your OTP for login is 482193", "482193"),
+    ("mật khẩu wifi: abc12345", "abc12345"),
+    ("Wifi password: abc12345", "abc12345"),
+    ("https://x.example.com/cb#access_token=abcDEF123456&state=1", "abcDEF123456"),
+    ("https://x.example.com/cb#state=1&id_token=eyJabc123def456", "eyJabc123def456"),
 ]
 
 # Thư thường: KHÔNG được bị che oan (nội dung còn đọc được để Gen tóm tắt/soạn trả lời)
@@ -48,6 +62,14 @@ THU_THUONG = [
     "Mã đơn hàng ABC-1234 đã giao.",
     "Xem tại https://example.com/bao-cao?trang=2&lang=vi",
     "Code review hôm nay lúc 3 giờ chiều.",
+    # Gói R: không che oan pin pin/điện thoại, năm, mã giảm giá ngắn
+    "Điện thoại pin 10000mAh sạc nhanh.",
+    "Pin: 5000 mAh, dùng được 2 ngày.",
+    "Pin 4500mAh giá 3 triệu.",
+    "Cập nhật code 2024 cho kịp tiến độ.",
+    "Nhập code 1505 để được giảm 10%.",
+    "Mật khẩu của bạn đã được đổi lúc 14:30.",
+    "https://example.com/bai-viet#phan-2024",
 ]
 
 
