@@ -16,6 +16,11 @@ F-22 "agy chỉ cho Gen của Owner" của v0.1.38 bị gỡ). Rủi ro còn l�
 container với khoá hệ thống, nội dung bên ngoài có thể lừa nó đọc tệp trong container. Lớp cô lập mỗi lượt của
 `AgyClient` vẫn giữ nguyên; bước kế tiếp: tách agy ra container riêng không gắn khoá.
 
+Gói G (16/10/2026) — agy PHÂN LỚP: lớp core (core.gen của Owner, core.briefing, core.refinery, agent nội bộ) dùng được
+agy; lớp ngoại giao (core.reply, agent gắn kênh / nhóm / người) và Gen của người dùng không phải Owner thì không.
+Quyết định nằm ở MỘT hàm `gh.providers.agy_policy.decide`; `resolve` / `missing_reason` / `choice_options` nhận kết
+quả đó (`agy=`) và loại nguồn Antigravity CLI khỏi hồ sơ tiêu chuẩn của khoá bị chặn.
+
 `resolve()` THUẦN (không DB) để test ma trận; phần truy vấn DB nằm ở `load_rows` / `standard_for` / `choice_options`.
 """
 
@@ -27,7 +32,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gh.providers import catalog
+from gh.providers import agy_policy, catalog
 
 KIND_CLAUDE = "claude_code_cli"
 KIND_AGY = "antigravity_cli"
@@ -160,19 +165,21 @@ def _rank_key(p: Any) -> tuple[int, int]:
     return (1, 0) if r is None else (0, int(r))
 
 
-def provider_allowed(kind: str, *, bg: bool, bg_cli_allowed: set[str] | frozenset[str]) -> bool:
+def provider_allowed(kind: str, *, bg: bool, bg_cli_allowed: set[str] | frozenset[str],
+                     agy_ok: bool = True) -> bool:
     """Luật cứng F-86 cho MỘT loại nguồn (hồ sơ tiêu chuẩn chỉ chọn trong phạm vi này). v0.1.62: Antigravity CLI dùng
     được ở mọi vai kể cả việc nền (Owner chọn mở ngày 16/10/2026); Claude Code CLI vẫn chỉ khi Owner cho phép việc
-    nền."""
+    nền. Gói G: `agy_ok=False` (quyết định `agy_policy.decide` cho khoá này là KHÔNG) ⇒ loại Antigravity CLI."""
     if kind == KIND_AGY:
-        return True
+        return agy_ok
     if kind == KIND_CLAUDE:
         return (not bg) or kind in bg_cli_allowed
     return kind in API_KINDS
 
 
 def resolve(providers_rows: Sequence[Any], models_rows: Sequence[Any], agent_key: str, *, background: bool,
-            bg_cli_allowed: set[str] | frozenset[str], tier_override: str | None = None) -> list[dict[str, Any]]:
+            bg_cli_allowed: set[str] | frozenset[str], tier_override: str | None = None,
+            agy: agy_policy.AgyVerdict | None = None) -> list[dict[str, Any]]:
     """Hồ sơ tiêu chuẩn của MỘT vai → danh sách ứng viên (nguồn + model), THỨ TỰ theo hạng nguồn (failover_rank).
 
     - `providers_rows`: id, kind, name, is_enabled (mặc định True), failover_rank, has_key (chỉ nguồn khoá API; vắng =
@@ -181,10 +188,13 @@ def resolve(providers_rows: Sequence[Any], models_rows: Sequence[Any], agent_key
       nền.
     - `bg_cli_allowed`: CLI Owner đã cho chạy việc nền (chỉ `claude_code_cli`; Antigravity CLI không cần cho phép).
     - `tier_override`: ép tầng (chat chọn Nhanh / Cân bằng / Kỹ hơn) — vẫn tôn trọng mọi luật trên.
+    - `agy`: quyết định `agy_policy.decide` cho khoá này (gói G). Bỏ trống ⇒ tính tĩnh từ khoá (`core.reply` bị chặn;
+      agent ngoại giao / Gen nhân viên cần bên gọi truyền vì phải tra DB).
     Hàm thuần: không DB, không Redis. Thiếu tầng ⇒ tầng gần nhất; KHÔNG tự thêm dòng model."""
     role = role_of(agent_key)
     if role is None:
         return []
+    agy_ok = (agy or agy_policy.decide(agent_key)).allowed
     forced = normalize_tier(tier_override)
     bg = background or role in BACKGROUND_ROLES
     by_provider: dict[str, list[Any]] = {}
@@ -199,7 +209,7 @@ def resolve(providers_rows: Sequence[Any], models_rows: Sequence[Any], agent_key
             continue
         if kc == KIND_API and _g(p, "has_key", True) is False:
             continue
-        if not provider_allowed(kind, bg=bg, bg_cli_allowed=bg_cli_allowed):
+        if not provider_allowed(kind, bg=bg, bg_cli_allowed=bg_cli_allowed, agy_ok=agy_ok):
             continue
         wanted = forced or prof.tier
         picked = pick_model(kind, by_provider.get(str(_g(p, "id")), []), wanted)
@@ -215,12 +225,13 @@ def resolve(providers_rows: Sequence[Any], models_rows: Sequence[Any], agent_key
 
 
 REASON_NEED_API = "cần khoá API hoặc đăng nhập Antigravity CLI"
-REASON_NEED_API_OR_CLAUDE = "cần khoá API, Antigravity CLI hoặc Claude Code CLI"
+REASON_NEED_API_OR_CLAUDE = "cần khoá API hoặc Claude Code CLI"      # core.reply: agy chưa dùng (gói G)
 REASON_NO_SOURCE = "chưa có nguồn phù hợp"
 
 
 def missing_reason(providers_rows: Sequence[Any], models_rows: Sequence[Any], agent_key: str,
-                   bg_cli_allowed: set[str] | frozenset[str] = frozenset()) -> str:
+                   bg_cli_allowed: set[str] | frozenset[str] = frozenset(),
+                   agy: agy_policy.AgyVerdict | None = None) -> str:
     """v0.1.58 — vì sao `resolve()` không ra ứng viên cho vai này (hàm thuần, KHÔNG đổi `resolve` / `pick_model`).
 
     Gọi khi `resolve` rỗng; câu trả về nối sau "Chuẩn: " ở web. Thứ tự:
@@ -228,12 +239,16 @@ def missing_reason(providers_rows: Sequence[Any], models_rows: Sequence[Any], ag
        ở <nguồn>" (đường tự sửa của Sếp);
     2. vai nền không có nguồn dùng được ⇒ "cần khoá API hoặc đăng nhập Antigravity CLI" (v0.1.62: Antigravity CLI
        chạy được việc nền; Claude Code CLI chỉ khi Owner cho phép nên không gợi ý ở đây);
-    3. trả lời lại / soạn nháp (core.reply) ⇒ "cần khoá API, Antigravity CLI hoặc Claude Code CLI";
-    4. còn lại ⇒ "chưa có nguồn phù hợp"."""
+    3. (gói G) khoá bị chặn agy mà có nguồn Antigravity CLI đang bật ⇒ nêu đúng lý do chặn (`agy.reason`: ngoại giao /
+       Gen nhân viên) thay vì gợi ý đăng nhập lại Antigravity;
+    4. trả lời lại / soạn nháp (core.reply) ⇒ "cần khoá API hoặc Claude Code CLI" (agy chưa dùng cho việc này);
+    5. còn lại ⇒ "chưa có nguồn phù hợp"."""
     role = role_of(agent_key)
     if role is None:
         return REASON_NO_SOURCE
+    verdict = agy or agy_policy.decide(agent_key)
     bg = role_background(agent_key)
+    agy_blocked_here = False
     has_model = {str(_g(m, "provider_id")) for m in models_rows if _model_ok(m)}
     for p in sorted(providers_rows, key=_rank_key):
         kind = str(_g(p, "kind", ""))
@@ -242,12 +257,15 @@ def missing_reason(providers_rows: Sequence[Any], models_rows: Sequence[Any], ag
             continue
         if kc == KIND_API and _g(p, "has_key", True) is False:
             continue
-        if not provider_allowed(kind, bg=bg, bg_cli_allowed=bg_cli_allowed):
+        if not provider_allowed(kind, bg=bg, bg_cli_allowed=bg_cli_allowed, agy_ok=verdict.allowed):
+            agy_blocked_here = agy_blocked_here or (kind == KIND_AGY and not verdict.allowed)
             continue
         if str(_g(p, "id")) not in has_model:
             if kc == KIND_API:   # adopt chỉ cho CLI ⇒ nguồn khoá API không có nút tự thêm model
                 return f"chưa chọn model ở {_g(p, 'name') or kind}"
             return f"chưa có model — bấm Kiểm tra kết nối ở {_g(p, 'name') or kind}"
+    if agy_blocked_here and verdict.reason:
+        return verdict.reason
     if bg:
         return REASON_NEED_API
     if role == ROLE_REPLY:
@@ -295,17 +313,21 @@ def role_background(agent_key: str) -> bool:
 async def standard_with_reasons(
         db: AsyncSession, org_id: uuid.UUID, agent_keys: Sequence[str],
 ) -> tuple[dict[str, dict[str, Any] | None], dict[str, str | None]]:
-    """Như `standard_for` + (v0.1.58) LÝ DO khi một vai chưa có model chuẩn (`missing_reason`; vai đã có ⇒ None)."""
+    """Như `standard_for` + (v0.1.58) LÝ DO khi một vai chưa có model chuẩn (`missing_reason`; vai đã có ⇒ None).
+    Gói G: mỗi khoá được hỏi `agy_policy.decide` (agent ngoại giao tra DB một lần) — khoá bị chặn không nhận Antigravity
+    CLI làm model chuẩn. Hiển thị (tên "Chuẩn: …") là mặt nhìn của Owner nên `owner=True`."""
     from gh.providers.router import background_cli_allowed
 
     providers, models = await load_rows(db, org_id)
     bg_cli = await background_cli_allowed(db, org_id)
+    verdicts = await agy_policy.verdicts_for(db, org_id, list(agent_keys))
     std: dict[str, dict[str, Any] | None] = {}
     why: dict[str, str | None] = {}
     for key in agent_keys:
-        cands = resolve(providers, models, key, background=role_background(key), bg_cli_allowed=bg_cli)
+        cands = resolve(providers, models, key, background=role_background(key), bg_cli_allowed=bg_cli,
+                        agy=verdicts[key])
         std[key] = cands[0] if cands else None
-        why[key] = None if cands else missing_reason(providers, models, key, bg_cli)
+        why[key] = None if cands else missing_reason(providers, models, key, bg_cli, verdicts[key])
     return std, why
 
 
@@ -330,15 +352,17 @@ def standard_text(c: dict[str, Any] | None, reason: str | None = None) -> str:
     return f"Chuẩn: {reason or REASON_NO_SOURCE}" if c is None else f"Chuẩn: {c['model_name']} (tự chọn)"
 
 
-async def choice_options(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
+async def choice_options(db: AsyncSession, org_id: uuid.UUID, *, owner: bool = True) -> dict[str, Any]:
     """Tầng + mức suy nghĩ mà khung chat (G3) được phép mời người hỏi chọn — hợp đồng G1 → G3.
 
     `{'tiers': [{'tier': 'auto'|'fast'|'balanced'|'deep', 'available': bool, 'efforts': [...]}]}`; 'deep' ↔ tầng
     'strong'. Một tầng `available` khi có nguồn DÙNG ĐƯỢC (đang bật; khoá API có khoá; CLI chưa hết hạn đăng nhập) có
-    model đã bật ở đúng tầng đó. v0.1.62: Antigravity CLI dùng được cho mọi người hỏi (Owner lẫn nhân viên, kể cả lượt
-    đã đọc nội dung bên ngoài) nên không còn tham số `owner` / `tainted`. 'auto' (Tự động, chuẩn) khả dụng khi có
-    bất kỳ nguồn nào. `efforts` ⊆ low/medium/high mà các model CLI của tầng ấy hỗ trợ (khoá API: rỗng)."""
+    model đã bật ở đúng tầng đó. v0.1.62: Antigravity CLI không phụ thuộc nội dung bên ngoài (không còn `tainted`).
+    Gói G: `owner=False` (người hỏi là nhân viên) ⇒ `agy_policy.decide("core.gen", owner=False)` chặn Antigravity CLI
+    nên mọi tầng chỉ tính nguồn khác. 'auto' (Tự động, chuẩn) khả dụng khi có bất kỳ nguồn nào. `efforts` ⊆
+    low/medium/high mà các model CLI của tầng ấy hỗ trợ (khoá API: rỗng)."""
     providers, models = await load_rows(db, org_id)
+    agy_ok = agy_policy.decide("core.gen", owner=owner).allowed
     by_provider: dict[str, list[dict[str, Any]]] = {}
     for m in models:
         by_provider.setdefault(str(m["provider_id"]), []).append(m)
@@ -347,6 +371,8 @@ async def choice_options(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
     any_source = False
     for p in providers:
         kind = str(p["kind"])
+        if kind == KIND_AGY and not agy_ok:
+            continue
         if kind in API_KINDS and not p["has_key"]:
             continue
         if kind in CLI_KINDS and p.get("auth_state") == "expired":

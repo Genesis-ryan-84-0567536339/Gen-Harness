@@ -336,10 +336,11 @@ def stub_model_options() -> dict[str, Any]:
     return {"tiers": [{"tier": t, "available": True, "efforts": []} for t in ("auto", "fast", "balanced", "deep")]}
 
 
-async def model_options(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
-    """Tầng + mức suy nghĩ khung chat được mời chọn (hợp đồng G1: `gh.defaults.profiles.choice_options`)."""
+async def model_options(db: AsyncSession, org_id: uuid.UUID, *, owner: bool = True) -> dict[str, Any]:
+    """Tầng + mức suy nghĩ khung chat được mời chọn (hợp đồng G1: `gh.defaults.profiles.choice_options`). Gói G:
+    `owner=False` (nhân viên) ⇒ nguồn Antigravity CLI không được tính (Gen của nhân viên không dùng agy)."""
     try:
-        out = await profiles.choice_options(db, org_id)
+        out = await profiles.choice_options(db, org_id, owner=owner)
     except Exception:  # noqa: BLE001 — khung chọn model không được làm hỏng màn Gen
         log.warning("Không tra được tầng model cho khung chat Gen", exc_info=True)
         return stub_model_options()
@@ -384,10 +385,14 @@ def resolve_model_choice(choice: Mapping[str, Any] | None, *,
     return ROUTER_TIER[tier], (str(effort) if effort in efforts else None), None
 
 
-def _tier_kw(router: Any, tier: str | None, effort: str | None) -> dict[str, str]:
-    """`tier` / `effort` chỉ truyền cho bộ định tuyến NHẬN tham số đó (bộ giả của test cũ không nhận; ModelRouter chưa
-    có tham số này cũng không) — `ModelRouter.generate(tier=, effort=)` thật luôn nhận."""
-    want = {k: v for k, v in (("tier", tier), ("effort", effort)) if v}
+def _tier_kw(router: Any, tier: str | None, effort: str | None, *, owner: bool = True) -> dict[str, Any]:
+    """`tier` / `effort` / `owner` chỉ truyền cho bộ định tuyến NHẬN tham số đó (bộ giả của test cũ không nhận;
+    ModelRouter chưa có tham số này cũng không) — `ModelRouter.generate(tier=, effort=, owner=)` thật luôn nhận.
+    Gói G: `owner=False` (nhân viên hỏi Gen) được truyền để bộ định tuyến không chạy Antigravity CLI; Owner (mặc định)
+    không cần truyền."""
+    want: dict[str, Any] = {k: v for k, v in (("tier", tier), ("effort", effort)) if v}
+    if not owner:
+        want["owner"] = False
     if not want:
         return {}
     try:
@@ -560,13 +565,13 @@ async def _run(turn: Turn, *, app: Any, router: ModelRouter, session_token: str,
     route = "default"
     if not auto:
         async with turn.sm() as db:
-            options = await model_options(db, user.org_id)
+            options = await model_options(db, user.org_id, owner=is_owner)
         tier, effort, notice = resolve_model_choice(choice, options=options)
         if notice:
             await turn.emit({"kind": "notice", "text": notice})  # chuỗi thuần — web hiện một dòng nhỏ
     elif intent.value == "data" and decmod.is_simple_question(inp.text):
         async with turn.sm() as db:
-            options = await model_options(db, user.org_id)
+            options = await model_options(db, user.org_id, owner=is_owner)
         if tier_available(options, "fast"):
             tier, route = ROUTER_TIER["fast"], "fast"
     await _log_decide(turn, intent, route)
@@ -577,7 +582,7 @@ async def _run(turn: Turn, *, app: Any, router: ModelRouter, session_token: str,
                 Message("user", inp.text[:4000])]
     # v0.1.62: Antigravity CLI dùng được cho mọi người hỏi (Owner lẫn nhân viên) và cả lượt đã đọc nội dung bên ngoài
     # (luật F-22 đã gỡ). v0.1.55 (G3): tầng / mức suy nghĩ đã chọn (hoặc J3 chọn Nhanh).
-    route_kw: dict[str, Any] = _tier_kw(router, tier, effort)
+    route_kw: dict[str, Any] = _tier_kw(router, tier, effort, owner=is_owner)
     retried = False
     for _ in range(MAX_ROUNDS):
         try:

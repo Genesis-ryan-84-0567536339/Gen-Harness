@@ -26,6 +26,11 @@ cụ đọc tệp / chạy lệnh, chạy cùng container với khoá hệ thố
 container) và chọn "mở thẳng" thay vì "tách agy ra hộp riêng". Rủi ro CÒN LẠI nằm ở đó; lớp cô lập mỗi lượt của
 `AgyClient` (cwd rỗng 0700, env sạch, prompt qua stdin, regex tên model) vẫn giữ. Bước kế tiếp (chưa làm): tách agy ra
 container riêng không gắn khoá.
+
+Gói G (16/10/2026) — agy PHÂN LỚP (quyết định của Sếp): lớp core dùng agy; lớp ngoại giao (`core.reply`, agent gắn
+kênh / nhóm / người) và Gen của người dùng không phải Owner thì KHÔNG (tham số `owner` của `generate`). MỘT hàm quyết
+định: `gh.providers.agy_policy.decide` (tiêu chí "agent ngoại giao" nằm ở đó); bộ định tuyến gỡ Antigravity CLI khỏi
+chuỗi của khoá bị chặn — kể cả dòng gán agy cũ — và ghi lý do vào `reasons`.
 """
 
 import asyncio
@@ -46,7 +51,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from gh import crypto
 from gh.config import get_settings
 from gh.defaults import profiles
-from gh.providers import catalog
+from gh.providers import agy_policy, catalog
 from gh.providers.clients import (
     AgyClient,
     AuthFailed,
@@ -75,6 +80,12 @@ CLI_KINDS = ("antigravity_cli", "claude_code_cli")
 PROBE_PROMPT = "Trả lời đúng một chữ: OK"
 # Lịch sử: v0.1.38 (F-22) từng giới hạn agy chỉ cho lượt Gen của Owner (`allow_agy`, `AGY_OWNER_ONLY_REASON`,
 # `agy_only`…). Owner chọn mở thẳng ngày 16/10/2026 sau khi được báo rủi ro ⇒ v0.1.62 gỡ toàn bộ (xem docstring module).
+#: Gói G (P3): trần thời gian MỘT lượt agy của việc nền (giây). Việc nền chạy trong job worker (`gh.worker.JOB_TIMEOUT`
+#: = 300s) và gọi agy TUẦN TỰ (lô sàng lọc: mỗi phần lô một lượt, JSON sai thì gọi lại một lượt nữa) — AgyClient mặc
+#: định 300s bằng đúng JOB_TIMEOUT nên một lượt treo ăn trọn job và job bị arq giết giữa chừng (bản ghi kẹt "đang xử
+#: lý"). 90s × 3 lượt < 300s: lượt quá hạn ném ProviderError sớm, bộ định tuyến chuyển nguồn / trả ModelUnavailable,
+#: runner kịp nhả bản ghi và job kết thúc có kiểm soát. Lượt Gen của Sếp (không nền, chạy ở api) giữ 300s.
+AGY_BACKGROUND_TIMEOUT_S = 90.0
 PROBE_TIMEOUT_S = 90.0
 #: Số lượt gọi CLI tối đa của một lần "Kiểm tra kết nối" (kể cả lượt thử lại khi CLI đòi / không nhận mức suy nghĩ).
 PROBE_MAX_CALLS = 4
@@ -351,7 +362,7 @@ class ModelRouter:
     # ─── chuỗi ───────────────────────────────────────────────────────────────
 
     async def _chain(self, db: AsyncSession, org_id: uuid.UUID, agent_key: str, *,
-                     tier: str | None = None) -> list[dict[str, Any]]:
+                     tier: str | None = None, agy: agy_policy.AgyVerdict | None = None) -> list[dict[str, Any]]:
         """Chuỗi nguồn + model cho `agent_key` (v0.1.55: binding → hồ sơ tiêu chuẩn → hạng nhà cung cấp):
 
         1. dòng `agent.bindings` Owner đã đổi — luôn đứng đầu (kèm `bindings.effort`); lượt gọi ép `tier` (chat chọn
@@ -361,6 +372,8 @@ class ModelRouter:
            khi lượt gọi ép tầng;
         3. phần đuôi như cũ: model mặc định theo hạng của các nguồn còn lại/chưa dùng (để lỗi tầng đã chọn vẫn còn đường
            lui).
+        Gói G: `agy` (quyết định `agy_policy.decide` của khoá này; bỏ trống ⇒ tự tra, người hỏi mặc định Owner) không
+        cho phép ⇒ nguồn Antigravity CLI bị gỡ KHỎI chuỗi (cả dòng gán agy cũ, cả phần đuôi).
         Luật F-86 KHÔNG lọc ở đây: `generate` bỏ qua Claude Code CLI khi việc nền chưa được phép và ghi LÝ DO vào
         `reasons`/hết chuỗi.
 
@@ -372,6 +385,9 @@ class ModelRouter:
             SELECT id, kind, name, endpoint, auth_state, failover_rank FROM agent.providers
             WHERE org_id = :o AND is_enabled AND kind NOT IN ('embedding', 'system_one')
             ORDER BY failover_rank NULLS LAST, created_at"""), {"o": org_id})).all()
+        verdict = agy if agy is not None else await agy_policy.verdict_for(db, org_id, agent_key)
+        if not verdict.allowed:
+            providers = [p for p in providers if p.kind != agy_policy.KIND_AGY]
         models = (await db.execute(text("""
             SELECT m.id, m.provider_id, m.model_name, m.effort, m.daily_quota, m.rate_limit_per_min, m.is_default,
                    m.is_enabled
@@ -387,7 +403,8 @@ class ModelRouter:
         # Chọn model theo hồ sơ cho MỌI nguồn (luật F-86 của Claude Code CLI do `generate` áp — nên cho hồ sơ xét cả CLI
         # ở đây).
         picked = {c["provider_id"]: c for c in profiles.resolve(
-            providers, models, agent_key, background=False, bg_cli_allowed={"claude_code_cli"}, tier_override=tier)}
+            providers, models, agent_key, background=False, bg_cli_allowed={"claude_code_cli"}, tier_override=tier,
+            agy=verdict)}
         keys_cache: dict[Any, list[Any]] = {}
 
         async def keys_of(pid: Any) -> list[Any]:
@@ -434,9 +451,13 @@ class ModelRouter:
                 chain.append(lk)
         return chain
 
-    def _client(self, p: Any, secret: str | None) -> Any:
+    def _client(self, p: Any, secret: str | None, *, background: bool = False) -> Any:
         if p.kind == "antigravity_cli":
-            return self.cli_factory()
+            client = self.cli_factory()
+            if background and hasattr(client, "timeout"):
+                # Gói G (P3): việc nền chạy trong job worker có JOB_TIMEOUT 300s — một lượt agy treo 300s ăn trọn job.
+                client.timeout = min(float(client.timeout), AGY_BACKGROUND_TIMEOUT_S)
+            return client
         if p.kind == "claude_code_cli":
             return self.claude_factory()
         if p.kind == "gemini":
@@ -517,8 +538,12 @@ class ModelRouter:
 
     async def generate(self, org_id: uuid.UUID, *, agent_key: str, purpose: str, messages: list[Message],
                        json_mode: bool = True, temperature: float = 0.2,
-                       tier: str | None = None, effort: str | None = None) -> Routed:
-        """v0.1.62: Antigravity CLI dùng được ở MỌI lượt gọi (không còn tham số `allow_agy` — Owner mở thẳng ngày
+                       tier: str | None = None, effort: str | None = None, owner: bool = True) -> Routed:
+        """Gói G: `owner` = người hỏi là Owner (mặc định True: việc nền / hệ thống không có người hỏi). Chỉ `core.gen`
+        phân biệt — Gen của nhân viên (`owner=False`) không dùng Antigravity CLI. Khoá `core.reply` và agent ngoại
+        giao cũng không dùng agy (`agy_policy.decide`, kể cả khi có dòng gán agy cũ).
+
+        v0.1.62: Antigravity CLI dùng được ở MỌI lượt gọi (không còn tham số `allow_agy` — Owner mở thẳng ngày
         16/10/2026, xem docstring module).
 
         v0.1.41 (F-86): việc nền (`is_background(purpose)`) bỏ qua Claude Code CLI trừ khi Owner đã cho phép
@@ -530,13 +555,16 @@ class ModelRouter:
         nguồn cho việc nền ⇒ giữ hành vi cũ (hết chuỗi → ModelUnavailable / bản tin để trống), KHÔNG tự chuyển sang
         Claude Code CLI."""
         background = is_background(purpose)
-        async with self.sm() as db:
-            chain = await self._chain(db, org_id, agent_key, tier=tier)
-            bg_cli = await background_cli_allowed(db, org_id) if background else set()
-        if not chain and await self._heal_agy(org_id):
-            async with self.sm() as db:
-                chain = await self._chain(db, org_id, agent_key, tier=tier)
         reasons: list[str] = []
+        async with self.sm() as db:
+            verdict = await agy_policy.verdict_for(db, org_id, agent_key, owner=owner)
+            chain = await self._chain(db, org_id, agent_key, tier=tier, agy=verdict)
+            bg_cli = await background_cli_allowed(db, org_id) if background else set()
+            if not verdict.allowed and verdict.reason and await self._agy_enabled(db, org_id):
+                reasons.append(verdict.reason)          # Antigravity có trong cấu hình nhưng khoá này không được dùng
+        if not chain and verdict.allowed and await self._heal_agy(org_id):
+            async with self.sm() as db:
+                chain = await self._chain(db, org_id, agent_key, tier=tier, agy=verdict)
         # v0.1.55 (F-R3): nguồn đã lỗi Ở CẤP NGUỒN (mạng / 5xx / quá giờ, hoặc CLI hết phiên đăng nhập) trong lượt này
         # ⇒ bỏ mọi mắt xích sau của CÙNG nguồn (phần đuôi `_chain` có thể trỏ model khác của nguồn đó): gọi lại chỉ
         # nhân đôi thời gian chờ, dòng `model_calls` lỗi và số đếm ngắt mạch. Lỗi cấp MODEL (BadRequest/ModelRejected,
@@ -583,7 +611,7 @@ class ModelRouter:
                 try:
                     eff, implicit = self._effort(agent_key, p, m, link, effort)
                     c = await self._complete(p, secret, m, messages, json_mode=json_mode, temperature=temperature,
-                                             effort=eff, implicit=implicit)
+                                             effort=eff, implicit=implicit, background=background)
                 except RateLimited as e:
                     await self._record(org_id, m.id, kid, agent_key, purpose, "rate_limited", started, None)
                     if key is not None:
@@ -625,6 +653,12 @@ class ModelRouter:
                 return Routed(c.text, p.name, m.model_name, c.tokens_in, c.tokens_out, reasons)
         await self._chain_exhausted(org_id, reasons, purpose=purpose)
         raise ModelUnavailable(reasons, no_chain=not chain)
+
+    @staticmethod
+    async def _agy_enabled(db: AsyncSession, org_id: uuid.UUID) -> bool:
+        return bool((await db.execute(text("""SELECT EXISTS (SELECT 1 FROM agent.providers
+                                               WHERE org_id = :o AND is_enabled AND kind = 'antigravity_cli')"""),
+                                      {"o": org_id})).scalar_one())
 
     async def _heal_agy(self, org_id: uuid.UUID) -> bool:
         """v0.1.58 — tự lành khi chuỗi rỗng; v0.1.62: mọi vai kể cả việc nền (agy mở cho mọi vai). Nguồn Antigravity CLI
@@ -681,11 +715,11 @@ class ModelRouter:
         return None, False
 
     async def _complete(self, p: Any, secret: str | None, m: Any, messages: list[Message], *, json_mode: bool,
-                        temperature: float, effort: str | None, implicit: bool) -> Completion:
+                        temperature: float, effort: str | None, implicit: bool, background: bool = False) -> Completion:
         """Một lượt gọi model. Mức suy nghĩ do HỒ SƠ tự thêm (`implicit`) mà CLI không nhận cho model này thì gọi lại
         một lần KHÔNG gửi mức — hồ sơ tiêu chuẩn không bao giờ làm hỏng lượt gọi chỉ vì mức suy nghĩ. v0.1.58: ngược
         lại, CHƯA gửi mức mà CLI đòi mức (agy: `available: low, medium, high`) thì gọi lại một lần với mức hợp lệ."""
-        client = self._client(p, secret)
+        client = self._client(p, secret, background=background)
         extra = {"effort": effort} if effort else {}
         try:
             c: Completion = await client.generate(m.model_name, messages, json_mode=json_mode,

@@ -69,7 +69,11 @@ def plugins_root() -> Path:
     return Path("/app/plugins")
 
 
-async def bootstrap(db: AsyncSession, *, manifests: list[Manifest] | None = None) -> BootstrapResult:
+async def bootstrap(db: AsyncSession, *, manifests: list[Manifest] | None = None,
+                    mint_setup_code: bool = True) -> BootstrapResult:
+    """`mint_setup_code=False` (worker): KHÔNG sinh / ghi đè mã thiết lập — chỉ api sinh và giao mã (P2-2, A10). Worker
+    khởi động sau api mà sinh mã mới sẽ ghi đè hash ⇒ mã trong `run/setup-code.json` sai. Mọi phần khác của bootstrap
+    (quyền, ranh giới, plugin, tầng dữ liệu, vô hiệu mã khi Owner đã tạo) vẫn chạy ở cả hai tiến trình."""
     await db.execute(text("SELECT pg_advisory_xact_lock(hashtext('gh.bootstrap'))"))
     org_id = (await db.execute(text("SELECT id FROM core.organizations ORDER BY created_at LIMIT 1"))).scalar()
     if org_id is None:
@@ -82,7 +86,7 @@ async def bootstrap(db: AsyncSession, *, manifests: list[Manifest] | None = None
     await _boundaries(db, org_id)
     await _core_plugins(db, manifests if manifests is not None else read_manifests(plugins_root()))
     await _data_layer(db, org_id)
-    token, finished = await _setup_state(db, org_id)
+    token, finished = await _setup_state(db, org_id, mint=mint_setup_code)
     return BootstrapResult(org_id=org_id, setup_token=token, setup_finished=finished)
 
 
@@ -165,7 +169,7 @@ async def _data_layer(db: AsyncSession, org_id: uuid.UUID) -> None:
                                      VALUES (:o, :d, :w, '2000-01-01')"""), {"o": org_id, "d": dim, "w": pct / 100})
 
 
-async def _setup_state(db: AsyncSession, org_id: uuid.UUID) -> tuple[str | None, bool]:
+async def _setup_state(db: AsyncSession, org_id: uuid.UUID, *, mint: bool = True) -> tuple[str | None, bool]:
     row = (await db.execute(text("SELECT finished_at, completed FROM ops.setup_state WHERE org_id = :o"),
                             {"o": org_id})).one_or_none()
     if row is None:
@@ -181,6 +185,8 @@ async def _setup_state(db: AsyncSession, org_id: uuid.UUID) -> tuple[str | None,
         with contextlib.suppress(OSError):
             (run_root() / SETUP_CODE_FILE).unlink(missing_ok=True)
         return None, finished
+    if not mint:
+        return None, False        # worker: mã (nếu có) do api đã sinh / giao — không đụng hash, không ghi tệp
     configured = get_settings().setup_token
     token = configured or new_token(9)
     await db.execute(text("UPDATE ops.setup_state SET setup_token_hash = :h WHERE org_id = :o"),

@@ -60,9 +60,9 @@ async def gen_user(user: service.CurrentUser = Depends(current_user), db: AsyncS
 
 async def _settings_out(db: AsyncSession, user: service.CurrentUser) -> dict[str, Any]:
     cfg = await store.get_settings(db, user.org_id)
-    # v0.1.55 (G3): tầng + mức suy nghĩ khung chat được mời chọn (hợp đồng G1 `choice_options`). v0.1.62: như nhau
-    # cho Owner và nhân viên (Antigravity CLI mở cho mọi vai).
-    options = await engine.model_options(db, user.org_id)
+    # v0.1.55 (G3): tầng + mức suy nghĩ khung chat được mời chọn (hợp đồng G1 `choice_options`). Gói G: nhân viên không
+    # tính nguồn Antigravity CLI (Gen của nhân viên không dùng agy) ⇒ tầng chỉ khả dụng khi có nguồn khác.
+    options = await engine.model_options(db, user.org_id, owner=user.role_code == rbac.OWNER)
     return {**cfg, "available": store.available(cfg, user), "decider": await _decider_kind(db, user.org_id),
             "model_options": options}
 

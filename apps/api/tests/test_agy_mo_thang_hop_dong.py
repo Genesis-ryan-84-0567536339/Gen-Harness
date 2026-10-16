@@ -4,13 +4,16 @@
 Quyết định của Sếp 16/10/2026: hệ thống chạy chủ đạo bằng agy. Test này khoá ý đó ở mức hành vi nhìn từ ngoài, KHÔNG
 nhập tên hằng / hàm nội bộ của luật cũ (F-22 "agy chỉ cho Gen") — nên trên bản còn luật cũ nó đỏ vì HÀNH VI sai
 chứ không vì thiếu tên, và ai khôi phục luật cũ dưới bất kỳ tên nào cũng bị bắt. Phủ các vai: core.gen,
-core.refinery, core.reply,
-core.briefing và agent:<id>. Khi Sếp CHỈ có nguồn agy (không khoá API, không Claude Code CLI):
+core.refinery, core.briefing và agent:<id> NỘI BỘ. Khi Sếp CHỈ có nguồn agy (không khoá API, không Claude Code CLI):
 
-  1. tầng "Chuẩn" (standard) của MỌI vai có model agy và không có lý do từ chối;
-  2. gán model agy cho MỌI khoá, kể cả agent:<id>, trả 200 (trước đây 409 AGY_OWNER_GEN_ONLY);
+  1. tầng "Chuẩn" (standard) của các vai đó có model agy và không có lý do từ chối;
+  2. gán model agy cho các khoá đó, kể cả agent:<id> nội bộ, trả 200 (trước đây 409 AGY_OWNER_GEN_ONLY);
   3. `router.generate` dùng agy cho việc nền (sàng lọc, trực việc, Bản tin) mà bên gọi không phải xin cờ đặc biệt;
   4. không còn câu "chỉ dùng cho Gen" ở bất kỳ chuỗi nào hiển thị cho người dùng (API, lượt Gen, cảnh báo, giao diện).
+
+NGOẠI LỆ CÓ CHỦ ĐÍCH (gói G, Sếp chốt 16/10/2026 — kiến trúc phân lớp): lớp ngoại giao `core.reply` và agent gắn
+kênh / nhóm / người CHƯA dùng agy (chờ hộp riêng, bản sau) — các ca đó nằm ở test_agy_phan_lop.py, ở đây chỉ khoá
+rằng ngoại lệ là đúng một câu trung thực, hiển thị được và KHÔNG làm sống lại câu "chỉ dùng cho Gen".
 
 Lớp cô lập mỗi lượt của AgyClient KHÔNG đổi (test_agy_isolation_v0138); Claude Code CLI vẫn không chạy việc nền khi Sếp
 chưa cho phép (F-86) — nằm ở test_agy_all_agents.py, không lặp lại ở đây.
@@ -30,6 +33,7 @@ from sqlalchemy import text
 from gh.db import admin_sessionmaker, sessionmaker
 from gh.gen import store
 from gh.providers.clients import Message
+from gh.providers.router import ModelUnavailable
 from tests.conftest import Api
 from tests.test_cli_models_v0131 import (
     _login,
@@ -44,12 +48,14 @@ MSGS = [Message("user", "nội dung của khách")]
 ROLE_CASES = [
     ("core.gen", "gen.turn"),
     ("core.refinery", "refinery.extract"),
-    ("core.reply", "draft_translate"),
     ("core.briefing", "gen.briefing"),
     ("agent:{id}", "duty_decide"),
     ("agent:{id}", "setup_agent_try"),
 ]
-CORE_KEYS = ("core.gen", "core.refinery", "core.reply", "core.briefing")
+#: Lớp core dùng được agy; `core.reply` (ngoại giao) là ngoại lệ có chủ đích (gói G).
+CORE_KEYS = ("core.gen", "core.refinery", "core.briefing")
+DIPLOMATIC_KEY = "core.reply"
+DIPLOMATIC_REASON = "Antigravity chưa dùng cho việc trả lời người ngoài — chờ hộp riêng (bản sau)"
 OLD_RULE = re.compile(r"chỉ (?:dùng )?cho Gen|AGY_OWNER_GEN_ONLY|Antigravity chỉ", re.IGNORECASE)
 REPO = Path(__file__).resolve().parents[3]
 
@@ -86,7 +92,10 @@ async def test_standard_tier_has_an_agy_model_for_every_role(owner_api, db, clis
     r = await owner_api.get("/agents/bindings")
     assert r.status_code == 200, r.text
     items = {i["agent_key"]: i for i in r.json()["items"]}
-    assert set(items) == {*CORE_KEYS, f"agent:{aid}"}
+    assert set(items) == {*CORE_KEYS, DIPLOMATIC_KEY, f"agent:{aid}"}
+    reply = items.pop(DIPLOMATIC_KEY)        # ngoại lệ có chủ đích: lý do trung thực, không phải "cần khoá API"
+    assert reply["source"] == "standard" and reply["standard"] is None
+    assert reply["standard_reason"] == DIPLOMATIC_REASON
     for key, it in items.items():
         assert it["source"] == "standard", (key, it)
         assert it["standard_reason"] is None, (key, it["standard_reason"])          # không còn "cần khoá API (…)"
@@ -97,6 +106,7 @@ async def test_standard_tier_has_an_agy_model_for_every_role(owner_api, db, clis
     dflt = {i["key"]: i for i in (await owner_api.get("/defaults")).json()["items"]}
     for key in CORE_KEYS:
         assert dflt[f"binding:{key}"]["default_text"].startswith("Chuẩn: gemini-"), (key, dflt[f"binding:{key}"])
+    assert dflt[f"binding:{DIPLOMATIC_KEY}"]["default_text"] == f"Chuẩn: {DIPLOMATIC_REASON}"
 
 
 # ─── 2. set_binding: gán agy cho mọi khoá ⇒ 200 ─────────────────────────
@@ -112,6 +122,9 @@ async def test_set_binding_agy_is_200_for_every_role_including_agent(owner_api, 
         assert "blocked_reason" not in b and "AGY_OWNER_GEN_ONLY" not in r.text, (key, b)
     listing = (await owner_api.get("/agents/bindings")).json()
     for it in listing["items"]:
+        if it["agent_key"] == DIPLOMATIC_KEY:
+            assert it["source"] == "standard" and it["binding"] is None, it
+            continue
         assert it["source"] == "custom" and "blocked_reason" not in (it["binding"] or {}), it
     detail = (await owner_api.get(f"/agents/{aid}")).json()
     assert detail["binding"]["model_id"] == str(mid)
@@ -129,6 +142,18 @@ async def test_router_generate_runs_agy_for_every_role(owner_api, app, db, clis,
                                                 messages=MSGS, json_mode=False)
     assert out.text == "whoami:an@example.vn" and out.provider == "Antigravity CLI"
     assert len(_calls(clis)) == n + 1 and _calls(clis)[-1]["via_stdin"] is True
+
+
+async def test_diplomatic_exception_is_one_honest_sentence(owner_api, app, db, clis) -> None:  # type: ignore[no-untyped-def]
+    """core.reply: gán agy bị từ chối (422) và lượt gọi không chạy agy — đúng một câu ngoại lệ."""
+    org, mid = await _only_agy(owner_api)
+    r = await owner_api.send("PUT", f"/agents/bindings/{DIPLOMATIC_KEY}", {"model_id": str(mid)})
+    assert r.status_code == 422 and DIPLOMATIC_REASON in r.text and not OLD_RULE.search(r.text), r.text
+    n = len(_calls(clis))
+    with pytest.raises(ModelUnavailable) as ei:
+        await app.state.model_router.generate(org, agent_key=DIPLOMATIC_KEY, purpose="draft_translate",
+                                              messages=MSGS, json_mode=False)
+    assert DIPLOMATIC_REASON in ei.value.reasons and len(_calls(clis)) == n
 
 
 async def test_binding_to_agy_drives_the_background_call(owner_api, app, db, clis) -> None:  # type: ignore[no-untyped-def]

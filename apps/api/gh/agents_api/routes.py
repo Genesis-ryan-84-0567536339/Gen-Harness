@@ -38,7 +38,7 @@ from gh.db import DB
 from gh.defaults import profiles
 from gh.errors import field_errors, not_found, pin_required
 from gh.gen.coach import cache as coach_cache
-from gh.providers import catalog
+from gh.providers import agy_policy, catalog
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 READ = require("system.read", rbac.ALL)
@@ -166,7 +166,9 @@ async def _agent_key_label(db: AsyncSession, org_id: uuid.UUID, agent_key: str) 
 
 def _binding_out(r: Any) -> dict[str, Any]:
     # v0.1.62: Antigravity CLI gán được cho MỌI khoá (luật F-22 owner-only đã gỡ, Owner chọn mở 16/10/2026) ⇒ không
-    # còn `blocked_reason` và không còn lỗi 409 AGY_OWNER_GEN_ONLY ở PUT /bindings.
+    # còn `blocked_reason` và không còn lỗi 409 AGY_OWNER_GEN_ONLY ở PUT /bindings. Gói G (16/10/2026): ngoại lệ có chủ
+    # đích là lớp ngoại giao (core.reply, agent gắn kênh / nhóm / người) — xem `agy_blocked_reason` ở từng mục danh
+    # sách và 422 ở PUT khi gán model agy cho khoá đó (một hàm quyết định: `gh.providers.agy_policy.decide`).
     return {"model_id": str(r.model_id), "model_name": r.model_name, "provider_name": r.provider_name,
             "temperature": float(r.temperature), "context_tokens": r.context_tokens,
             "rule_codes": list(r.rule_codes or []), "effort": getattr(r, "effort", None)}
@@ -188,19 +190,24 @@ async def list_bindings(user: service.CurrentUser = Depends(READ), db: AsyncSess
         WHERE b.org_id = :o"""), {"o": user.org_id})).all()
     by_key = {r.agent_key: r for r in rows}
     unbound = [k for k, _ in keys if k not in by_key]
+    verdicts = await agy_policy.verdicts_for(db, user.org_id, [k for k, _ in keys])
     standard, reasons = await profiles.standard_with_reasons(db, user.org_id, unbound) if unbound else ({}, {})
     items = [{"agent_key": k, "label": label, "binding": _binding_out(by_key[k]) if k in by_key else None,
               "source": "custom" if k in by_key else "standard",
               "standard": None if k in by_key else profiles.standard_public(standard.get(k)),
-              "standard_reason": None if k in by_key else reasons.get(k)}
+              "standard_reason": None if k in by_key else reasons.get(k),
+              # Gói G: lý do Antigravity CLI không dùng được cho khoá này (chuỗi) hoặc null — web làm mờ model agy ở
+              # ô chọn; dòng gán agy cũ của khoá bị chặn vẫn hiện để Sếp gỡ / đổi.
+              "agy_blocked_reason": verdicts[k].reason}
              for k, label in keys]
     models = (await db.execute(text("""
-        SELECT m.id, m.model_name, p.name AS provider_name, m.is_enabled FROM agent.models m
-        JOIN agent.providers p ON p.id = m.provider_id WHERE p.org_id = :o ORDER BY p.name, m.model_name"""),
+        SELECT m.id, m.model_name, p.name AS provider_name, p.kind AS provider_kind, m.is_enabled
+        FROM agent.models m JOIN agent.providers p ON p.id = m.provider_id
+        WHERE p.org_id = :o ORDER BY p.name, m.model_name"""),
         {"o": user.org_id})).all()
     return {"items": items,
             "models": [{"id": str(m.id), "model_name": m.model_name, "provider_name": m.provider_name,
-                       "enabled": m.is_enabled} for m in models]}
+                       "kind": m.provider_kind, "enabled": m.is_enabled} for m in models]}
 
 
 class BindingIn(BaseModel):
@@ -236,6 +243,11 @@ async def set_binding(agent_key: str, body: BindingIn, request: Request,
     if m is None:
         raise not_found("Model")
     _check_effort(m.kind, m.model_name, body.effort)
+    if m.kind == agy_policy.KIND_AGY:
+        # Gói G: lớp ngoại giao (core.reply, agent gắn kênh / nhóm / người) chưa dùng agy ⇒ không nhận dòng gán agy.
+        verdict = await agy_policy.verdict_for(db, user.org_id, agent_key)
+        if not verdict.allowed:
+            raise field_errors({"model_id": verdict.reason or agy_policy.REASON_DIPLOMATIC})
     await db.execute(text("""
         INSERT INTO agent.bindings (org_id, agent_key, model_id, temperature, context_tokens, rule_codes, effort)
         VALUES (:o, :k, :m, :t, :ct, :rc, :e)

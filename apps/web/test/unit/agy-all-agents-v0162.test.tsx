@@ -58,8 +58,8 @@ function renderWith(ui: ReactElement, qc: QueryClient) {
 }
 const freshClient = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
-// Câu phạm vi dùng chung (apps/web/src/screens/system/systemModel.ts::AGY_SCOPE_TEXT).
-const SCOPE_RE = /Dùng được cho mọi việc: Gen, sàng lọc tin, Bản tin, soạn nháp, agent và việc nền/;
+// Gói G (16/10/2026): câu phạm vi theo lớp (apps/web/src/lib/agyLayers.ts::AGY_LAYERS_TEXT) thay câu "mọi việc" của v0.1.62.
+const SCOPE_RE = /Dùng được cho: Gen của Sếp, sàng lọc tin, Bản tin và agent nội bộ\. Chưa dùng cho việc trả lời người ngoài/;
 const OLD_RULE_RE = /chỉ dùng cho Gen|chỉ cho Gen|luật an toàn, không tắt được/i;
 
 const PROVIDERS: Provider[] = [
