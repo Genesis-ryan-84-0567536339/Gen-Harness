@@ -188,8 +188,10 @@ async def channel_resume(type_: str, request: Request, user: service.CurrentUser
     if not await redis.get("gh:bridge:heartbeat"):
         raise _bridge_offline()
     s = (await db.execute(text("""
-        SELECT id, credential_enc, account_label FROM core.channel_sessions
-        WHERE channel_id = :c AND state = 'error' AND credential_enc IS NOT NULL
+        SELECT s.id, s.credential_enc, s.account_label FROM core.channel_sessions s
+        WHERE s.channel_id = :c AND s.state = 'error' AND s.credential_enc IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM core.channel_sessions n WHERE n.channel_id = s.channel_id AND n.id <> s.id
+                            AND COALESCE(n.started_at, n.qr_issued_at) > COALESCE(s.started_at, s.qr_issued_at))
         ORDER BY COALESCE(started_at, qr_issued_at) DESC NULLS LAST, id DESC LIMIT 1"""), {"c": ch.id})).one_or_none()
     if s is None:
         raise conflict("NO_SAVED_SESSION", "Chưa có phiên đã lưu để nối lại — hãy tạo mã QR để đăng nhập lại")
@@ -206,9 +208,12 @@ async def channel_logout(type_: str, request: Request, user: service.CurrentUser
                          _pin: Any = Depends(require_pin("channel.logout")),
                          db: AsyncSession = DB) -> Response:
     ch = await _qr_channel(db, user.org_id, type_)
+    # Gói K (P1-1): phiên 'error' (vd. CONNECTION_REPLACED) đã có ended_at nhưng còn credential — đăng xuất phải xoá cả nó,
+    # nếu không bridge khởi động lại vẫn tự nối lại được.
     rows = (await db.execute(text("""
-        UPDATE core.channel_sessions SET state = 'logged_out', ended_at = now(), credential_enc = NULL
-        WHERE channel_id = :c AND ended_at IS NULL RETURNING id, account_label"""), {"c": ch.id})).all()
+        UPDATE core.channel_sessions SET state = 'logged_out', ended_at = COALESCE(ended_at, now()), credential_enc = NULL
+        WHERE channel_id = :c AND (ended_at IS NULL OR credential_enc IS NOT NULL)
+        RETURNING id, account_label"""), {"c": ch.id})).all()
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id, action="channel.logout",
                            target_type="channel", target_id=type_,
                            target_label=rows[0].account_label if rows else None,

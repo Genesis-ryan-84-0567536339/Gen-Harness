@@ -276,3 +276,69 @@ async def test_bridge_offline_noi_tieng_nguoi(owner_api, db, redis) -> None:  # 
     assert "Bridge" not in title and "bridge" not in title
     assert "Gói chẩn đoán" in title
 
+
+
+# ─── Gói K (rà soát v0.1.62, P1-1/P2-4): phiên 'error' đăng xuất được; CONNECTION_REPLACED không tự nối lại ──
+
+async def _pin(api: Api) -> None:
+    assert (await api.send("POST", "/auth/pin/verify", {"pin": "246810"})).status_code == 200
+
+
+async def test_dang_xuat_xoa_ca_phien_error_con_credential(owner_api, db, redis) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    api: Api = owner_api
+    # Phiên bị ngắt vì mở nơi khác: đã có ended_at nhưng vẫn giữ credential (để Sếp bấm "Nối lại").
+    sid = await _session(db, org, state="error", ended=True)
+    before = await _row(db, sid)
+    assert before.has_cred and before.ended_at is not None
+    await _pin(api)
+    r = await api.send("POST", "/channels/zalo/logout")
+    assert r.status_code == 204
+    after = await _row(db, sid)
+    assert after.state == "logged_out" and not after.has_cred, "đăng xuất phải xoá credential của phiên lỗi"
+    assert abs((after.ended_at - before.ended_at).total_seconds()) < 1, "giữ mốc kết thúc gốc"
+    card = {c["type"]: c for c in (await api.get("/channels")).json()}["zalo"]
+    assert card["state"] == "logged_out" and card["resumable"] is False
+    assert [c["session_id"] for c in await _control(redis) if c["type"] == "session.logout"] == [str(sid)]
+    # Sau đăng xuất, bridge khởi động lại không còn gì để tự nối.
+    await redis.delete(BRIDGE_CONTROL)
+    await redis.set("gh:bridge:heartbeat", "1")
+    assert (await api.send("POST", "/channels/zalo/resume")).status_code == 409
+
+
+async def test_hello_khong_tu_noi_lai_phien_bi_mo_noi_khac(owner_api, db, redis, app) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    sid = await _session(db, org, state="active")
+    await _status(app, redis, org, "session.ended", {"session_id": str(sid), "reason": "error",
+                                                      "error": "CONNECTION_REPLACED"})
+    assert (await _row(db, sid)).state == "error"
+    await _status(app, redis, org, "bridge.hello", {"channels": ["zalo", "whatsapp"]})
+    assert await _control(redis) == [], "bridge restart không được đăng nhập lại, đá Zalo Web của Sếp"
+    # Lỗi khác (rớt mạng…) vẫn tự nối lại như cũ.
+    other = await _session(db, org, state="active", type_="whatsapp")
+    await _status(app, redis, org, "session.ended", {"session_id": str(other), "reason": "error",
+                                                      "error": "RECONNECT_FAILED"})
+    await _status(app, redis, org, "bridge.hello", {"channels": ["zalo", "whatsapp"]})
+    assert [(c["type"], c["session_id"]) for c in await _control(redis)] == [("session.login", str(other))]
+
+
+async def test_nut_noi_lai_van_dung_duoc_voi_phien_bi_mo_noi_khac(owner_api, db, redis, app) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    sid = await _session(db, org, state="active")
+    await _status(app, redis, org, "session.ended", {"session_id": str(sid), "reason": "error",
+                                                      "error": "CONNECTION_REPLACED"})
+    await redis.set("gh:bridge:heartbeat", "1")
+    card = {c["type"]: c for c in (await owner_api.get("/channels")).json()}["zalo"]
+    assert card["state"] == "error" and card["error"] == "CONNECTION_REPLACED" and card["resumable"] is True
+    r = await owner_api.send("POST", "/channels/zalo/resume")
+    assert r.status_code == 202 and r.json()["session_id"] == str(sid)
+
+
+async def test_resume_bo_qua_phien_error_da_co_phien_moi_hon(owner_api, db, redis) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    await redis.set("gh:bridge:heartbeat", "1")
+    await _session(db, org, state="error", ended=True, started_ago_h=48)     # phiên lỗi cũ còn credential
+    await _session(db, org, state="logged_out", ended=True, started_ago_h=2, cred=False)   # Sếp đã đăng xuất sau đó
+    r = await owner_api.send("POST", "/channels/zalo/resume")
+    assert r.status_code == 409 and r.json()["code"] == "NO_SAVED_SESSION", "không được sống lại phiên cũ đã bị thay"
+    assert await _control(redis) == []
