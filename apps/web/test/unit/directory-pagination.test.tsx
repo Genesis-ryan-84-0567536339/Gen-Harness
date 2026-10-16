@@ -236,6 +236,11 @@ describe('Khách & Nhóm — gán BOT hàng loạt theo bộ lọc', () => {
     await user.click(within(dlg).getByRole('button', { name: 'Áp dụng cho 130 người' }));
 
     expect(await within(dlg).findByText(/Bộ lọc hiện khớp 131 người/)).toBeInTheDocument();
+    // luật cứng: câu thân thiện kèm "Chi tiết kỹ thuật" (mã HTTP, mã lỗi)
+    const err = within(dlg).getByRole('alert');
+    expect(within(err).getByText('Chi tiết kỹ thuật')).toBeInTheDocument();
+    expect(err.textContent).toContain('HTTP 409');
+    expect(err.textContent).toContain('BULK_FILTER_CHANGED');
     await waitFor(() => expect(listCalls).toBeGreaterThan(before));
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
     expect(useToasts.getState().toasts.some((t) => t.text.startsWith('Đã cập nhật'))).toBe(false);

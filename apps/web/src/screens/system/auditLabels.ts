@@ -87,10 +87,11 @@ export const ACTION_LABEL: Record<string, string> = {
   'agent.updated': 'Sửa agent',
   'agent.enabled': 'Bật agent',
   'agent.disabled': 'Tắt agent',
-  'agent.bound': 'Gắn agent vào nhóm chat',
-  'agent.unbound': 'Gỡ agent khỏi nhóm chat',
+  'agent.bound': 'Gắn model cho agent',
+  'agent.unbound': 'Gỡ model khỏi agent',
   'directory.bot_assigned': 'Giao bộ nhận tin cho một người',
   'directory.group_bot_set': 'Chọn bộ nhận tin cho nhóm chat',
+  'directory.bulk_bot_set': 'Chọn bộ nhận tin hàng loạt cho nhiều người',
   // Tin nhắn, bản nháp
   'message.sent': 'Gửi tin nhắn',
   'message.send_failed': 'Gửi tin nhắn không thành công',

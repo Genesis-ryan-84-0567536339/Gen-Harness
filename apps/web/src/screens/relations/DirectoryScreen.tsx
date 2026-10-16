@@ -5,7 +5,7 @@ import { ApiError } from '@gen-harness/contracts';
 import type { AgentRef, DirChannel, DirGroup, DirHeatBand, DirPeopleFilter, DirPerson, DirPriority, DirRelation, DirValueBand } from '@gen-harness/contracts';
 import { Bar, CardError, InlineError, ScreenHead, SkeletonLines } from '../common';
 import { Button, Dialog, EmptyState, Icon, Tabs, TextField, type FilterOption, type TabItem } from '@gen-harness/ui';
-import { errorText } from '../../lib/errorText';
+import { errorDetail, errorText } from '../../lib/errorText';
 import { fmtInt } from '../../lib/format';
 import { useCan } from '../../lib/permissions';
 import { useAgentOptions, useEmptyAgentsText } from '../../lib/pickers';
@@ -70,7 +70,7 @@ function AgentChoices({
       {query.isPending ? (
         <SkeletonLines rows={3} />
       ) : query.isError ? (
-        <InlineError>{errorText(query.error)}</InlineError>
+        <InlineError detail={errorDetail(query.error)}>{errorText(query.error)}</InlineError>
       ) : (
         <>
           {missing ? (
@@ -246,7 +246,7 @@ function MoreRow({ shown, total, unit, hasMore, loading, error, onMore }: { show
           Xem thêm
         </Button>
       ) : null}
-      {error ? <InlineError>{errorText(error)}</InlineError> : null}
+      {error ? <InlineError detail={errorDetail(error)}>{errorText(error)}</InlineError> : null}
     </div>
   );
 }
@@ -278,7 +278,7 @@ function GroupBotDialog({ group, onClose }: { group: DirGroup; onClose: () => vo
       }
     >
       <AgentChoices value={agentId} onChange={setAgentId} current={group.bot} />
-      {setBot.isError ? <InlineError>{errorText(setBot.error)}</InlineError> : null}
+      {setBot.isError ? <InlineError detail={errorDetail(setBot.error)}>{errorText(setBot.error)}</InlineError> : null}
     </Dialog>
   );
 }
@@ -500,7 +500,7 @@ function PersonBotDialog({ person, onClose }: { person: DirPerson; onClose: () =
       <div className="dlg-fields">
         <AgentChoices value={agentId} onChange={setAgentId} current={person.bot} />
         <AutonomySelect current={person.autonomy_level} value={picked} onChange={setPicked} />
-        {setBot.isError ? <InlineError>{errorText(setBot.error)}</InlineError> : null}
+        {setBot.isError ? <InlineError detail={errorDetail(setBot.error)}>{errorText(setBot.error)}</InlineError> : null}
       </div>
     </Dialog>
   );
@@ -549,7 +549,7 @@ function BulkBotDialog({ filter, total, onClose, onStale }: { filter: DirPeopleF
       <div className="dlg-fields">
         <AgentChoices value={agentId} onChange={setAgentId} noneLabel="Chưa gán (gỡ BOT)" keepLabel="Giữ nguyên BOT hiện tại" />
         <AutonomySelect current={null} value={picked} onChange={setPicked} keepLabel="Giữ nguyên" />
-        {bulk.isError ? <InlineError>{errorText(bulk.error)}</InlineError> : null}
+        {bulk.isError ? <InlineError detail={errorDetail(bulk.error)}>{errorText(bulk.error)}</InlineError> : null}
       </div>
     </Dialog>
   );

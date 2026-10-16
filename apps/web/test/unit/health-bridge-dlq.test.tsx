@@ -224,6 +224,10 @@ describe('<HealthCard> — hàng lỗi có lối xử lý', () => {
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('Hệ thống gặp lỗi');
     expect(alert.textContent).not.toContain('[object');
+    // luật cứng: câu thân thiện kèm "Chi tiết kỹ thuật" (mã HTTP, mã lỗi)
+    expect(within(alert).getByText('Chi tiết kỹ thuật')).toBeInTheDocument();
+    expect(alert.textContent).toContain('HTTP 500');
+    expect(alert.textContent).toContain('INTERNAL');
   });
 
   it('chỉ có system.read: thấy số lượng + lời nhờ, không có nút', async () => {
