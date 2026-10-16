@@ -167,7 +167,8 @@ class ActionLogGuard:
                 async with sessionmaker()() as db:
                     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                                            action=f"http.{scope['method'].lower()}", target_type="route",
-                                           target_id=scope["path"], ip=user.ip)
+                                           target_id=scope["path"],
+                                           target_label=f"{scope['method']} {scope['path']}"[:200], ip=user.ip)
                     await db.commit()
             except Exception:  # noqa: BLE001
                 log.exception("Không ghi được Action Log cho %s %s", scope["method"], scope["path"])

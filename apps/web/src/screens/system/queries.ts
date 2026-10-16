@@ -3,7 +3,7 @@
  * bước thiết lập 10–11 (PLAN 4.6). "Bộ não AI" dùng lại `useProviders`/`useCliProfiles` (`lib/dataQueries.ts`)
  * và `useFailoverRules` (`screens/api/queries.ts`) — không có hook riêng ở đây.
  */
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   AiBudgetBody,
   AiCost,
@@ -97,8 +97,16 @@ export const usePatchBoundary = () => {
   });
 };
 
-export const useSystemAuditLog = (q: SystemAuditQuery) =>
-  useQuery({ queryKey: qkSystem.auditLog(q), queryFn: ({ signal }) => api.systemAuditLog.list(q, signal) });
+/** Nhật ký phân trang bằng cursor (F099): mỗi trang 50 dòng, `fetchNextPage` = nút "Xem thêm"; bộ lọc/ô tìm chạy ở máy chủ. */
+export const AUDIT_PAGE_SIZE = 50;
+export const useSystemAuditLog = (q: Omit<SystemAuditQuery, 'cursor' | 'limit'>) =>
+  useInfiniteQuery({
+    queryKey: qkSystem.auditLog(q),
+    queryFn: ({ pageParam, signal }) => api.systemAuditLog.list({ ...q, limit: AUDIT_PAGE_SIZE, cursor: pageParam ?? undefined }, signal),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.next_cursor,
+    placeholderData: keepPreviousData,
+  });
 
 export const useExportAuditLog = () => useMutation({ mutationFn: (q: Omit<SystemAuditQuery, 'cursor' | 'limit'>) => api.systemAuditLog.exportCsv(q) });
 

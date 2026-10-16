@@ -434,7 +434,8 @@ export function createMock(opts: P4SystemOptions) {
     }
 
     // ── Nhật ký hệ thống ──
-    if (p === '/audit-log' && m === 'GET') {
+    // `/audit` (đường đọc của tab Nhật ký từ A8) và `/audit-log` (cũ) cùng một bộ lọc, như `gh.audit.routes.query_log`.
+    if ((p === '/audit-log' || p === '/audit') && m === 'GET') {
       if (!has(ctx, 'audit.read')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
       const actorType = q.get('actor_type');
       const action = q.get('action');
@@ -442,10 +443,21 @@ export function createMock(opts: P4SystemOptions) {
       const targetId = q.get('target_id');
       const since = q.get('since');
       const until = q.get('until');
+      const needle = (q.get('q') ?? '').trim().toLowerCase();
+      const qActions = (q.get('q_actions') ?? '').split(',').filter(Boolean);
+      const qActors = (q.get('q_actors') ?? '').split(',').filter(Boolean);
+      const hideNoise = q.get('hide_noise') === 'true';
       const filtered = opts.auditLog.filter(
         (a) =>
           (!actorType || a.actor_type === actorType) &&
           (!action || a.action.startsWith(action)) &&
+          (!hideNoise || !(a.action.startsWith('http.') || (a.action === 'audit.chain_verified' && a.result === 'ok'))) &&
+          (!needle ||
+            (a.actor_label ?? a.actor_id ?? '').toLowerCase().includes(needle) ||
+            a.action.toLowerCase().includes(needle) ||
+            (a.target_label ?? '').toLowerCase().includes(needle) ||
+            qActions.includes(a.action) ||
+            qActors.includes(a.actor_id ?? '')) &&
           (!targetType || a.target_type === targetType) &&
           (!targetId || a.target_id === targetId) &&
           (!since || a.at >= since) &&

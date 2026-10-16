@@ -25,7 +25,7 @@ const TABS: Array<{ key: SysTab; label: string; count?: string; genTarget?: stri
   { key: 'org', label: 'Tổ chức', count: 'tên · giờ', genTarget: 'system.tab.org', perm: 'system.read' },
   { key: 'brain', label: 'Bộ não AI', count: 'model · hạn mức', genTarget: 'system.tab.brain', perm: 'system.read' },
   { key: 'roles', label: 'Quyền hạn', count: 'vai trò', perm: 'system.read' },
-  { key: 'log', label: 'Nhật ký', count: '30 ngày', perm: 'audit.read' },
+  { key: 'log', label: 'Nhật ký', count: 'ai đã làm gì', perm: 'audit.read' },
 ];
 
 export function SystemScreen() {
