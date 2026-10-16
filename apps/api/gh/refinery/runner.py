@@ -14,6 +14,7 @@ như cũ (không mất tin).
 
 import asyncio
 import logging
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -30,7 +31,7 @@ from gh.chassis.bus import CLEAN_READY, EventBus
 from gh.data.common import iso, live_person, raw_code
 from gh.gen import decider as decmod
 from gh.memory import notebook
-from gh.providers.router import ModelRouter, ModelUnavailable, raise_alert
+from gh.providers.router import AGY_BACKGROUND_TIMEOUT_S, ModelRouter, ModelUnavailable, raise_alert
 from gh.refinery import extract, prefilter, scoring, triage
 from gh.refinery.rules import EventCtx, Outcome, RuleDef, RuleHit, apply_outputs, evaluate
 
@@ -41,6 +42,12 @@ MAX_ATTEMPTS = 3
 #: J2: tổng thời gian tối đa hỏi Jev cho CẢ lô trước khi trích xuất (giây). Quá hạn ⇒ coi như Jev lỗi (thận trọng:
 #: chỉ bỏ tin trùng hẳn) — bước tối ưu chi phí không được ăn hết `JOB_TIMEOUT` của job sàng lọc.
 PREFILTER_JEV_BUDGET_S = 20.0
+#: Review lần 2 v0.1.62: ngân sách thời gian của MỘT lượt sàng lọc (giây) — nhỏ hơn `gh.worker.JOB_TIMEOUT` (300) để
+#: arq không giết job giữa chừng. Mỗi phần lô gọi model tối đa hai lượt (lượt gọi lại khi JSON sai), mỗi lượt tới
+#: `AGY_BACKGROUND_TIMEOUT_S`. Trước mỗi phần kế tiếp, còn lại ít hơn `PART_WORST_S` (trường hợp xấu nhất của một phần)
+#: ⇒ dừng sớm, trả các bản ghi chưa xử lý về `pending` cho lượt sau. Phần đầu luôn chạy (lượt nào cũng tiến được).
+RUN_TIME_BUDGET_S = 270.0
+PART_WORST_S = 2 * AGY_BACKGROUND_TIMEOUT_S
 ATTENTION_TYPES = {"Complained", "MentionsCompetitor", "WentSilent"}
 OPEN_THREAD_TYPES = {"PromisedDelivery", "ScheduledMeeting", "AskedStatus", "RequestedSample", "SentQuotation"}
 RULE_KIND_ALERT = {"risk": "repeated_complaint", "competition": "competitor", "hr": "people_signal",
@@ -92,6 +99,7 @@ class RunStats:
     errors: int = 0
     held: int = 0
     prefilter_skipped: int = 0     # v0.1.55 (J2): tin bỏ qua trước khi trích xuất (đã tính cả vào noise/processed)
+    deferred: int = 0              # hết ngân sách thời gian lượt: tin trả về pending cho lượt sau (không phải lỗi)
     status: str = "running"
     error: str | None = None
     unit_ids: list[str] = field(default_factory=list)
@@ -148,8 +156,10 @@ async def unanswered(db: AsyncSession, ev: Ev, sender_identity: uuid.UUID | None
 
 class Refinery:
     def __init__(self, sm: async_sessionmaker[AsyncSession], redis: Redis, router: ModelRouter,
-                 bus: EventBus | None = None, *, jev_transport: httpx.AsyncBaseTransport | None = None):
+                 bus: EventBus | None = None, *, jev_transport: httpx.AsyncBaseTransport | None = None,
+                 time_budget_s: float = RUN_TIME_BUDGET_S, part_worst_s: float = PART_WORST_S):
         self.sm, self.redis, self.router, self.bus = sm, redis, router, bus
+        self.time_budget_s, self.part_worst_s = time_budget_s, part_worst_s   # chỉ test chỉnh
         self.jev_transport = jev_transport      # chỉ test tiêm (Jev giả); production = None
 
     async def _progress(self, org_id: uuid.UUID, st: RunStats, final: bool = False) -> None:
@@ -266,6 +276,7 @@ class Refinery:
 
     async def _run(self, org_id: uuid.UUID, st: RunStats, event_ids: list[uuid.UUID] | None,
                    limit: int | None) -> None:
+        deadline = time.monotonic() + self.time_budget_s
         async with self.sm() as db:
             sched = await load_schedule(db, org_id)
             claimed = await self._claim(db, org_id, st.run_id, limit or sched.batch_size, event_ids)
@@ -299,7 +310,12 @@ class Refinery:
         to_model = await self._prefilter(org_id, st, to_model)
         await self._progress(org_id, st)
         # Bước 2–4: model theo từng phần lô.
-        for part in extract.chunks([self._event_in(ev) for ev in to_model]):
+        parts = extract.chunks([self._event_in(ev) for ev in to_model])
+        for idx, part in enumerate(parts):
+            if idx > 0 and deadline - time.monotonic() < self.part_worst_s:
+                left = {p.ref for rest in parts[idx:] for p in rest}
+                await self._defer([e for e in to_model if e.ref in left], st)
+                break
             by_ref = {e.ref: e for e in to_model if e.ref in {p.ref for p in part}}
             try:
                 routed = await self.router.generate(org_id, agent_key=AGENT_KEY, purpose="refinery",
@@ -388,6 +404,21 @@ class Refinery:
         hints = [f"{h.rule.code} ({h.score:.2f})" for h in ev.outcome.hits + ev.outcome.near if h.score > 0]
         return extract.EventIn(ev.ref, str(ev.event_id), ev.group_code, ev.person_code,
                                ev.occurred_at.isoformat(), ev.kind, ev.text, hints)
+
+    async def _defer(self, evs: list[Ev], st: RunStats) -> None:
+        """Hết ngân sách thời gian của lượt: trả tin chưa xử lý về `pending` và HOÀN lại lần thử đã tính lúc nhận lô
+        (hoãn không phải lỗi — không được dồn tới `MAX_ATTEMPTS`)."""
+        note = orjson.dumps({"deferred": "hết ngân sách thời gian của lượt — để lượt sau"}).decode()
+        async with self.sm() as db:
+            for ev in evs:
+                await db.execute(text("""
+                    UPDATE refinery.event_state SET state = 'pending', attempts = GREATEST(attempts - 1, 0),
+                           updated_at = now(), detail = detail || CAST(:d AS jsonb)
+                    WHERE event_id = :e AND event_received_at = :r"""),
+                    {"e": ev.event_id, "r": ev.received_at, "d": note})
+            await db.commit()
+        st.deferred += len(evs)
+        log.info("Lượt sàng lọc %s hết ngân sách thời gian — hoãn %d tin cho lượt sau", st.run_id, len(evs))
 
     async def _release(self, evs: list[Ev], st: RunStats, reason: str, count_error: bool = False) -> None:
         """Trả tin về pending (model chết / trả sai); quá số lần thử → `error`."""
