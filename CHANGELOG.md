@@ -7,6 +7,12 @@ Ngày = ngày Release trên GitHub theo giờ Việt Nam; tiêu đề trong `doc
 (v0.1.32–v0.1.34, v0.1.40, v0.1.46) hoặc vài ngày (v0.1.47, v0.1.48: làm 03/10, phát hành 09/10).
 Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) ghi ở [ROADMAP › Bản phản ứng](docs/ROADMAP.md).
 
+## v0.1.59 — Bản vá: WhatsApp quét QR được, thẻ "Hôm nay của Sếp" đọc lại ngay (16/10/2026)
+- **WhatsApp quét QR**: mã QR WhatsApp dày gấp đôi Zalo nay vẽ lớn ở màn Kết nối (trước 88px nên điện thoại không đọc); ghép cặp xử lý `companion_reg_refresh`; socket lỗi trước khi ra mã thử lại 4 lần có giãn cách thay vì mở lại vô hạn; ghim Baileys `7.0.0-rc14`; thẻ kênh nói lý do lỗi bằng tiếng Việt kèm "Chi tiết kỹ thuật".
+- **Hôm nay của Sếp**: "Kiểm tra kết nối" của nguồn CLI xanh được tính là bằng chứng nguồn AI chạy được (dòng bắt buộc đạt ngay); thẻ cập nhật ngay, không trễ 60 giây.
+- Chưa thử được với máy chủ WhatsApp thật (máy kiểm thử bị chặn mạng); kiểm trên máy Owner là Nợ #35.
+- Chi tiết: [docs/releases/v0.1.59.md](docs/releases/v0.1.59.md)
+
 ## v0.1.58 — Bản vá nóng: Antigravity CLI đòi mức suy nghĩ làm Gen im lặng, "Kiểm tra kết nối" đỏ và mọi vai "chưa có nguồn phù hợp" (11/10/2026)
 - **Gốc rễ**: agy của Sếp không đánh dấu model "current" nên lượt gọi thử không gửi `--effort`, agy từ chối kèm `available: low, medium, high`; `_cli_probe` không thử lại với một mức nên đỏ và báo sai `CLI không nhận model ""` (ô chọn model bị ẩn, Sếp kẹt). Nay thử lại cùng model với 'medium' (≤ 4 lượt), câu lỗi nêu đúng model + mức và không bao giờ in model rỗng; `_complete` cũng gọi lại một lần khi CLI đòi mức.
 - **Tự lành**: Kiểm tra kết nối xanh mà nguồn CLI chưa có dòng model ⇒ tự lưu (model, mức) vừa chạy được (không đặt mặc định, Action Log `provider.model_auto`); lượt Gen của Owner tự kiểm tra đúng một lần/10 phút khi agy mất dòng model; việc nền không bao giờ gọi agy.
