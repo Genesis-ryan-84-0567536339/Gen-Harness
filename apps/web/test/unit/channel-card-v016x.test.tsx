@@ -18,6 +18,8 @@ import { PinDialogHost } from '../../src/shell/PinDialogHost';
 import { ToastHost } from '../../src/shell/ToastHost';
 import { queryClient } from '../../src/lib/queryClient';
 import { qk2, useChannels } from '../../src/lib/dataQueries';
+import { qk } from '../../src/lib/queries';
+import { qkSystem } from '../../src/screens/system/queries';
 
 // Gói B4 (v0.1.62): kênh bền — nối lại bằng phiên đã lưu, "Mất liên lạc", QR đếm ngược theo expires_at, bỏ lời hứa "tự gửi lại".
 
@@ -158,6 +160,56 @@ describe('F051 (phần thẻ): bộ nhận tin mất nhịp tim ⇒ "Mất liên
     expect(channelStatus(zalo({ state: 'logged_out', bridge_online: false })).label).toBe('Chưa đăng nhập');
     renderCard(zalo({ bridge_online: true }));
     expect(screen.queryByTestId('lost-zalo')).not.toBeInTheDocument();
+  });
+});
+
+describe('F051 (tích hợp B5↔B4): /system/health bridge.silent ⇒ thẻ kênh không còn "Đang kết nối"', () => {
+  const me = (permissions: Record<string, string>) => ({
+    id: 'u', email: 'owner@genesis.local', display_name: 'Anh Cơ', role: { code: 'owner', name: 'Owner' },
+    org: { id: 'o', name: 'x', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
+    addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null, permissions,
+  });
+  const healthWith = (bridge?: { state: 'ok' | 'silent'; last_seen_at: string | null; silent_minutes: number | null }) => ({
+    checked_at: new Date().toISOString(), overall: bridge?.state === 'silent' ? 'bad' : 'ok',
+    worker: { state: 'ok', alive: true, last_seen_at: null, silent_minutes: null }, browser: { state: 'off', last_heartbeat_at: null },
+    ...(bridge ? { bridge } : {}), queues: [], crons: [], issues: [],
+  });
+  const silent = { state: 'silent' as const, last_seen_at: new Date(Date.now() - 7 * 60_000).toISOString(), silent_minutes: 7 };
+
+  it('kênh còn báo active (bridge_online chưa biết) nhưng health.bridge.state="silent" ⇒ "Mất liên lạc" + cảnh báo', async () => {
+    mockFetch((c) => (c.url.endsWith('/system/health') ? json(200, healthWith(silent)) : json(200, [])));
+    queryClient.setQueryData(qk.me, me({ 'system.read': 'all' }));
+    renderCard(zalo());
+    expect(await screen.findByText('Mất liên lạc')).toBeInTheDocument();
+    expect(screen.queryByText('Đang kết nối')).not.toBeInTheDocument();
+    expect(screen.getByTestId('lost-zalo')).toHaveTextContent('Mất liên lạc với bộ nhận tin Zalo/WhatsApp');
+  });
+
+  it('health.bridge.state="ok" hoặc không có khối bridge ⇒ vẫn "Đang kết nối"', async () => {
+    const calls = mockFetch((c) => (c.url.endsWith('/system/health') ? json(200, healthWith({ state: 'ok', last_seen_at: null, silent_minutes: null })) : json(200, [])));
+    queryClient.setQueryData(qk.me, me({ 'system.read': 'all' }));
+    renderCard(zalo());
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/system/health'))).toBe(true));
+    await waitFor(() => expect(queryClient.getQueryData(qkSystem.health)).toBeDefined());
+    expect(screen.getByText('Đang kết nối')).toBeInTheDocument();
+    expect(screen.queryByTestId('lost-zalo')).not.toBeInTheDocument();
+  });
+
+  it('vai không có system.read: không gọi /system/health, thẻ giữ nguyên', async () => {
+    const calls = mockFetch(() => json(200, []));
+    queryClient.setQueryData(qk.me, me({}));
+    renderCard(zalo());
+    expect(screen.getByText('Đang kết nối')).toBeInTheDocument();
+    expect(calls.some((c) => c.url.endsWith('/system/health'))).toBe(false);
+  });
+
+  it('chỉ áp cho kênh QR đang chạy: phiên đã đăng xuất vẫn "Chưa đăng nhập" dù bridge im', async () => {
+    mockFetch((c) => (c.url.endsWith('/system/health') ? json(200, healthWith(silent)) : json(200, [])));
+    queryClient.setQueryData(qk.me, me({ 'system.read': 'all' }));
+    renderCard(zalo({ state: 'logged_out' }));
+    await waitFor(() => expect(queryClient.getQueryData(qkSystem.health)).toBeDefined());
+    expect(screen.getByText('Chưa đăng nhập')).toBeInTheDocument();
+    expect(screen.queryByText('Mất liên lạc')).not.toBeInTheDocument();
   });
 });
 

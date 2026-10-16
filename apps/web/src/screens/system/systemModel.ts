@@ -38,6 +38,17 @@ export function channelState(s: ChannelState | string): { label: string; tone: s
 
 /** `resumable` / `bridge_online` (v0.1.62) nay nằm ở kiểu `Channel` của hợp đồng; máy chủ cũ không gửi ⇒ undefined ⇒ cách hiện như trước. */
 
+/**
+ * v0.1.62 (F051, tích hợp B5↔B4): `GET /system/health` báo bộ nhận tin im (`bridge.state === 'silent'`: nhịp mất > 2 phút mà
+ * kênh vẫn ghi "Đang kết nối") ⇒ coi thẻ kênh QR đang chạy là mất liên lạc dù `bridge_online` của danh sách kênh chưa kịp
+ * đổi. Chỉ áp cho kênh QR có phiên (active/error); không đụng kênh đã đăng xuất. `bridgeSilent` falsy ⇒ trả nguyên thẻ.
+ */
+export function withBridgeHealth<T extends Pick<Channel, 'type' | 'state' | 'bridge_online'>>(c: T, bridgeSilent: boolean | undefined): T {
+  if (!bridgeSilent || c.bridge_online === false) return c;
+  if (!(c.type === 'zalo' || c.type === 'whatsapp') || !(c.state === 'active' || c.state === 'error')) return c;
+  return { ...c, bridge_online: false };
+}
+
 /** Mã lỗi bridge báo khi mất mạng nhưng đang tự nối lại (phiên còn nguyên). */
 export const NETWORK_UNAVAILABLE = 'NETWORK_UNAVAILABLE';
 

@@ -5,7 +5,7 @@ import { Button, Dialog, EmptyState, Icon, Switch, TextField } from '@gen-harnes
 import { api } from '../../lib/api';
 import { qk2, useChannelGroups } from '../../lib/dataQueries';
 import { fmtInt } from '../../lib/format';
-import { useOrgTimezone } from '../../lib/permissions';
+import { useCan, useOrgTimezone } from '../../lib/permissions';
 import { queryClient } from '../../lib/queryClient';
 import { toast } from '../../lib/toast';
 import { useNow } from '../../lib/useNow';
@@ -13,6 +13,7 @@ import { errorDetail, errorText } from '../../lib/errorText';
 import { ErrorWithDetail } from '../../social/WriteProofDialog';
 import { Bar, CardError, InlineError, SkeletonLines } from '../common';
 import { ConnectionStatusPill } from '../connections/ConnectionStatusPill';
+import { useSystemHealth } from './queries';
 import { channelConnStatus } from '../connections/connectionsModel';
 import {
   BRIDGE_OFFLINE_TEXT,
@@ -34,6 +35,7 @@ import {
   qrHint,
   qrLifetimeMs,
   qrRemaining,
+  withBridgeHealth,
 } from './systemModel';
 
 /**
@@ -41,7 +43,9 @@ import {
  * risk warning first: the QR never appears before `accept_risk: true` is sent.
  */
 export function ChannelCard({ channel, canManage, large }: { channel: Channel; canManage: boolean; large?: boolean }) {
-  const c = channel;
+  // v0.1.62 (F051): bộ nhận tin im theo /system/health (vai có system.read) ⇒ "Mất liên lạc" thay "Đang kết nối".
+  const health = useSystemHealth(useCan('system.read'));
+  const c = withBridgeHealth(channel, health.data?.bridge?.state === 'silent');
   const tz = useOrgTimezone();
   const now = useNow(30_000);
   const st = channelStatus(c);
