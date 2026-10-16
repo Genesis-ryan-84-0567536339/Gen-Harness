@@ -66,7 +66,9 @@ def channel_down_text(reason: str, error: str | None) -> tuple[str, str]:
         return cause, 'bấm "Nối lại bằng phiên đã lưu" ở Kết nối (không cần quét QR).'
     if reason == "error":
         return cause, 'bấm "Nối lại bằng phiên đã lưu" ở Kết nối; còn lỗi thì quét lại QR.'
-    return cause, "đăng nhập lại (quét mã QR) để tiếp tục nhận tin."
+    if error in CHANNEL_DOWN_BY_ERROR:
+        return cause, "đăng nhập lại (quét mã QR) để tiếp tục nhận tin."
+    return cause, "đăng nhập lại để tiếp tục nhận tin."  # mã lỗi lạ: giữ câu chung, không đưa mã thô lên chuông
 KINDS = ("text", "image", "file", "sticker", "reaction", "system", "other")
 
 
