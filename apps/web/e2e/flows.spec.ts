@@ -823,13 +823,19 @@ test.describe('giai đoạn 4.5/4.6: Điều khiển hệ thống', () => {
 
       await page.getByLabel('Tìm người (tên hoặc mã)').fill('Bảo');
       await page.getByLabel('Người', { exact: true }).selectOption('p-bao');
+      // F100: gói xuất tải ngay thành tệp JSON (máy chủ không lưu gói) — không còn "Đã tạo gói" mà không có gì để tải.
+      const exportDownload = page.waitForEvent('download');
       await page.getByRole('button', { name: 'Xuất dữ liệu' }).click();
-      await expect(page.getByText('Đã tạo gói xuất dữ liệu')).toBeVisible();
+      expect((await exportDownload).suggestedFilename()).toMatch(/^du-lieu-.*\.json$/);
+      await expect(page.getByText(/Đã tải tệp dữ liệu của/)).toBeVisible();
       await expect(page.getByText('Xuất dữ liệu').last()).toBeVisible(); // dòng lịch sử vừa ghi
 
-      // Phiên PIN vừa mở ở lượt sửa hạn lưu vẫn còn hiệu lực — không hỏi PIN lại lần này.
-      await page.getByRole('button', { name: 'Xoá dữ liệu' }).click();
-      await expect(page.getByText('Đã xoá dữ liệu suy ra của người này')).toBeVisible();
+      // F101: "Ẩn danh hoá" hỏi lại, nêu rõ không xoá tin nhắn gốc. Phiên PIN vừa mở ở lượt sửa hạn lưu vẫn còn hiệu lực.
+      await page.getByRole('button', { name: 'Ẩn danh hoá' }).click();
+      const eraseDlg = page.getByRole('dialog', { name: 'Ẩn danh hoá người này?' });
+      await expect(eraseDlg.getByText(/Không xoá tin nhắn gốc/)).toBeVisible();
+      await eraseDlg.getByRole('button', { name: 'Ẩn danh hoá' }).click();
+      await expect(page.getByText(/Đã ẩn danh hoá người này/)).toBeVisible();
     });
   });
 

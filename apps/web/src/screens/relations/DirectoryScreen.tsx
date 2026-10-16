@@ -1,13 +1,16 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { SCREEN_BY_KEY, autonomyChoice, autonomyPatch } from '@gen-harness/contracts';
-import type { AgentRef, DirGroup, DirHeatBand, DirPerson, DirPriority, DirRelation, DirValueBand } from '@gen-harness/contracts';
+import { ApiError } from '@gen-harness/contracts';
+import type { AgentRef, DirChannel, DirGroup, DirHeatBand, DirPeopleFilter, DirPerson, DirPriority, DirRelation, DirValueBand } from '@gen-harness/contracts';
 import { Bar, CardError, InlineError, ScreenHead, SkeletonLines } from '../common';
-import { Button, Dialog, EmptyState, Icon, Tabs, type FilterOption, type TabItem } from '@gen-harness/ui';
+import { Button, Dialog, EmptyState, Icon, Tabs, TextField, type FilterOption, type TabItem } from '@gen-harness/ui';
 import { errorText } from '../../lib/errorText';
 import { fmtInt } from '../../lib/format';
 import { useCan } from '../../lib/permissions';
 import { useAgentOptions, useEmptyAgentsText } from '../../lib/pickers';
+import { toast } from '../../lib/toast';
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { useUrlState } from '../../lib/uiStore';
 import { AutonomySelect } from '../AutonomySelect';
 import { DataEmptyState } from '../DataEmptyState';
@@ -28,7 +31,7 @@ import {
   listenModeTone,
   priorityTone,
 } from './relationsModel';
-import { useDirChannels, useDirGroups, useDirPeople, useSetGroupBot, useSetPersonBot } from './queries';
+import { useBulkSetPersonBot, useDirChannels, useDirGroupsPaged, useDirPeoplePaged, useSetGroupBot, useSetPersonBot } from './queries';
 
 /** Giá trị "giữ nguyên BOT hiện tại" của hộp gán hàng loạt — không gửi `agent_id` (API giữ nguyên). */
 const KEEP_BOT = '__keep__';
@@ -112,99 +115,138 @@ export function DirectoryScreen() {
 
 function GroupsPane() {
   const channels = useDirChannels();
-  const groups = useDirGroups({});
+  const [qRaw, setQRaw] = useUrlState<string>('gq', '');
+  const q = useDebouncedValue(qRaw.trim(), 300);
   const [botFor, setBotFor] = useState<DirGroup | null>(null);
   // Gán BOT cần profile.write — vai trò chỉ đọc (Auditor) không thấy nút "Đổi" (mở ra chỉ gặp 403).
   const canWrite = useCan('profile.write');
 
-  if (channels.isPending || groups.isPending) return <SkeletonLines rows={6} />;
+  if (channels.isPending) return <SkeletonLines rows={6} />;
   if (channels.isError) return <CardError error={channels.error} onRetry={() => void channels.refetch()} retrying={channels.isFetching} />;
-  if (groups.isError) return <CardError error={groups.error} onRetry={() => void groups.refetch()} retrying={groups.isFetching} />;
   if (channels.data.length === 0) return <DataEmptyState fallback={<EmptyState icon="ph ph-broadcast" title="Chưa có kênh nào kết nối" />} />;
-
-  const byChannel = (type: string) => groups.data.items.filter((g) => g.channel.type === type);
 
   return (
     <div className="dir-groups">
-      {channels.data.map((ch) => {
-        const rows = byChannel(ch.type);
-        return (
-          <section className="gh-card" key={ch.id} aria-label={CHANNEL_LABEL[ch.type] ?? ch.type}>
-            <div className="gh-card__header">
-              <div className="dir-ch-head">
-                <span className="dir-ch-head__icon" style={{ color: channelTone(ch.type) }}>
-                  <Icon name={channelIcon(ch.type)} size={15} />
-                </span>
-                <div>
-                  <div className="gh-card__title">{CHANNEL_LABEL[ch.type] ?? ch.type}</div>
-                  <div className="gh-card__kicker">
-                    {fmtInt(ch.group_count)} nhóm · {fmtInt(ch.events_24h)} tin trong 24 giờ
-                  </div>
-                </div>
-                {ch.state ? (
-                  <span className="state-chip" style={{ color: channelTone(ch.type), borderColor: channelTone(ch.type) }}>
-                    <span className="state-chip__dot" style={{ background: channelTone(ch.type) }} />
-                    {CHANNEL_STATE_LABEL[ch.state] ?? ch.state}
-                  </span>
-                ) : null}
-              </div>
-            </div>
-            {rows.length === 0 ? (
-              <EmptyState icon="ph ph-users-three" title="Chưa có nhóm nào trên kênh này" />
-            ) : (
-              <div className="gh-table-scroll">
-                <table className="gh-table w920" aria-label={`Nhóm kênh ${CHANNEL_LABEL[ch.type] ?? ch.type}`}>
-                  <thead>
-                    <tr>
-                      <th style={{ width: 118 }}>ID nhóm</th>
-                      <th>Tên nhóm</th>
-                      <th style={{ width: 96 }}>Loại</th>
-                      <th style={{ width: 90 }}>Thành viên</th>
-                      <th style={{ width: 80 }}>Tin 24h</th>
-                      <th style={{ width: 110 }}>Độ nhiệt</th>
-                      <th style={{ width: 150 }}>Chế độ nghe</th>
-                      <th style={{ width: 170 }}>Agent trực</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((g) => (
-                      <tr key={g.id}>
-                        <td className="td-id">{g.code}</td>
-                        <td className="dir-grp-name">{g.name}</td>
-                        <td>
-                          <span className="mono-tag">{GROUP_KIND_LABEL[g.kind] ?? g.kind}</span>
-                        </td>
-                        <td className="td-id">{fmtInt(g.member_count)}</td>
-                        <td className="td-id">{fmtInt(g.events_24h)}</td>
-                        <td>
-                          {g.heat !== null ? <Bar pct={g.heat} tone={heatTone(g.heat)} width={64} /> : <span className="td-id">—</span>}
-                          {g.heat !== null ? <span style={{ marginLeft: 8, color: heatTone(g.heat), fontFamily: 'var(--font-mono)', fontSize: 10.5 }}>{fmtInt(g.heat)}</span> : null}
-                        </td>
-                        <td>
-                          <span className="mono-tag" style={{ color: listenModeTone(g.listen_mode) }}>
-                            {LISTEN_MODE_LABEL[g.listen_mode]}
-                          </span>
-                        </td>
-                        <td>
-                          <div className="dir-bot-cell">
-                            <span className="dir-bot-cell__name">{g.bot ? g.bot.name : 'Chưa gán'}</span>
-                            {canWrite ? (
-                              <Button variant="ghost" size="sm" onClick={() => setBotFor(g)}>
-                                Đổi
-                              </Button>
-                            ) : null}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-        );
-      })}
+      <div className="dir-search">
+        <TextField
+          label="Tìm nhóm (tên hoặc mã)"
+          type="search"
+          value={qRaw}
+          onChange={(e) => setQRaw(e.target.value)}
+          placeholder="Đại lý miền Trung, GRP-ZL-0114…"
+        />
+      </div>
+      {channels.data.map((ch) => (
+        <ChannelGroupsCard key={ch.id} ch={ch} q={q} canWrite={canWrite} onPickBot={setBotFor} />
+      ))}
       {botFor ? <GroupBotDialog group={botFor} onClose={() => setBotFor(null)} /> : null}
+    </div>
+  );
+}
+
+/** Nhóm của MỘT kênh: máy chủ lọc theo kênh + tên, trả từng trang; "Xem thêm" lấy trang kế (không giới hạn ở 50 nhóm đầu). */
+function ChannelGroupsCard({ ch, q, canWrite, onPickBot }: { ch: DirChannel; q: string; canWrite: boolean; onPickBot: (g: DirGroup) => void }) {
+  const groups = useDirGroupsPaged({ channel_id: ch.id, q: q || undefined });
+  const rows = groups.data?.pages.flatMap((pg) => pg.items) ?? [];
+  const total = groups.data?.pages[0]?.total ?? 0;
+  const label = CHANNEL_LABEL[ch.type] ?? ch.type;
+  return (
+    <section className="gh-card" aria-label={label}>
+      <div className="gh-card__header">
+        <div className="dir-ch-head">
+          <span className="dir-ch-head__icon" style={{ color: channelTone(ch.type) }}>
+            <Icon name={channelIcon(ch.type)} size={15} />
+          </span>
+          <div>
+            <div className="gh-card__title">{label}</div>
+            <div className="gh-card__kicker">
+              {q && groups.data ? `${fmtInt(total)} nhóm khớp tìm kiếm` : `${fmtInt(ch.group_count)} nhóm`} · {fmtInt(ch.events_24h)} tin trong 24 giờ
+            </div>
+          </div>
+          {ch.state ? (
+            <span className="state-chip" style={{ color: channelTone(ch.type), borderColor: channelTone(ch.type) }}>
+              <span className="state-chip__dot" style={{ background: channelTone(ch.type) }} />
+              {CHANNEL_STATE_LABEL[ch.state] ?? ch.state}
+            </span>
+          ) : null}
+        </div>
+      </div>
+      {groups.isPending ? (
+        <SkeletonLines rows={3} />
+      ) : groups.isError && !groups.data ? (
+        <CardError error={groups.error} onRetry={() => void groups.refetch()} retrying={groups.isFetching} />
+      ) : rows.length === 0 ? (
+        <EmptyState icon="ph ph-users-three" title={q ? 'Không có nhóm nào khớp tìm kiếm' : 'Chưa có nhóm nào trên kênh này'} />
+      ) : (
+        <>
+          <div className="gh-table-scroll">
+            <table className="gh-table w920" aria-label={`Nhóm kênh ${label}`}>
+              <thead>
+                <tr>
+                  <th style={{ width: 118 }}>ID nhóm</th>
+                  <th>Tên nhóm</th>
+                  <th style={{ width: 96 }}>Loại</th>
+                  <th style={{ width: 90 }}>Thành viên</th>
+                  <th style={{ width: 80 }}>Tin 24h</th>
+                  <th style={{ width: 110 }}>Độ nhiệt</th>
+                  <th style={{ width: 150 }}>Chế độ nghe</th>
+                  <th style={{ width: 170 }}>Agent trực</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((g) => (
+                  <tr key={g.id}>
+                    <td className="td-id">{g.code}</td>
+                    <td className="dir-grp-name">{g.name}</td>
+                    <td>
+                      <span className="mono-tag">{GROUP_KIND_LABEL[g.kind] ?? g.kind}</span>
+                    </td>
+                    <td className="td-id">{fmtInt(g.member_count)}</td>
+                    <td className="td-id">{fmtInt(g.events_24h)}</td>
+                    <td>
+                      {g.heat !== null ? <Bar pct={g.heat} tone={heatTone(g.heat)} width={64} /> : <span className="td-id">—</span>}
+                      {g.heat !== null ? <span style={{ marginLeft: 8, color: heatTone(g.heat), fontFamily: 'var(--font-mono)', fontSize: 10.5 }}>{fmtInt(g.heat)}</span> : null}
+                    </td>
+                    <td>
+                      <span className="mono-tag" style={{ color: listenModeTone(g.listen_mode) }}>
+                        {LISTEN_MODE_LABEL[g.listen_mode]}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="dir-bot-cell">
+                        <span className="dir-bot-cell__name">{g.bot ? g.bot.name : 'Chưa gán'}</span>
+                        {canWrite ? (
+                          <Button variant="ghost" size="sm" onClick={() => onPickBot(g)}>
+                            Đổi
+                          </Button>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <MoreRow shown={rows.length} total={total} unit="nhóm" hasMore={Boolean(groups.hasNextPage)} loading={groups.isFetchingNextPage} error={groups.isFetchNextPageError ? groups.error : null} onMore={() => void groups.fetchNextPage()} />
+        </>
+      )}
+    </section>
+  );
+}
+
+/** Chân bảng: "Đang hiện X / Y" + nút Xem thêm (lỗi tải trang kế hiện ngay dưới, bấm lại để thử lại). */
+function MoreRow({ shown, total, unit, hasMore, loading, error, onMore }: { shown: number; total: number; unit: string; hasMore: boolean; loading: boolean; error: unknown; onMore: () => void }) {
+  return (
+    <div className="dir-more">
+      <span className="raw-count">
+        Đang hiện {fmtInt(shown)} / {fmtInt(total)} {unit}
+      </span>
+      {hasMore ? (
+        <Button variant="secondary" className="btn-27" loading={loading} onClick={onMore}>
+          Xem thêm
+        </Button>
+      ) : null}
+      {error ? <InlineError>{errorText(error)}</InlineError> : null}
     </div>
   );
 }
@@ -257,6 +299,10 @@ const BOT_OPTIONS: FilterOption<string>[] = [
 ];
 
 function PeoplePane() {
+  const channels = useDirChannels();
+  const [qRaw, setQRaw] = useUrlState<string>('pq', '');
+  const q = useDebouncedValue(qRaw.trim(), 300);
+  const [channel, setChannel] = useUrlState<string>('chn', '');
   const [relation, setRelation] = useUrlState<string>('rel', '');
   const [heat, setHeat] = useUrlState<string>('heat', '');
   const [value, setValue] = useUrlState<string>('val', '');
@@ -269,10 +315,19 @@ function PeoplePane() {
       value: (value || undefined) as DirValueBand | undefined,
       priority: (priority || undefined) as DirPriority | undefined,
       bot: (bot || undefined) as 'assigned' | 'unassigned' | undefined,
+      channel: channel || undefined,
+      q: q || undefined,
     }),
-    [relation, heat, value, priority, bot],
+    [relation, heat, value, priority, bot, channel, q],
   );
-  const people = useDirPeople(query);
+  const people = useDirPeoplePaged(query);
+  const rows = useMemo(() => people.data?.pages.flatMap((pg) => pg.items) ?? [], [people.data]);
+  // Tổng do MÁY CHỦ đếm theo bộ lọc (trang đầu) — không phải số dòng đã tải.
+  const total = people.data?.pages[0]?.total ?? 0;
+  const channelOptions = useMemo<FilterOption<string>[]>(
+    () => [{ value: '', label: 'Tất cả' }, ...(channels.data ?? []).map((c) => ({ value: c.type, label: CHANNEL_LABEL[c.type] ?? c.type }))],
+    [channels.data],
+  );
   const [botFor, setBotFor] = useState<DirPerson | null>(null);
   const [bulk, setBulk] = useState(false);
   const canWrite = useCan('profile.write');
@@ -285,11 +340,16 @@ function PeoplePane() {
         <FilterRow label="Giá trị" value={value} onChange={setValue} options={VALUE_OPTIONS} />
         <FilterRow label="Ưu tiên" value={priority} onChange={setPriority} options={PRIORITY_OPTIONS} />
         <FilterRow label="BOT" value={bot} onChange={setBot} options={BOT_OPTIONS} />
+        {channelOptions.length > 1 ? <FilterRow label="Kênh" value={channel} onChange={setChannel} options={channelOptions} /> : null}
+        <div className="dir-filter-row dir-filter-row--search">
+          <TextField label="Tìm theo tên hoặc mã" type="search" value={qRaw} onChange={(e) => setQRaw(e.target.value)} placeholder="Nguyễn Văn Bảo, PER-0042…" />
+        </div>
         <span className="dir-filters__spacer" />
         <div className="dir-filters__actions">
-          {people.data ? <span className="raw-count">{fmtInt(people.data.total)} người khớp</span> : null}
+          {people.data ? <span className="raw-count">{fmtInt(total)} người khớp</span> : null}
           {canWrite ? (
-            <Button variant="primary" icon="ph ph-robot" disabled={!people.data?.items.length} onClick={() => setBulk(true)}>
+            // Đang hiện dữ liệu cũ của bộ lọc trước (placeholder) ⇒ số "khớp" chưa phải của bộ lọc này ⇒ chưa cho áp dụng.
+            <Button variant="primary" icon="ph ph-robot" disabled={!total || people.isPlaceholderData} onClick={() => setBulk(true)}>
               Thiết lập BOT cho nhóm đã lọc
             </Button>
           ) : null}
@@ -299,14 +359,15 @@ function PeoplePane() {
       <div className="table-card">
         {people.isPending ? (
           <SkeletonLines rows={6} />
-        ) : people.isError ? (
+        ) : people.isError && !people.data ? (
           <CardError error={people.error} onRetry={() => void people.refetch()} retrying={people.isFetching} />
-        ) : people.data.items.length === 0 ? (
+        ) : rows.length === 0 ? (
           <DataEmptyState
-            filtered={Boolean(relation || heat || value || priority || bot)}
+            filtered={Boolean(relation || heat || value || priority || bot || channel || q)}
             fallback={<EmptyState icon="ph ph-address-book" title="Không có ai khớp bộ lọc" />}
           />
         ) : (
+          <>
           <div className="gh-table-scroll">
             <table className="gh-table w920" aria-label="Con người">
               <thead>
@@ -323,7 +384,7 @@ function PeoplePane() {
                 </tr>
               </thead>
               <tbody>
-                {people.data.items.map((p) => (
+                {rows.map((p) => (
                   <tr key={p.id}>
                     <td className="td-id">{p.code}</td>
                     <td>
@@ -377,11 +438,13 @@ function PeoplePane() {
               </tbody>
             </table>
           </div>
+          <MoreRow shown={rows.length} total={total} unit="người" hasMore={Boolean(people.hasNextPage)} loading={people.isFetchingNextPage} error={people.isFetchNextPageError ? people.error : null} onMore={() => void people.fetchNextPage()} />
+          </>
         )}
       </div>
 
       {botFor ? <PersonBotDialog person={botFor} onClose={() => setBotFor(null)} /> : null}
-      {bulk ? <BulkBotDialog ids={people.data?.items.map((p) => p.id) ?? []} onClose={() => setBulk(false)} /> : null}
+      {bulk ? <BulkBotDialog filter={query} total={total} onClose={() => setBulk(false)} onStale={() => void people.refetch()} /> : null}
     </div>
   );
 }
@@ -443,47 +506,42 @@ function PersonBotDialog({ person, onClose }: { person: DirPerson; onClose: () =
   );
 }
 
-function BulkBotDialog({ ids, onClose }: { ids: string[]; onClose: () => void }) {
-  const setBot = useSetPersonBot();
+function BulkBotDialog({ filter, total, onClose, onStale }: { filter: DirPeopleFilter; total: number; onClose: () => void; onStale: () => void }) {
+  const bulk = useBulkSetPersonBot();
   // Mặc định GIỮ NGUYÊN BOT: người chỉ muốn đổi mức tự trị không vô tình gỡ BOT của cả nhóm đã lọc.
   const [agentId, setAgentId] = useState(KEEP_BOT);
   const [picked, setPicked] = useState<number | null>(null);
   const keepBot = agentId === KEEP_BOT;
   const nothingToApply = keepBot && picked === null;
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>(null);
-  const apply = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      for (const id of ids) {
-        // tuần tự (không await-in-loop song song) để không vượt giới hạn tốc độ API mock
-        await setBot.mutateAsync({
-          id,
-          body: { ...(keepBot ? {} : { agent_id: agentId || null }), ...autonomyPatch(null, picked) },
-        });
-      }
-      onClose();
-    } catch (e) {
-      setError(e);
-    } finally {
-      setBusy(false);
-    }
-  };
+  // Một lần gọi: máy chủ tự tìm MỌI người khớp bộ lọc (không chỉ trang đã tải) và chỉ áp khi số vẫn đúng `total`.
+  const apply = () =>
+    bulk.mutate(
+      { filter, expected_total: total, ...(keepBot ? {} : { agent_id: agentId || null }), ...autonomyPatch(null, picked) },
+      {
+        onSuccess: (r) => {
+          toast(`Đã cập nhật ${fmtInt(r.updated)} người`, 'ok');
+          onClose();
+        },
+        // Số người khớp đã đổi ⇒ tải lại để Sếp thấy số mới trước khi quyết lại.
+        onError: (e) => {
+          if (e instanceof ApiError && e.status === 409) onStale();
+        },
+      },
+    );
   return (
     <Dialog
       open
       onClose={onClose}
       width={400}
       title="Thiết lập BOT cho nhóm đã lọc"
-      kicker={`${ids.length} người đang khớp bộ lọc hiện tại`}
+      kicker={`${fmtInt(total)} người đang khớp bộ lọc hiện tại`}
       actions={
         <>
           <Button variant="secondary" onClick={onClose}>
             Huỷ
           </Button>
-          <Button variant="primary" icon="ph ph-robot" loading={busy} disabled={!ids.length || nothingToApply} onClick={() => void apply()}>
-            Áp dụng cho {ids.length} người
+          <Button variant="primary" icon="ph ph-robot" loading={bulk.isPending} disabled={!total || nothingToApply} onClick={apply}>
+            Áp dụng cho {fmtInt(total)} người
           </Button>
         </>
       }
@@ -491,9 +549,8 @@ function BulkBotDialog({ ids, onClose }: { ids: string[]; onClose: () => void })
       <div className="dlg-fields">
         <AgentChoices value={agentId} onChange={setAgentId} noneLabel="Chưa gán (gỡ BOT)" keepLabel="Giữ nguyên BOT hiện tại" />
         <AutonomySelect current={null} value={picked} onChange={setPicked} keepLabel="Giữ nguyên" />
-        {error ? <InlineError>{errorText(error)}</InlineError> : null}
+        {bulk.isError ? <InlineError>{errorText(bulk.error)}</InlineError> : null}
       </div>
     </Dialog>
   );
 }
-

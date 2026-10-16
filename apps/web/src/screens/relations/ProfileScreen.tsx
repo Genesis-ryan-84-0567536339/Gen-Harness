@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { AUTONOMY_AUTO_LABEL, AUTONOMY_CHOICES, AUTONOMY_LEVELS, autonomyChoice, autonomyPatch, type Profile } from '@gen-harness/contracts';
 import { Button, Card, Dialog, EmptyState, Icon, TextField } from '@gen-harness/ui';
@@ -13,8 +13,13 @@ import { SUMMARY_TONE, channelIcon, channelTone, eventTone, fmtBytes, initialsOf
 import { useProfile, useUpdateProfile } from './queries';
 
 export function ProfileScreen() {
-  const [id] = useUrlState<string>('id', '');
+  const [id, setId] = useUrlState<string>('id', '');
   const q = useProfile(id || null);
+  // Hồ sơ đã gộp: máy chủ chuyển hướng tới hồ sơ gốc ⇒ đổi `?id=` sang hồ sơ đang hiện, để sửa/ghi chú đi vào ĐÚNG hồ sơ sống.
+  const liveId = q.data?.person.id;
+  useEffect(() => {
+    if (liveId && id && liveId !== id) setId(liveId);
+  }, [liveId, id, setId]);
 
   if (!id) {
     return (
