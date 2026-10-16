@@ -2,7 +2,7 @@
 // Phiên mới thay phiên cũ ⇒ lõi ra lệnh `session.close` để bridge không giữ kết nối ma.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isCredentialRejected } from '../src/channels/zalo.js';
+import { classifyLoginError, isCredentialRejected } from '../src/channels/zalo.js';
 import { memoryAuthState } from '../src/channels/whatsapp.js';
 import { STREAMS } from '../src/envelope.js';
 import { ctl, makeBaileysLib, makeZaloLib, setup, tick, waitFor } from './fakes.js';
@@ -182,4 +182,47 @@ test('session.close: đóng kết nối của phiên cũ, KHÔNG đăng xuất n
   // Phiên không tồn tại: bỏ qua, không lỗi.
   await mgr.handleControl(ctl('session.close', { channel: 'zalo', session_id: 'khong-co' }));
   assert.equal(bus.of(STREAMS.status, 'session.ended').length, 0);
+});
+
+// ─── P3 (rà soát v0.1.62): lỗi lạ không được thử lại mãi mãi ─────────────────────────────────────────────────
+test('phân loại lỗi đăng nhập lại: từ chối · mạng · lạ', () => {
+  assert.equal(classifyLoginError(new Error('Đăng nhập thất bại')), 'rejected');
+  assert.equal(classifyLoginError(Object.assign(new Error('x'), { status: 401 })), 'rejected');
+  assert.equal(classifyLoginError(netErr('ENOTFOUND')), 'network');
+  assert.equal(classifyLoginError(netErr('ECONNRESET')), 'network');
+  assert.equal(classifyLoginError(new TypeError('fetch failed')), 'network');
+  assert.equal(classifyLoginError(new Error('Failed to fetch server info: Service Unavailable')), 'network');
+  assert.equal(classifyLoginError(Object.assign(new Error('x'), { status: 503 })), 'network');
+  assert.equal(classifyLoginError(Object.assign(new Error('x'), { status: 429 })), 'network');
+  assert.equal(classifyLoginError(new Error('Cannot read properties of undefined')), 'unknown');
+  assert.equal(classifyLoginError(null), 'unknown');
+});
+
+test('Zalo: lỗi lạ (không phải mạng, không phải từ chối) lặp lại → dừng sau giới hạn, session.ended error RECONNECT_FAILED', async () => {
+  const zalo = flakyZalo(() => new Error('Cannot read properties of undefined (reading "x")'));
+  const { bus, mgr, keyring } = await setup({ zalo });
+  const blob = keyring.encryptTransport(JSON.stringify(CRED), 'zalo:s1');
+  await mgr.handleControl(ctl('session.login', { channel: 'zalo', session_id: 's1', credential: blob }));
+  const e = await waitFor(() => bus.of(STREAMS.status, 'session.ended')[0], { timeout: 4000 });
+  assert.deepEqual([e.payload.reason, e.payload.error], ['error', 'RECONNECT_FAILED']);
+  const n = zalo.ctrl.calls.length;
+  assert.ok(n >= 3 && n <= 12, `phải dừng sau vài lần, không phải mãi (n=${n})`);
+  await tick(30);
+  assert.equal(zalo.ctrl.calls.length, n, 'đã dừng thì không thử lại nữa');
+  mgr.shutdown();
+});
+
+test('Zalo: lỗi lạ xen lỗi mạng — bộ đếm lỗi lạ tính liên tiếp, lỗi mạng đặt lại', async () => {
+  // 3 lỗi lạ, 1 lỗi mạng, 3 lỗi lạ, rồi nối được: nếu đếm cộng dồn thì đã dừng.
+  const seq = ['u', 'u', 'u', 'n', 'u', 'u', 'u', null];
+  const zalo = flakyZalo((n) => {
+    const k = seq[n - 1];
+    return k === 'u' ? new Error('lạ') : k === 'n' ? netErr() : null;
+  });
+  const { bus, mgr, keyring } = await setup({ zalo });
+  const blob = keyring.encryptTransport(JSON.stringify(CRED), 'zalo:s1');
+  await mgr.handleControl(ctl('session.login', { channel: 'zalo', session_id: 's1', credential: blob }));
+  await waitFor(() => bus.of(STREAMS.status, 'session.active')[0], { timeout: 4000 });
+  assert.equal(bus.of(STREAMS.status, 'session.ended').length, 0);
+  mgr.shutdown();
 });
