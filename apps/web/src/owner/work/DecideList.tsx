@@ -22,6 +22,9 @@ import { openAskGen } from '../AskGenScreen';
 import { OwnerError } from '../parts';
 import './work.css';
 
+/** Số nháp đầu danh sách được tải chi tiết (cờ + 2 dòng đầu). */
+const DETAIL_MAX = 20;
+
 /** Mã PIN: một câu dùng lại ở đầu khối. */
 export const PIN_HINT = 'Mỗi lần duyệt, sửa rồi gửi hoặc từ chối đều cần mã PIN của Sếp.';
 
@@ -67,7 +70,7 @@ function timeLabel(iso: unknown, tz: string): string {
   return sameDay(s, new Date(), tz) ? fmtHM(s, tz) : `${fmtDM(s, tz)} ${fmtHM(s, tz)}`;
 }
 
-function DraftRow({ item, detail, open, onToggle, tz }: { item: DraftItem; detail?: DraftDetail; open: boolean; onToggle: () => void; tz: string }) {
+function DraftRow({ item, detail, loading, open, onToggle, tz }: { item: DraftItem; detail?: DraftDetail; loading: boolean; open: boolean; onToggle: () => void; tz: string }) {
   const id = asText(item.id);
   const flags = draftFlags(detail);
   const target = detail ? draftTargetText(detail) : '';
@@ -95,9 +98,9 @@ function DraftRow({ item, detail, open, onToggle, tz }: { item: DraftItem; detai
             <blockquote className="work-draft__quote" data-testid="work-draft-preview">
               {preview}
             </blockquote>
-          ) : detail ? null : (
+          ) : loading ? (
             <Skeleton width="70%" height={14} />
-          )}
+          ) : null}
           {hold ? (
             <p className="work-draft__hold" data-testid="work-draft-hold">
               <Icon name="ph ph-warning" size={14} />
@@ -139,17 +142,21 @@ export function DecideList({
   const [openId, setOpenId] = useState<string | null>(null);
   const items = Array.isArray(drafts.data?.items) ? drafts.data.items.filter((d) => asText(d?.id)) : [];
   // Chi tiết từng nháp (cờ vượt ngưỡng / ghi ra ngoài + nội dung); cùng khoá với DraftDecide nên mở rộng không tải lại từ đầu.
+  // Chỉ tải chi tiết cho DETAIL_MAX nháp đầu (danh sách rất dài không bắn hàng chục yêu cầu); nháp sau vẫn hiện, mở rộng thì mới tải.
+  const detailItems = items.slice(0, DETAIL_MAX);
   const detailQs = useQueries({
-    queries: items.map((d) => ({
+    queries: detailItems.map((d) => ({
       queryKey: qk3.draft(asText(d.id)),
       queryFn: ({ signal }: { signal: AbortSignal }) => api.drafts.get(asText(d.id), signal),
       staleTime: 30_000,
     })),
   });
   const details = new Map<string, DraftDetail>();
-  items.forEach((d, i) => {
+  const loadingIds = new Set<string>();
+  detailItems.forEach((d, i) => {
     const data = detailQs[i]?.data;
     if (data) details.set(asText(d.id), data);
+    else if (detailQs[i]?.isPending) loadingIds.add(asText(d.id));
   });
   const title = 'Cần Sếp quyết';
 
@@ -201,6 +208,7 @@ export function DecideList({
             key={asText(d.id)}
             item={d}
             detail={details.get(asText(d.id))}
+            loading={loadingIds.has(asText(d.id))}
             open={openId === asText(d.id)}
             onToggle={() => setOpenId((cur) => (cur === asText(d.id) ? null : asText(d.id)))}
             tz={tz}

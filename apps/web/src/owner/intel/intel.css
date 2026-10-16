@@ -29,7 +29,8 @@
 .intel-big {
   font-size: var(--fs-28); line-height: var(--lh-28); font-weight: var(--fw-600); color: var(--text); font-variant-numeric: tabular-nums;
 }
-.intel-history { border-top: 0; }
+/* Ngăn chi tiết nằm ngoài vùng .kit-scope (cổng React) nên tự đặt đệm dòng danh sách. */
+.intel-history { --kit-pad: var(--sp-2); border-top: 0; }
 
 /* Cảnh báo: viền bad CHỈ khi có mục Khẩn; rỗng thì ẩn trên điện thoại (hiện từ 760px với một câu). */
 .kit-scope .gh-card.intel-alerts--bad { border-color: var(--bad); }

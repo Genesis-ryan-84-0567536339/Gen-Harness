@@ -157,6 +157,16 @@ export function TodayTasks({ data, kicker, tz = DEFAULT_TZ, className }: { data:
   const done = useTaskDone();
   const postpone = useTaskPostpone();
   const keep = useKeepPromise();
+  // Ô tick giữ trạng thái "đã tick" NGAY khi bấm (đồng bộ) — không chờ cờ isPending của mutation, nếu không React trả ô về chưa tick
+  // trong lúc chờ. Lỗi ⇒ bỏ tick để Sếp bấm lại; thành công ⇒ dòng biến mất khi danh sách tải lại.
+  const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
+  const mark = (key: string, on: boolean) =>
+    setTicked((cur) => {
+      const next = new Set(cur);
+      if (on) next.add(key);
+      else next.delete(key);
+      return next;
+    });
   const title = 'Việc hôm nay';
   if (data.isPending) return <Card title={title} state="loading" className={className} data-testid="work-today-loading" />;
   if (data.isError) {
@@ -194,17 +204,24 @@ export function TodayTasks({ data, kicker, tz = DEFAULT_TZ, className }: { data:
       {data.promisesFailed ? <p className="work-note owner-muted">Chưa tải được danh sách lời hứa — Sếp thử lại sau ít phút.</p> : null}
       <ul className="work-list" aria-label="Việc hôm nay">
         {data.items.map((it) => {
-          const pending = (it.kind === 'task' ? done.isPending && done.variables === it.id : keep.isPending && keep.variables === it.id) || (postpone.isPending && postpone.variables?.id === it.id);
+          const key = `${it.kind}-${it.id}`;
+          const isTicked = ticked.has(key);
+          const pending = isTicked || (postpone.isPending && postpone.variables?.id === it.id);
           return (
-            <li key={`${it.kind}-${it.id}`} className="work-task" aria-busy={pending || undefined} data-testid="work-task-row" data-kind={it.kind}>
+            <li key={key} className="work-task" aria-busy={pending || undefined} data-testid="work-task-row" data-kind={it.kind}>
               <input
                 type="checkbox"
                 className="work-check"
                 aria-label={`Xong: ${it.title}`}
-                checked={pending}
+                checked={isTicked}
                 disabled={pending}
                 data-testid="work-task-done"
-                onChange={() => (it.kind === 'task' ? done.mutate(it.id) : keep.mutate(it.id))}
+                onChange={() => {
+                  mark(key, true);
+                  const opts = { onError: () => mark(key, false) };
+                  if (it.kind === 'task') done.mutate(it.id, opts);
+                  else keep.mutate(it.id, opts);
+                }}
               />
               <div className="work-task__body">
                 <span className="work-task__title">{it.title}</span>
