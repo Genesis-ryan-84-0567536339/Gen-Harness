@@ -68,14 +68,16 @@
 .rel-sheet__body { background: transparent; }
 
 .rel-scores { display: flex; flex-direction: column; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
+/* Khung hồ sơ hẹp (cột 4/12 ở 1024px ≈ 220px): nhãn giữ tối thiểu ~7rem rồi số + xu hướng xuống dòng, không bị ép
+ * thành chữ dọc từng ký tự (lính gác bố cục `chu-bi-ep`). */
 .rel-score {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--sp-3);
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3);
   min-height: var(--tap); padding: var(--sp-2) var(--sp-3); background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-8);
 }
-.rel-score__label { min-width: 0; color: var(--text-2); overflow-wrap: anywhere; }
-.rel-score__value { font-size: var(--fs-18); line-height: var(--lh-18); font-weight: var(--fw-600); font-variant-numeric: tabular-nums; }
+.rel-score__label { flex: 1 1 7rem; min-width: 0; color: var(--text-2); overflow-wrap: anywhere; }
+.rel-score__value { flex: none; font-size: var(--fs-18); line-height: var(--lh-18); font-weight: var(--fw-600); font-variant-numeric: tabular-nums; }
 .rel-score__trend {
-  display: inline-flex; align-items: center; justify-content: flex-end; gap: var(--sp-1); min-width: 88px;
+  flex: none; display: inline-flex; align-items: center; justify-content: flex-end; gap: var(--sp-1); min-width: 88px;
   font-size: var(--fs-12); line-height: var(--lh-12); color: var(--text-3); white-space: nowrap;
 }
 .rel-score[data-tone='ok'] .rel-score__trend { color: var(--ok-ink); }
@@ -89,9 +91,10 @@
 .rel-timeline li { display: grid; grid-template-columns: var(--sp-6) minmax(0, 1fr); gap: var(--sp-2); overflow-wrap: anywhere; }
 .rel-timeline__at { font-size: var(--fs-12); line-height: var(--lh-14); color: var(--text-3); }
 .rel-facts { display: flex; flex-direction: column; gap: var(--sp-2); margin: 0; }
-.rel-fact { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-3); min-width: 0; }
+/* Khung hẹp: giá trị (dd) giữ tối thiểu ~7rem, không đủ chỗ thì xuống dòng dưới nhãn thay vì bị ép còn vài ký tự một dòng. */
+.rel-fact { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: var(--sp-1) var(--sp-3); min-width: 0; }
 .rel-fact dt { flex: none; color: var(--text-3); }
-.rel-fact dd { display: flex; flex-direction: column; align-items: flex-end; margin: 0; min-width: 0; text-align: right; overflow-wrap: anywhere; }
+.rel-fact dd { flex: 1 1 7rem; display: flex; flex-direction: column; align-items: flex-end; margin: 0; min-width: 0; text-align: right; overflow-wrap: anywhere; }
 .rel-note-text { margin: 0; overflow-wrap: anywhere; }
 
 @media (min-width: 760px) {

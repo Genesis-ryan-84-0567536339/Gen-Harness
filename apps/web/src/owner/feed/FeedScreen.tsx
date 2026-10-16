@@ -45,7 +45,7 @@ function FeedRow({ item, selected, onSelect }: { item: FeedItem; selected: boole
       }
       meta={
         <>
-          {summary ? <span className="feed-row__summary">{summary}</span> : null}
+          {summary ? <span className="feed-row__summary" title={summary}>{summary}</span> : null}
           {meta ? <span className="feed-row__meta">{meta}</span> : null}
         </>
       }
