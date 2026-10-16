@@ -411,10 +411,27 @@ def token_expiry(raw: bytes) -> float | None:
     return None
 
 
+_REFRESH_KEYS = ("refresh_token", "refreshToken")
+
+
+def _has_refresh_token(raw: bytes) -> bool:
+    try:
+        data = orjson.loads(raw)
+    except orjson.JSONDecodeError:
+        return False
+    return isinstance(data, dict) and any(isinstance(data.get(k), str) and data.get(k) for k in _REFRESH_KEYS)
+
+
 def token_needs_refresh(raw: bytes, *, now: float | None = None, window: float = TOKEN_REFRESH_WINDOW_S) -> bool:
-    """Token truy cập đã hoặc sắp hết hạn (trong `window` giây) ⇒ lượt agy kế tiếp có thể làm mới token."""
+    """Token truy cập đã hoặc sắp hết hạn (trong `window` giây) ⇒ lượt agy kế tiếp có thể làm mới token.
+
+    Review lần 2 v0.1.62: tệp có refresh token mà KHÔNG đọc được hạn (thiếu / sai định dạng `expiry`, `expires_at`,
+    `exp`) ⇒ coi như CÓ THỂ làm mới (khoá độc quyền, chậm hơn nhưng không làm hỏng phiên); tệp không phải JSON hoặc
+    không có refresh token thì không có gì để làm mới ⇒ không khoá."""
     exp = token_expiry(raw)
-    return exp is not None and exp - (time.time() if now is None else now) <= window
+    if exp is None:
+        return _has_refresh_token(raw)
+    return exp - (time.time() if now is None else now) <= window
 
 
 def cli_home_dir(cli_home: str) -> Path:
