@@ -7,7 +7,6 @@ import pytest
 from sqlalchemy import text
 
 from gh.config import get_settings
-from gh.crypto import hash_secret
 from gh.db import admin_sessionmaker
 from tests.conftest import OWNER, Api
 
@@ -152,12 +151,18 @@ async def test_last_owner_is_protected(owner_api: Api, app: object) -> None:
     async with admin_sessionmaker()() as db:
         await db.execute(text("""UPDATE core.role_permissions SET scope = 'all' WHERE permission_code = 'roles.manage'
                                  AND role_id IN (SELECT id FROM core.roles WHERE code = 'manager')"""))
-        await db.execute(text("UPDATE core.users SET must_change_password = false, pin_hash = :p WHERE email = :e"),
-                         {"p": hash_secret("135790"), "e": "lan@example.vn"})
         await db.commit()
     owner_id = (await owner_api.get("/users")).json()["items"][0]["id"]
     c, lan, r = await _login(app, "lan@example.vn", str(out["temp_password"]))
     try:
+        # Người mời THẬT: đổi mật khẩu tạm rồi tự đặt PIN lần đầu (v0.1.61) — không chèn pin_hash bằng SQL.
+        new_pw = "mat-khau-moi-cua-lan-88"
+        r = await lan.send("POST", "/account/password",
+                           {"current_password": out["temp_password"], "new_password": new_pw})
+        assert r.status_code == 200, r.text
+        r = await lan.send("POST", "/account/pin", {"current_password": new_pw, "new_pin": "135790",
+                                                    "new_pin_confirm": "135790"})
+        assert r.status_code == 204, r.text
         await _pin(lan, "135790")
         r = await lan.send("PATCH", f"/users/{owner_id}/role", {"role": "manager"})
         assert r.status_code == 409 and r.json()["code"] == "LAST_OWNER"

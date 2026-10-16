@@ -9,15 +9,17 @@ from gh.shell import navigation
 from tests.conftest import Api
 
 PASSWORD = "mat-khau-nhan-vien-01"
+PIN = "112233"
 
 
 async def add_user(db, role: str) -> str:  # type: ignore[no-untyped-def]
     org = (await db.execute(text("SELECT id FROM core.organizations"))).scalar_one()
     email = f"{role}@example.vn"
-    uid = (await db.execute(text("""INSERT INTO core.users (org_id, email, display_name, password_hash, pin_hash)
-                                    VALUES (:o, :e, :n, :p, :pin) RETURNING id"""),
-                            {"o": org, "e": email, "n": role, "p": hash_secret(PASSWORD),
-                             "pin": hash_secret("112233")})).scalar_one()
+    # v0.1.61 (F071): KHÔNG chèn pin_hash bằng SQL — cách đó che mất lỗi "người được mời không có đường đặt PIN".
+    # Người dùng tạo không PIN, rồi tự đặt PIN lần đầu qua POST /account/pin (xem login_as).
+    uid = (await db.execute(text("""INSERT INTO core.users (org_id, email, display_name, password_hash)
+                                    VALUES (:o, :e, :n, :p) RETURNING id"""),
+                            {"o": org, "e": email, "n": role, "p": hash_secret(PASSWORD)})).scalar_one()
     await db.execute(text("""INSERT INTO core.user_roles (user_id, role_id)
                              SELECT :u, id FROM core.roles WHERE code = :r"""), {"u": uid, "r": role})
     await db.commit()
@@ -30,6 +32,8 @@ async def login_as(client, db, role: str) -> Api:  # type: ignore[no-untyped-def
     api = Api(c)
     r = await api.send("POST", "/auth/login", {"email": email, "password": PASSWORD})
     assert r.status_code == 200, r.text
+    r = await api.send("POST", "/account/pin", {"current_password": PASSWORD, "new_pin": PIN, "new_pin_confirm": PIN})
+    assert r.status_code == 204, r.text  # đặt PIN lần đầu bằng mật khẩu — đường thật mọi vai trò dùng
     return api
 
 
@@ -92,7 +96,7 @@ async def test_endpoint_permissions(owner_api, client, db, role, audit, verify, 
     assert (await api.get("/audit/verify")).status_code == verify
     assert (await api.get("/plugins")).status_code == plugins
     # Không ai ngoài Owner bật/tắt plugin — kể cả khi đã nhập PIN.
-    await api.send("POST", "/auth/pin/verify", {"pin": "112233"})
+    await api.send("POST", "/auth/pin/verify", {"pin": PIN})
     r = await api.send("PATCH", "/plugins/@gen/chassis-bus/toggle", {"enabled": False})
     assert r.status_code == 403
 

@@ -250,11 +250,19 @@ async def test_load_session_without_renew_is_read_only(owner_api: Api) -> None:
     assert user is not None and user.session_renewed is False
     assert tuple(await snapshot()) == tuple(before)
 
-    # Mặc định (HTTP) vẫn gia hạn như cũ.
+    # Mặc định (HTTP) vẫn gia hạn phiên đăng nhập trượt; phiên PIN (v0.1.61, F115) chỉ gia hạn khi nơi gọi bật
+    # `renew_pin` (lời gọi ghi do người bấm) — GET tự làm mới không giữ PIN sống mãi.
     async with sessionmaker()() as db:
         user = await service.load_session(db, token)
         await db.commit()
     after = await snapshot()
     assert user is not None and user.session_renewed is True
     assert after.expires_at - before.expires_at > timedelta(hours=1)
+    assert after.pin_verified_until == before.pin_verified_until
+
+    async with sessionmaker()() as db:
+        user = await service.load_session(db, token, renew_pin=True)
+        await db.commit()
+    after = await snapshot()
+    assert user is not None
     assert after.pin_verified_until > before.pin_verified_until
