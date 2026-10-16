@@ -10,7 +10,7 @@ import { offsiteNextStep, type OffsiteViewer } from './offsiteModel';
 export type HealthTone = 'ok' | 'warn' | 'bad' | 'muted';
 
 export interface HealthRow {
-  key: 'worker' | 'browser' | 'dlq' | 'backup' | 'offsite' | 'update' | 'disk' | 'autostart' | 'nightly' | 'watcher';
+  key: 'worker' | 'browser' | 'bridge' | 'dlq' | 'backup' | 'offsite' | 'update' | 'disk' | 'autostart' | 'nightly' | 'watcher';
   label: string;
   value: string;
   tone: HealthTone;
@@ -29,6 +29,44 @@ const GB = 1024 ** 3;
 /** 12_884_901_888 → "12,0 GB". */
 export function fmtGb(bytes: number): string {
   return `${fmtDec(bytes / GB, 1)} GB`;
+}
+
+/** Hàng lỗi tin khách vào: tin đã thử nhập kho 5 lần mà vẫn lỗi — hàng DUY NHẤT phát lại được (khớp `DLQ_REPLAYABLE` ở API). */
+export const INBOUND_STREAM = 'gh.bridge.inbound';
+
+/** Tên hàng lỗi theo loại (chữ cho Sếp); hàng chưa biết ⇒ "Việc nền khác" (tên kỹ thuật chỉ ở "Chi tiết kỹ thuật"). */
+const QUEUE_LABELS: Record<string, string> = {
+  [INBOUND_STREAM]: 'Tin khách chưa nhập kho được',
+  'gh.bridge.status': 'Trạng thái kênh chưa ghi nhận được',
+  'gh.bridge.directory': 'Danh bạ nhóm chưa cập nhật được',
+  'gh.clean.ready': 'Tin chờ sàng lọc bị lỗi',
+  'gh.action.requested': 'Đề xuất của Gen bị lỗi',
+  'gh.action.decided': 'Quyết định duyệt bị lỗi',
+};
+
+export interface HealthQueue {
+  /** Tên stream gốc (không `.dlq`) — đúng tham số của `POST /system/queues/{stream}/replay|clear`. */
+  stream: string;
+  label: string;
+  count: number;
+  /** Có nút "Phát lại" (chỉ tin khách vào); mọi hàng đều có "Đã xem, xoá". */
+  replayable: boolean;
+}
+
+/** Các hàng lỗi đang có việc (> 0), tin khách vào trước. */
+export function healthQueues(h: SystemHealth): HealthQueue[] {
+  return h.queues
+    .filter((q) => Number.isFinite(q.dlq) && q.dlq > 0)
+    .map((q) => ({ stream: q.stream, label: QUEUE_LABELS[q.stream] ?? 'Việc nền khác', count: q.dlq, replayable: q.stream === INBOUND_STREAM }))
+    .sort((a, b) => Number(b.replayable) - Number(a.replayable) || a.stream.localeCompare(b.stream));
+}
+
+function dlqHint(hasInbound: boolean, hasOthers: boolean): string {
+  const report = 'Vẫn lỗi thì gửi kèm khi báo lỗi (Trợ giúp › Báo lỗi).';
+  if (hasInbound) {
+    return `Tin khách chưa mất — đang nằm chờ. Bấm "Phát lại" để nhập kho lại. ${report}${hasOthers ? ' Việc khác đã thử lại nhiều lần mà vẫn lỗi: xem rồi bấm "Đã xem, xoá" để dọn.' : ''}`;
+  }
+  return `Việc này đã thử lại nhiều lần mà vẫn lỗi nên sẽ không tự hết. Xem rồi bấm "Đã xem, xoá" để dọn; ${report.replace(/^V/, 'v')}`;
 }
 
 /** Các dòng chính của thẻ "Sức khoẻ hệ thống" (theo đúng thứ tự hiển thị). */
@@ -58,11 +96,36 @@ export function healthRows(
         : { key: 'browser', label: 'Trình duyệt nền', value: 'Chưa bật', tone: 'muted' },
   );
 
-  const dlq = h.queues.reduce((sum, q) => sum + (Number.isFinite(q.dlq) ? q.dlq : 0), 0);
-  // Thuật ngữ "DLQ" chỉ ở "Chi tiết kỹ thuật" (healthTechRows); chưa có màn xem từng việc lỗi ⇒ chỉ báo số lượng.
+  // F051: bộ nhận tin Zalo/WhatsApp (cầu nối) — khối chỉ có khi có nhịp hoặc có kênh đang "kết nối" ⇒ vắng khối thì không dòng.
+  const br = h.bridge;
+  if (br) {
+    rows.push(
+      br.state === 'silent'
+        ? {
+            key: 'bridge',
+            label: 'Bộ nhận tin Zalo/WhatsApp',
+            value: br.silent_minutes != null ? `Đã ngừng ${fmtInt(br.silent_minutes)} phút — tin khách chưa vào được` : 'Đã ngừng — tin khách chưa vào được',
+            tone: 'bad',
+          }
+        : { key: 'bridge', label: 'Bộ nhận tin Zalo/WhatsApp', value: br.last_seen_at ? `Đang chạy · lần cuối ${fmtAgo(br.last_seen_at, now, tz)}` : 'Đang chạy', tone: 'ok' },
+    );
+  }
+
+  // Thuật ngữ "DLQ" chỉ ở "Chi tiết kỹ thuật" (healthTechRows). Hàng lỗi KHÔNG tự hết (việc đã thử 5 lần mà vẫn lỗi):
+  // tin khách vào có nút "Phát lại", mọi hàng đều có "Đã xem, xoá" (HealthCard) — câu gợi ý nói đúng như vậy.
+  const dq = healthQueues(h);
+  const inbound = dq.find((q) => q.replayable);
+  const others = dq.filter((q) => !q.replayable).reduce((sum, q) => sum + q.count, 0);
+  const dlq = dq.reduce((sum, q) => sum + q.count, 0);
   rows.push(
     dlq > 0
-      ? { key: 'dlq', label: 'Việc nền bị lỗi', value: `${fmtInt(dlq)} việc`, tone: 'warn', hint: 'Thường tự hết, chưa cần làm gì; kéo dài nhiều ngày thì gửi kèm khi báo lỗi (Trợ giúp › Báo lỗi).' }
+      ? {
+          key: 'dlq',
+          label: 'Việc nền bị lỗi',
+          value: inbound ? `${fmtInt(inbound.count)} tin khách chưa nhập kho${others > 0 ? ` · ${fmtInt(others)} việc khác` : ''}` : `${fmtInt(dlq)} việc`,
+          tone: 'warn',
+          hint: dlqHint(!!inbound, others > 0),
+        }
       : { key: 'dlq', label: 'Việc nền bị lỗi', value: 'Không có', tone: 'ok' },
   );
 
@@ -206,7 +269,7 @@ export interface HealthTipStep {
   cmd?: string;
 }
 export interface HealthTip {
-  key: 'disk' | 'worker' | 'autostart' | 'nightly' | 'watcher';
+  key: 'disk' | 'worker' | 'bridge' | 'autostart' | 'nightly' | 'watcher';
   title: string;
   steps: HealthTipStep[];
   /** Cảnh báo rủi ro (Sếp tự quyết, nhưng phải thấy rõ). */
@@ -246,6 +309,19 @@ export function healthTips(h: SystemHealth): HealthTip[] {
         { text: 'Trên máy chủ, dừng rồi bật lại toàn bộ dịch vụ (không mất dữ liệu, Console tạm gián đoạn khoảng 1 phút):', cmd: 'genh stop' },
         { text: 'Rồi:', cmd: 'genh start' },
         { text: 'Vẫn ngừng thì xem lỗi của Bộ xử lý nền và gửi kèm khi báo lỗi (Trợ giúp › Báo lỗi):', cmd: 'genh logs worker' },
+      ],
+    });
+  }
+  if (h.bridge?.state === 'silent') {
+    // F051: đích của nút "Xem sức khoẻ" (bridge.silent) — dịch vụ bridge chạy riêng, khởi động lại không mất dữ liệu.
+    tips.push({
+      key: 'bridge',
+      title: 'Cách khởi động lại Bộ nhận tin Zalo/WhatsApp',
+      steps: [
+        { text: 'Trên máy chủ, xem lỗi của bộ nhận tin (dịch vụ bridge) và gửi kèm khi báo lỗi nếu cần (Trợ giúp › Báo lỗi):', cmd: 'genh logs bridge' },
+        { text: 'Dừng rồi bật lại toàn bộ dịch vụ (không mất dữ liệu, Console tạm gián đoạn khoảng 1 phút):', cmd: 'genh stop' },
+        { text: 'Rồi:', cmd: 'genh start' },
+        { text: 'Tin khách gửi trong lúc bộ nhận tin dừng có thể không về — hỏi lại khách nếu cần. Chạy lại xong, thẻ kênh và dòng này tự về bình thường.' },
       ],
     });
   }
@@ -325,7 +401,11 @@ export function healthTechRows(h: SystemHealth, tz = DEFAULT_TZ): { crons: Healt
     value: c.last_at ? `${fmtDMClock(c.last_at, tz)} · ${c.ok === false ? 'lỗi' : c.ok === true ? 'ok' : '—'}` : 'chưa chạy',
     tone: (c.ok === false ? 'bad' : c.ok === true ? 'ok' : 'muted') as HealthTone,
   }));
-  const queues = h.queues.map((q) => ({ name: `${q.stream}.dlq`, value: fmtInt(q.dlq), tone: (q.dlq > 0 ? 'warn' : 'ok') as HealthTone }));
+  const queues = h.queues.map((q) => ({
+    name: `${q.stream}.dlq`,
+    value: `${fmtInt(q.dlq)}${q.dlq > 0 ? ` · ${QUEUE_LABELS[q.stream] ?? 'Việc nền khác'}` : ''}`,
+    tone: (q.dlq > 0 ? 'warn' : 'ok') as HealthTone,
+  }));
   return { crons, queues };
 }
 

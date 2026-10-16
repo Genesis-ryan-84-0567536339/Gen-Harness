@@ -414,11 +414,26 @@ export interface HealthIssue {
   action: string;
   raised_at: string;
 }
+export interface QueueReplayResult {
+  stream: string;
+  replayed: number;
+  remaining: number;
+}
+export interface QueueClearResult {
+  stream: string;
+  cleared: number;
+  remaining: number;
+}
 export interface SystemHealth {
   checked_at: string;
   overall: 'ok' | 'warn' | 'bad';
   worker: { state: 'ok' | 'silent' | 'unknown'; alive: boolean; last_seen_at: string | null; silent_minutes: number | null };
   browser: { state: 'ok' | 'silent' | 'off'; last_heartbeat_at: string | null };
+  /**
+   * v0.1.62 (F051): cầu nối tin nhắn (Zalo/WhatsApp). CHỈ có khi có nhịp hoặc có kênh đang "kết nối" (chưa dùng cầu nối
+   * ⇒ vắng khối). 'silent' = nhịp mất > 2 phút mà kênh vẫn ghi "Đang kết nối" (kèm sự cố bridge.silent).
+   */
+  bridge?: { state: 'ok' | 'silent'; last_seen_at: string | null; silent_minutes: number | null };
   /** `stream` là tên stream gốc (không có `.dlq`). */
   queues: Array<{ stream: string; dlq: number }>;
   crons: Array<{ name: string; last_at: string | null; ok: boolean | null }>;
@@ -677,6 +692,10 @@ export function systemEndpoints(r: ApiClient['request']) {
     /** v0.1.36 (F-6): sức khoẻ hệ thống + sự cố cần Sếp xử lý. */
     systemHealth: {
       get: (signal?: AbortSignal) => r<SystemHealth>('/system/health', { signal }),
+      /** v0.1.62 (F064): `system.manage` + PIN. Chỉ `gh.bridge.inbound` phát lại được (hàng khác 409 QUEUE_NOT_REPLAYABLE). */
+      replayQueue: (stream: string) => r<QueueReplayResult>(`/system/queues/${enc(stream)}/replay`, { method: 'POST' }),
+      /** v0.1.62 (F102): "Đã xem, xoá" — `system.manage` + PIN; ghi Action Log. */
+      clearQueue: (stream: string) => r<QueueClearResult>(`/system/queues/${enc(stream)}/clear`, { method: 'POST' }),
     },
     /** v0.1.41 (F-84): Chi phí AI hôm nay + trần ngân sách + giá model (sửa cần `system.manage`). */
     aiCost: {

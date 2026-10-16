@@ -52,6 +52,8 @@ export const HEALTH_KINDS: ReadonlySet<string> = new Set([
   'hub.unreachable',
   // v0.1.53 (F-99): lịch tự cập nhật đêm không chạy / Sếp đã tắt mà lịch vẫn bật.
   'host.nightly',
+  // v0.1.62 (F051, F064): bộ nhận tin Zalo/WhatsApp im; tin khách nằm trong hàng lỗi.
+  'bridge.silent', 'dlq.inbound',
 ]);
 
 /** v0.1.36 (F-6): `GET /system/health` — chỉ gọi khi vai trò có `system.read` (`enabled`); tự hỏi lại mỗi 60 giây. */
@@ -165,5 +167,25 @@ export const useSetBackgroundSources = () => {
       void qc.invalidateQueries({ queryKey: qkSystem.backgroundSources });
       void qc.invalidateQueries({ queryKey: qkSystem.health });
     },
+  });
+};
+
+/**
+ * v0.1.62 (F064/F102): "Phát lại" / "Đã xem, xoá" một hàng lỗi — `system.manage` + mã PIN (hộp PIN tự mở qua lib/api.ts rồi
+ * gửi lại). Xong làm mới thẻ Sức khoẻ và dải "Cần Sếp xử lý" (sự cố `dlq.inbound` đóng ngay khi hàng hết).
+ */
+export const useReplayQueue = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (stream: string) => api.systemHealth.replayQueue(stream),
+    onSettled: () => void qc.invalidateQueries({ queryKey: qkSystem.health }),
+  });
+};
+
+export const useClearQueue = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (stream: string) => api.systemHealth.clearQueue(stream),
+    onSettled: () => void qc.invalidateQueries({ queryKey: qkSystem.health }),
   });
 };

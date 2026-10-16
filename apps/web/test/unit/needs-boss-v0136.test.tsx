@@ -213,8 +213,10 @@ describe('v0.1.36 — healthModel (thẻ "Sức khoẻ hệ thống")', () => {
     const rows = byKey(health({ queues: [{ stream: 'gh:raw', dlq: 2 }], browser: { state: 'silent', last_heartbeat_at: new Date(NOW - 5 * 60_000).toISOString() } }));
     expect(rows.dlq.label).toBe('Việc nền bị lỗi');
     expect(rows.dlq.value).toBe('2 việc');
-    // Dòng vàng phải nói Sếp cần làm gì (ở đây: thường không cần làm gì).
-    expect(rows.dlq.hint).toContain('Thường tự hết');
+    // Dòng vàng phải nói Sếp cần làm gì: hàng lỗi KHÔNG tự hết (F102) ⇒ xem rồi "Đã xem, xoá".
+    expect(rows.dlq.hint).not.toContain('Thường tự hết');
+    expect(rows.dlq.hint).toContain('sẽ không tự hết');
+    expect(rows.dlq.hint).toContain('Đã xem, xoá');
     expect(rows.dlq.hint).toContain('Báo lỗi');
     expect(rows.browser.value).toBe('Ngừng từ 5 phút trước');
   });

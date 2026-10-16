@@ -61,6 +61,8 @@ PIN_OPERATIONS: dict[str, str] = {
     # v0.1.55 (G1): "Về mặc định tất cả" — đưa mọi cài đặt có thể reset về mặc định (không đụng khoá API, phiên CLI, mã
     # PIN, mật khẩu, token Gen-hub/Telegram, tài khoản mạng xã hội, danh tính tổ chức, ranh giới cứng).
     "defaults.reset_all": "Về mặc định tất cả cài đặt",
+    # v0.1.62 (F064/F102): phát lại tin khách nằm trong hàng lỗi / xoá hàng lỗi đã xem (không hoàn tác được).
+    "queue.manage": "Phát lại / xoá việc nền bị lỗi",
 }
 
 
