@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import type { AgentBindingSlot, BindableModel, Effort, Provider, ProviderKind } from '@gen-harness/contracts';
 import { ApiError, SCREEN_BY_KEY } from '@gen-harness/contracts';
 import { Button, Dialog, EmptyState, Icon, SelectField, Switch, TextField } from '@gen-harness/ui';
+import { agyBlockedReason, isAgyModel } from '../../lib/agyLayers';
 import { useProviders } from '../../lib/dataQueries';
 import { errorDetail, errorReasons, errorText } from '../../lib/errorText';
 import { useCan } from '../../lib/permissions';
@@ -297,6 +298,12 @@ function BindingsPanel({ canManage }: { canManage: boolean }) {
                   ) : (
                     <span>{bindingModelText(slot)}</span>
                   )}
+                  {/* Gói G: dòng gán agy cũ của khoá ngoại giao (máy chủ bỏ qua khi chạy) ⇒ nói thật để Sếp đổi model. */}
+                  {slot.binding && agyBlockedReason(slot) && isAgyModel(bindings.data.models.find((m) => m.id === slot.binding?.model_id) ?? {}) ? (
+                    <div className="muted-note" role="note" data-testid={`binding-agy-blocked-${slot.agent_key}`}>
+                      {agyBlockedReason(slot)} — dòng này đang chạy bằng model khác, hãy chọn lại model.
+                    </div>
+                  ) : null}
                   {/* v0.1.55: chưa gán ⇒ "Mặc định" (hồ sơ tiêu chuẩn theo vai); Sếp đã gán ⇒ "Đã đổi". Máy chủ cũ: không chip. */}
                   {slot.source ? (
                     <span style={{ marginLeft: 6 }}>
@@ -324,7 +331,7 @@ function BindingsPanel({ canManage }: { canManage: boolean }) {
 
 /**
  * Lỗi khi lưu gán model — câu thân thiện (title của ApiError) + phần mã/lý do để trong "Chi tiết kỹ thuật". Luôn trả
- * chuỗi (không bao giờ đưa đối tượng vào JSX). v0.1.62: model của Antigravity CLI gán được cho MỌI khoá (không còn
+ * chuỗi (không bao giờ đưa đối tượng vào JSX). v0.1.62: model của Antigravity CLI gán được cho mọi khoá, trừ lớp ngoại giao ở gói G (422, xem `agy_blocked_reason`; không còn
  * lỗi 409 AGY_OWNER_GEN_ONLY).
  */
 function bindingErrorView(e: unknown): { message: string; detail: string | null } {
@@ -346,10 +353,14 @@ function BindingEditDialog({ slot, models, onClose }: { slot: AgentBindingSlot; 
   const set = useSetBinding();
   const providers = useProviders();
   // v0.1.55: slot chưa gán chọn sẵn đúng model hồ sơ chuẩn đang phủ (nếu có trong danh sách), rồi mới tới model đầu tiên.
-  // v0.1.62: model Antigravity CLI chọn được ở MỌI dòng (kể cả sàng lọc, Bản tin, agent tự tạo) — không lọc, không làm mờ.
+  // Gói G: dòng ngoại giao (core.reply, agent gắn kênh / nhóm / người) chưa dùng agy ⇒ model agy bị làm mờ + giải thích;
+  // lý do do máy chủ trả (`agy_blocked_reason`), máy chủ từ chối 422 nếu vẫn gán.
+  const agyBlocked = agyBlockedReason(slot);
+  const usable = (m: BindableModel) => !(agyBlocked && isAgyModel(m));
   const std = slot.standard;
   const standardId = std ? models.find((m) => m.model_name === std.model_name && m.provider_name === std.provider_name)?.id : undefined;
-  const preferred = slot.binding?.model_id ?? standardId ?? models[0]?.id ?? '';
+  const boundId = slot.binding && models.some((m) => m.id === slot.binding?.model_id && usable(m)) ? slot.binding.model_id : undefined;
+  const preferred = boundId ?? standardId ?? models.find(usable)?.id ?? models[0]?.id ?? '';
   const [picked, setPicked] = useState<string | null>(null);
   const modelId = picked ?? preferred;
   const setModelId = setPicked;
@@ -416,11 +427,16 @@ function BindingEditDialog({ slot, models, onClose }: { slot: AgentBindingSlot; 
             </label>
             <select id="apm-binding-model" className="gh-input" value={modelId} onChange={(e) => setModelId(e.target.value)}>
               {models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {`${m.provider_name} · ${m.model_name}${m.enabled ? '' : ' (đã tắt)'}`}
+                <option key={m.id} value={m.id} disabled={!usable(m)}>
+                  {`${m.provider_name} · ${m.model_name}${m.enabled ? '' : ' (đã tắt)'}${usable(m) ? '' : ' (chưa dùng cho dòng này)'}`}
                 </option>
               ))}
             </select>
+            {agyBlocked ? (
+              <p className="muted-note" data-testid="binding-agy-blocked-note">
+                {agyBlocked}
+              </p>
+            ) : null}
           </div>
         )}
         {efforts.length ? (

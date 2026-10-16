@@ -141,15 +141,22 @@ export function createMock(opts: P4ApiOptions) {
   function bindableModels(): BindableModel[] {
     const out: BindableModel[] = [];
     for (const p of opts.getProviders()) {
-      for (const m of p.models) out.push({ id: m.id, model_name: m.model_name, provider_name: p.name, enabled: p.enabled });
+      for (const m of p.models) out.push({ id: m.id, model_name: m.model_name, provider_name: p.name, kind: p.kind, enabled: p.enabled });
     }
     return out;
   }
 
-  /** Model "Chuẩn" cho một khoá: model đầu tiên của nguồn đầu tiên dùng được (v0.1.62: agy cho mọi khoá); không có ⇒ null. */
+  /** Gói G (16/10/2026): như `gh.providers.agy_policy.decide` — core.reply (lớp ngoại giao) chưa dùng agy; khoá khác dùng được. */
+  const AGY_DIPLOMATIC_REASON = 'Antigravity chưa dùng cho việc trả lời người ngoài — chờ hộp riêng (bản sau)';
+  const agyBlockedFor = (agentKey: string): string | null => (agentKey === 'core.reply' ? AGY_DIPLOMATIC_REASON : null);
+
+  /** Model "Chuẩn" cho một khoá: model đầu tiên của nguồn đầu tiên dùng được (agy cho khoá core, trừ lớp ngoại giao); không có ⇒ null. */
   function standardFor(agentKey: string) {
     const prof = STANDARD_PROFILE[agentKey] ?? AGENT_PROFILE;
-    const providers = [...opts.getProviders()].filter((x) => x.enabled && x.kind !== 'system_one').sort((a, b) => a.failover_rank - b.failover_rank);
+    const blocked = agyBlockedFor(agentKey) !== null;
+    const providers = [...opts.getProviders()]
+      .filter((x) => x.enabled && x.kind !== 'system_one' && !(blocked && x.kind === 'antigravity_cli'))
+      .sort((a, b) => a.failover_rank - b.failover_rank);
     for (const pv of providers) {
       const m = pv.models[0];
       if (m) return { model_name: m.model_name, provider_name: pv.name, ...prof };
@@ -263,6 +270,8 @@ export function createMock(opts: P4ApiOptions) {
           // v0.1.55 (G1): `custom` = Sếp đã gán; `standard` = dùng hồ sơ chuẩn (+ model đang phủ).
           source: b ? 'custom' : 'standard',
           standard: b ? null : standardFor(agent_key),
+          standard_reason: b || standardFor(agent_key) ? null : agyBlockedFor(agent_key),
+          agy_blocked_reason: agyBlockedFor(agent_key),
         };
       });
       return reply(200, { items, models: bindableModels() });
@@ -278,6 +287,10 @@ export function createMock(opts: P4ApiOptions) {
       const modelId = String(b.model_id ?? '');
       const found = findModel(modelId);
       if (!found) return problem(404, 'NOT_FOUND', 'Model không tồn tại');
+      const blocked = agyBlockedFor(agentKey);
+      if (blocked && opts.getProviders().find((x) => x.models.some((mm) => mm.id === modelId))?.kind === 'antigravity_cli') {
+        return problem(422, 'VALIDATION', 'Dữ liệu chưa hợp lệ', { errors: { model_id: blocked } });
+      }
       // v0.1.55 (G1): `effort` kiểm theo nguồn — khoá API và haiku không có mức suy nghĩ (422 `effort`).
       const effort = typeof b.effort === 'string' ? b.effort : null;
       if (effort) {

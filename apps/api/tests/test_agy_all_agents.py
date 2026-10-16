@@ -49,7 +49,8 @@ from tests.test_ux_v0128 import _provider as _key_provider
 
 MSGS = [Message("user", "nội dung của khách")]
 BG_CASES = [("core.refinery", "refinery.extract"), ("core.briefing", "gen.briefing"), ("agent:{id}", "duty_decide")]
-ALL_CASES = [*BG_CASES, ("core.gen", "gen.turn"), ("core.reply", "draft_translate"), ("agent:{id}", "setup_agent_try")]
+# Gói G: core.reply (ngoại giao) KHÔNG nằm ở đây — ngoại lệ có chủ đích, xem test_agy_phan_lop.py.
+ALL_CASES = [*BG_CASES, ("core.gen", "gen.turn"), ("agent:{id}", "setup_agent_try")]
 
 
 def _calls(clis: dict[str, Any]) -> list[dict[str, Any]]:
@@ -81,16 +82,17 @@ async def _agy_only(api: Api) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
 async def test_profiles_resolve_agy_for_every_role(owner_api, db, clis) -> None:  # type: ignore[no-untyped-def]
     org, _pid, _mid = await _agy_only(owner_api)
     aid = await _seed_agent(db, org)
-    keys = ["core.gen", "core.refinery", "core.briefing", "core.reply", f"agent:{aid}"]
+    keys = ["core.gen", "core.refinery", "core.briefing", f"agent:{aid}"]
     async with sessionmaker()() as s:
-        std, why = await profiles.standard_with_reasons(s, org, keys)
+        std, why = await profiles.standard_with_reasons(s, org, [*keys, "core.reply"])
+    assert std["core.reply"] is None and why["core.reply"] and "người ngoài" in why["core.reply"]   # gói G: ngoại giao
     for k in keys:
         c = std[k]
         assert c is not None and why[k] is None, (k, why[k])
         assert c["provider_kind"] == "antigravity_cli", k
     # Tầng theo vai: sàng lọc / Bản tin = nhanh (agy chỉ có flash = cân bằng ⇒ tầng gần nhất, mức thấp); Gen = cân bằng.
     assert (std["core.gen"]["model_name"], std["core.gen"]["effort"]) == ("gemini-3.8-flash", "medium")
-    for k in ("core.refinery", "core.briefing", "core.reply", f"agent:{aid}"):
+    for k in ("core.refinery", "core.briefing", f"agent:{aid}"):
         assert (std[k]["model_name"], std[k]["effort"]) == ("gemini-3.8-flash", "low"), k
     # Việc nền cũng được: khoá nền (BACKGROUND_ROLES) không còn bị loại agy.
     for k in ("core.refinery", "core.briefing", f"agent:{aid}"):
@@ -164,7 +166,7 @@ def _says(t: dict[str, Any]) -> list[str]:
     return [s["step"]["text"] for s in t["steps"] if s["step"]["kind"] == "say"]
 
 
-async def test_gen_turn_owner_and_staff_both_use_agy(owner_api, client, db, clis) -> None:  # type: ignore[no-untyped-def]
+async def test_gen_turn_owner_uses_agy_staff_does_not(owner_api, client, db, clis) -> None:  # type: ignore[no-untyped-def]
     org, _pid, _mid = await _agy_only(owner_api)
     n = len(_calls(clis))
     t = await _turn(owner_api, "Sáng nay có gì?")
@@ -178,7 +180,7 @@ async def test_gen_turn_owner_and_staff_both_use_agy(owner_api, client, db, clis
     try:
         n = len(_calls(clis))
         t = await _turn(manager, "Hôm nay có gì?")
-        assert len(_calls(clis)) > n                                              # nhân viên: agy CŨNG được gọi
+        assert len(_calls(clis)) == n          # gói G: nhân viên KHÔNG dùng agy (Gen của nhân viên dùng khoá API)
         assert not any("chỉ dùng cho Gen" in s or "luật an toàn" in s for s in _says(t)), t
         async with admin_sessionmaker()() as adb:
             failed = (await adb.execute(text("""SELECT detail FROM ops.action_log WHERE action = 'gen.answer'
@@ -253,6 +255,8 @@ async def test_bindings_have_no_api_key_reason_and_agy_assignable_to_every_key(o
     aid = await _seed_agent(db, org)
     items = {i["agent_key"]: i for i in (await api.get("/agents/bindings")).json()["items"]}
     assert set(items) == {"core.gen", "core.refinery", "core.briefing", "core.reply", f"agent:{aid}"}
+    reply = items.pop("core.reply")        # gói G: lớp ngoại giao — lý do trung thực, không phải "cần khoá API"
+    assert reply["standard"] is None and "người ngoài" in reply["standard_reason"]
     for k, it in items.items():                                              # (d)
         assert it["source"] == "standard" and it["standard_reason"] is None, k
         assert it["standard"]["model_name"] == "gemini-3.8-flash", k       # "Chuẩn: <model agy>" cho mọi dòng
@@ -260,7 +264,7 @@ async def test_bindings_have_no_api_key_reason_and_agy_assignable_to_every_key(o
     assert "cần khoá API" not in json.dumps(items, ensure_ascii=False)
     assert "chỉ dùng cho Gen" not in json.dumps(items, ensure_ascii=False)
 
-    for key in ("core.refinery", "core.briefing", "core.reply", "core.gen", f"agent:{aid}"):    # (e)
+    for key in ("core.refinery", "core.briefing", "core.gen", f"agent:{aid}"):    # (e)
         r = await api.send("PUT", f"/agents/bindings/{key}", {"model_id": str(mid)})
         assert r.status_code == 200, (key, r.text)
         b = r.json()["binding"]
@@ -269,7 +273,8 @@ async def test_bindings_have_no_api_key_reason_and_agy_assignable_to_every_key(o
     models = {m["model_name"] for m in listing["models"]}
     assert {"gemini-3.1-pro", "gemini-3.8-flash"} <= models      # ô chọn model liệt kê model agy cho mọi dòng
     got = {i["agent_key"]: i for i in listing["items"]}
-    assert all(got[k]["source"] == "custom" and "blocked_reason" not in got[k]["binding"] for k in got)
+    assert all(got[k]["source"] == "custom" and "blocked_reason" not in got[k]["binding"]
+               for k in got if k != "core.reply")
     detail = (await api.get(f"/agents/{aid}")).json()
     assert detail["binding"]["model_id"] == str(mid)
 

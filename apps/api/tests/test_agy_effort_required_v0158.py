@@ -337,8 +337,7 @@ async def test_heal_that_hangs_is_cut_and_gen_turn_goes_on(owner_api, app, needs
 
 
 @pytest.mark.parametrize("agent_key,purpose", [("core.refinery", "refinery.extract"), ("core.briefing", "gen.briefing"),
-                                               ("core.gen", "gen.briefing"), ("core.reply", "draft_translate"),
-                                               ("agent:{id}", "duty_decide")])
+                                               ("core.gen", "gen.briefing"), ("agent:{id}", "duty_decide")])
 async def test_background_and_other_roles_also_self_heal_agy(owner_api, app, needs_effort, agent_key, purpose) -> None:  # type: ignore[no-untyped-def]
     """v0.1.62: agy mở cho mọi vai ⇒ chuỗi rỗng ở việc nền / vai khác cũng tự lành (gọi thử một lần rồi lưu model) và
     lượt gọi trả lời bằng agy — trước đây (F-22) các vai này không bao giờ tới agy."""
@@ -370,9 +369,11 @@ async def test_bindings_show_agy_model_for_every_role(owner_api, needs_effort) -
     assert gen["source"] == "standard" and gen["standard_reason"] is None
     assert (gen["standard"]["model_name"], gen["standard"]["effort"]) == ("gemini-3.8-flash", "medium")
     # v0.1.62: agy mở cho mọi vai ⇒ sàng lọc, Bản tin, soạn lại cũng "Chuẩn: <model agy>" (hết lý do "cần khoá API").
-    for key in ("core.refinery", "core.briefing", "core.reply"):
+    for key in ("core.refinery", "core.briefing"):
         assert after[key]["standard"]["model_name"] == "gemini-3.8-flash", key
         assert after[key]["standard_reason"] is None, key
+    # Gói G: core.reply là lớp ngoại giao ⇒ chưa dùng agy; câu trung thực thay cho "cần khoá API".
+    assert after["core.reply"]["standard"] is None and "người ngoài" in after["core.reply"]["standard_reason"]
     assert all(isinstance(i["standard_reason"], str | None) for i in after.values())
     assert "cần khoá API" not in json.dumps(after, ensure_ascii=False)
     # Mục "Về mặc định" dùng cùng lý do (một sự thật cho cả hai màn).

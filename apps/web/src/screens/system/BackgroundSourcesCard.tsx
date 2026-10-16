@@ -6,6 +6,7 @@ import { Button, Dialog, Icon, Switch } from '@gen-harness/ui';
 import { errorDetail, errorText } from '../../lib/errorText';
 import { detailToText } from '../../lib/friendlyError';
 import { useCan } from '../../lib/permissions';
+import { AGY_BACKGROUND_NOTE } from '../../lib/agyLayers';
 import { useMe } from '../../lib/queries';
 import { toast } from '../../lib/toast';
 import { CardError, InlineError, Panel, PinHint, SkeletonLines } from '../common';
@@ -114,7 +115,7 @@ function BackgroundBody({ data }: { data: BackgroundSources }) {
             ) : (
               <>
                 <div className="risk-box__title">Chưa có nguồn AI cho việc nền — dán khoá OpenRouter/Gemini hoặc đăng nhập Antigravity CLI</div>
-                Bản tin Gen vẫn gửi đúng giờ phần không cần model; sàng lọc tin và trực việc cần một nguồn AI (khoá API hoặc Antigravity CLI).
+                Bản tin Gen vẫn gửi đúng giờ phần không cần model; sàng lọc tin cần một nguồn AI (khoá API hoặc Antigravity CLI), trực việc cần khoá API.
               </>
             )}
             {canManage ? (
@@ -153,7 +154,7 @@ function BackgroundBody({ data }: { data: BackgroundSources }) {
         </div>
       ) : null}
       <p className="muted-note" data-testid="bg-src-agy-note">
-        Antigravity CLI chạy được cả việc nền, không cần Sếp cho phép (Sếp đã chọn mở cho mọi việc).
+        {AGY_BACKGROUND_NOTE}
       </p>
 
       {confirmOpen ? <ConfirmCliDialog riskText={data.risk_text} onClose={() => setConfirmOpen(false)} save={save} /> : null}

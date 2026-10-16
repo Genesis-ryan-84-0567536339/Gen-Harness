@@ -50,13 +50,22 @@ def options_for(*, deep_efforts: tuple[str, ...] = ("low", "medium", "high"), ba
     ]}
 
 
-@pytest.fixture
-def options(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
-    """Thay `engine.model_options` bằng bản giả; trả danh sách tổ chức đã tra (mỗi lần gọi một phần tử)."""
-    seen: list[Any] = []
+class Seen(list):  # type: ignore[type-arg]
+    """Danh sách tổ chức đã tra (mỗi lần gọi một phần tử) + `owners`: người hỏi có phải Owner (gói G) mỗi lần."""
 
-    async def fake(db: Any, org: Any) -> dict[str, Any]:
+    def __init__(self) -> None:
+        super().__init__()
+        self.owners: list[bool] = []
+
+
+@pytest.fixture
+def options(monkeypatch: pytest.MonkeyPatch) -> Seen:
+    """Thay `engine.model_options` bằng bản giả; trả danh sách tổ chức đã tra (mỗi lần gọi một phần tử)."""
+    seen = Seen()
+
+    async def fake(db: Any, org: Any, *, owner: bool = True) -> dict[str, Any]:
         seen.append(org)
+        seen.owners.append(owner)
         return options_for()
 
     monkeypatch.setattr(engine, "model_options", fake)
@@ -191,13 +200,13 @@ async def test_settings_returns_model_options(owner_api: Api, client: httpx.Asyn
     assert out["model_options"] == options_for()
     assert len(options) == 1
     assert out["available"] is True and "decider" in out                       # trường cũ giữ nguyên
-    # Nhân viên: cùng đường, cùng kết quả (v0.1.62: tầng chạy bằng agy không còn tắt riêng cho nhân viên).
+    # Nhân viên: cùng đường, cùng hình dạng; gói G: máy chủ hỏi theo người hỏi (owner=False ⇒ không tính nguồn agy).
     await _enable_gen_for_manager(db)
     mgr = await login_as(client, db, "manager")
     try:
         got = (await mgr.get("/gen/settings")).json()["model_options"]
         assert got == options_for()
-        assert len(options) == 2
+        assert len(options) == 2 and options.owners == [True, False]
     finally:
         await mgr.c.aclose()
 
@@ -293,7 +302,7 @@ async def test_staff_deep_choice_reaches_router_like_owner(owner_api: Api, app: 
         assert not steps_of(t, "notice")
         # Tầng chưa có nguồn nào phục vụ ⇒ vẫn hạ về Tự động kèm thông báo (bước notice trước câu trả lời, KHÔNG vào
         # lịch sử gửi cho model ở lượt sau).
-        async def no_deep(db: Any, org: Any) -> dict[str, Any]:
+        async def no_deep(db: Any, org: Any, *, owner: bool = True) -> dict[str, Any]:
             return options_for(deep=False)
 
         monkeypatch.setattr(engine, "model_options", no_deep)
@@ -478,7 +487,7 @@ async def test_simple_data_in_auto_mode_uses_fast_tier(owner_api: Api, app: Any,
 
 
 async def test_fast_tier_skipped_when_unavailable(owner_api: Api, app: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    async def none_fast(db: Any, org: Any) -> dict[str, Any]:
+    async def none_fast(db: Any, org: Any, *, owner: bool = True) -> dict[str, Any]:
         o = options_for()
         o["tiers"][1]["available"] = False
         return o

@@ -46,12 +46,20 @@ export interface AgentBindingSlot {
    * …"…) — CHUỖI hoặc null, không bao giờ object. Máy chủ cũ không có trường này ⇒ web dùng câu cũ.
    */
   standard_reason?: string | null;
+  /**
+   * Gói G (16/10/2026): lý do Antigravity CLI KHÔNG dùng được cho dòng này ("Antigravity chưa dùng cho việc trả lời
+   * người ngoài — chờ hộp riêng (bản sau)": `core.reply` và agent gắn kênh / nhóm / người) — CHUỖI hoặc null (dùng được).
+   * PUT /agents/bindings trả 422 khi gán model agy cho dòng có lý do này. Máy chủ cũ không có trường ⇒ coi như null.
+   */
+  agy_blocked_reason?: string | null;
 }
 
 export interface BindableModel {
   id: string;
   model_name: string;
   provider_name: string;
+  /** Gói G: loại nguồn của model (`antigravity_cli`, `gemini`…) — web làm mờ model agy ở dòng có `agy_blocked_reason`. */
+  kind?: string;
   enabled: boolean;
 }
 
@@ -77,7 +85,8 @@ export interface FailoverRule {
 /**
  * v0.1.41 (F-86, QD-12): `GET/PUT /providers/background` — "Nguồn AI cho việc nền" (sàng lọc tin, trực việc, Bản tin Gen;
  * purpose ∈ refinery/duty_decide/gen.briefing). Mặc định chỉ khoá API; Owner có thể cho Claude Code CLI chạy việc nền
- * (cảnh báo + xác nhận + PIN `ai.background_cli`). Antigravity CLI KHÔNG BAO GIỜ chạy việc nền (F-22).
+ * (cảnh báo + xác nhận + PIN `ai.background_cli`). Antigravity CLI chạy được sàng lọc tin và Bản tin không cần cho phép
+ * (v0.1.62); agent trực kênh (ngoại giao) chưa dùng agy (gói G).
  */
 export interface BackgroundSource {
   provider_id: string;

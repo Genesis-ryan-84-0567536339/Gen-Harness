@@ -523,9 +523,11 @@ def test_gen_picks_the_right_tier_and_effort_per_source() -> None:
         (AGY, "gemini-3.8-flash", "medium"), (API, "g/flash", None)]
 
 
-def test_reply_uses_agy_with_low_effort_on_cli() -> None:
+def test_reply_skips_agy_because_it_is_the_diplomatic_layer() -> None:
+    """Gói G: core.reply nói chuyện với người ngoài => CHƯA dùng agy (hộp riêng ở bản sau); Claude CLI và API vẫn."""
     assert picks(("claude", "agy", "api"), "core.reply") == [
-        (CLAUDE, "sonnet", "low"), (AGY, "gemini-3.8-flash", "low"), (API, "g/flash", None)]
+        (CLAUDE, "sonnet", "low"), (API, "g/flash", None)]
+    assert picks(("agy",), "core.reply") == []
 
 
 def test_tier_override_forces_the_tier_but_keeps_the_rules() -> None:
@@ -587,16 +589,20 @@ def reason_of(names: tuple[str, ...], role: str, *, with_models: bool = True, bg
     return profiles.missing_reason(p, m, role, bg_cli or set())
 
 
-def test_only_agy_with_model_gives_every_role_a_candidate() -> None:
-    """v0.1.62: chỉ có agy (có model) ⇒ MỌI vai có ứng viên, hết lý do "cần khoá API (Antigravity chỉ dùng cho Gen)"."""
-    for role in ("core.gen", "core.briefing", "core.refinery", "core.reply", "agent:7"):
+def test_only_agy_with_model_gives_every_core_role_a_candidate() -> None:
+    """v0.1.62: chỉ có agy (có model) ⇒ các vai core có ứng viên, hết lý do "cần khoá API (Antigravity chỉ dùng cho
+    Gen)". Gói G: core.reply (ngoại giao) là ngoại lệ — xem test_reply_skips_agy_because_it_is_the_diplomatic_layer."""
+    for role in ("core.gen", "core.briefing", "core.refinery", "agent:7"):
         assert picks(("agy",), role) == [(AGY, "gemini-3.8-flash", "medium" if role == "core.gen" else "low")], role
 
 
 def test_missing_reason_agy_without_model_points_at_the_test_button() -> None:
-    # Mọi vai (kể cả vai nền): agy được dùng nhưng 0 model ⇒ bảo bấm Kiểm tra kết nối ở nguồn đó (đường tự sửa của Sếp).
-    for role in ("core.gen", "core.refinery", "core.briefing", "core.reply", "agent:7"):
+    # Các vai core (kể cả vai nền): agy được dùng nhưng 0 model ⇒ bảo bấm Kiểm tra kết nối ở nguồn đó (đường tự sửa của
+    # Sếp). Gói G: core.reply không dùng agy ⇒ nói đúng lý do ngoại giao, KHÔNG bảo bấm Kiểm tra kết nối ở Agy.
+    for role in ("core.gen", "core.refinery", "core.briefing", "agent:7"):
         assert reason_of(("agy",), role, with_models=False) == "chưa có model — bấm Kiểm tra kết nối ở Agy", role
+    assert reason_of(("agy",), "core.reply", with_models=False) == (
+        "Antigravity chưa dùng cho việc trả lời người ngoài — chờ hộp riêng (bản sau)")
 
 
 def test_missing_reason_source_allowed_but_empty_and_fallback() -> None:
@@ -608,12 +614,13 @@ def test_missing_reason_source_allowed_but_empty_and_fallback() -> None:
     assert profiles.REASON_NEED_API == "cần khoá API hoặc đăng nhập Antigravity CLI"
     assert reason_of(("claude",), "core.reply", with_models=False) == "chưa có model — bấm Kiểm tra kết nối ở Claude"
     # Nguồn khoá API không có khoá thì không "được phép".
-    assert reason_of(("api",), "core.reply", no_key=True) == "cần khoá API, Antigravity CLI hoặc Claude Code CLI"
+    # Gói G: agy chưa dùng cho core.reply nên câu không còn nhắc Antigravity CLI.
+    assert reason_of(("api",), "core.reply", no_key=True) == "cần khoá API hoặc Claude Code CLI"
     # Không nguồn nào / vai lạ ⇒ câu cũ.
     assert reason_of((), "core.gen") == "chưa có nguồn phù hợp"
     assert profiles.missing_reason([], [], "core.embedding", set()) == "chưa có nguồn phù hợp"
     assert profiles.standard_text(None) == "Chuẩn: chưa có nguồn phù hợp"
-    why = "cần khoá API, Antigravity CLI hoặc Claude Code CLI"
+    why = "cần khoá API hoặc Claude Code CLI"
     assert profiles.standard_text(None, why) == f"Chuẩn: {why}"
     assert profiles.standard_text({"model_name": "gemini-3.8-flash"}, "bỏ qua") == "Chuẩn: gemini-3.8-flash (tự chọn)"
 

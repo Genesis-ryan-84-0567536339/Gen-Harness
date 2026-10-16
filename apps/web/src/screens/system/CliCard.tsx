@@ -7,6 +7,7 @@ import { cliProfilesKey, qk2, useCliProfiles } from '../../lib/dataQueries';
 import { emailInitials } from '../../lib/format';
 import { queryClient } from '../../lib/queryClient';
 import { toast } from '../../lib/toast';
+import { AGY_LAYERS_TEXT } from '../../lib/agyLayers';
 import { useNow } from '../../lib/useNow';
 import { errorText } from '../../lib/errorText';
 import { CardError, InlineError, PinHint, SkeletonLines, StateChip } from '../common';
@@ -183,10 +184,10 @@ export function CliCard({ canManage, showCredentials = true, kind = 'antigravity
           <div className="gh-card__title">{txt.title}</div>
           <div className="gh-card__kicker">{txt.kicker}</div>
           {txt.scope ? (
-            // v0.1.62: phạm vi dùng + rủi ro còn lại của Antigravity CLI (đã mở cho mọi việc).
+            // v0.1.62 → gói G: phạm vi dùng theo lớp (core dùng được, ngoại giao chưa) + rủi ro còn lại của Antigravity CLI.
             <div className="gh-card__kicker" role="note" data-testid="cli-scope" style={{ color: 'var(--color-warn)', display: 'flex', gap: 6, alignItems: 'flex-start' }}>
               <Icon name="ph ph-shield-warning" size={13} color="var(--color-warn)" />
-              <span>{txt.scope}</span>
+              <span>{kind === 'antigravity_cli' ? AGY_LAYERS_TEXT : txt.scope}</span>
             </div>
           ) : null}
         </div>
