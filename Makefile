@@ -6,7 +6,7 @@ API = apps/api
 UV_VERSION = 0.12.23
 UV = uvx uv@$(UV_VERSION)
 
-.PHONY: secrets up down logs logs-token ps api-dev api-test api-test-app-role api-lint web-test bridge-test browser-test \
+.PHONY: dev-up dev-ps dev-logs dev-down dev-clean secrets up down logs logs-token ps api-dev api-test api-test-app-role api-lint web-test bridge-test browser-test \
         api-sync lock test migrate seed-demo seed-demo-clean backup backup-list restore
 
 secrets:
@@ -94,3 +94,19 @@ backup-list:
 # vd: make restore BACKUP=backups/20260101T020000Z-abcd1234.pgcustom.enc
 restore:
 	cd $(API) && .venv/bin/python -m gh.backup restore --key $(BACKUP)
+
+# Môi trường dev RIÊNG cạnh bản cài thật (project genh-dev, cổng 184xx) — xem docs/dev-local.md. KHÔNG đụng project gen-harness.
+dev-up:
+	scripts/dev-local.sh up
+
+dev-ps:
+	scripts/dev-local.sh ps
+
+dev-logs:
+	scripts/dev-local.sh logs
+
+dev-down:
+	scripts/dev-local.sh down
+
+dev-clean:
+	scripts/dev-local.sh clean
