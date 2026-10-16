@@ -93,7 +93,7 @@ describe('header + footer helpers', () => {
   });
   it('owner role line matches the design', () => {
     expect(roleLine({ role: { code: 'owner', name: 'Owner — Sếp' } })).toBe('Owner · thấy toàn cảnh');
-    expect(roleLine({ role: { code: 'auditor', name: 'Auditor' } })).toBe('Auditor');
+    expect(roleLine({ role: { code: 'auditor', name: 'Auditor' } })).toBe('Kiểm soát');
   });
   it('login ?next= only accepts in-app paths', () => {
     expect(safeNext('/inbox?tab=all')).toBe('/inbox?tab=all');

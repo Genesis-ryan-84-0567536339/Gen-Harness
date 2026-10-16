@@ -200,7 +200,7 @@ describe('bước 8 — chọn mẫu là xong, bỏ tin thử', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     );
-    expect(screen.getByLabelText('Mẫu')).toHaveValue('sales');
+    expect(screen.getByLabelText('Mẫu')).toHaveValue('commercial');
     expect(screen.getByLabelText('Tên agent')).toHaveValue('Trợ lý Kinh doanh');
     expect(screen.queryByLabelText('Câu thử trò chuyện')).toBeNull();
     expect(screen.getByTestId('step8-note')).toHaveTextContent('Chọn mẫu là xong');
@@ -209,11 +209,11 @@ describe('bước 8 — chọn mẫu là xong, bỏ tin thử', () => {
     await user.selectOptions(screen.getByLabelText('Mẫu'), '');
     expect(screen.getByLabelText('Tên agent')).toHaveValue('Trợ lý'); // "Tạo trống" cũng có tên + vai trò mặc định
     expect(screen.getByRole('button', { name: /Tiếp tục/ })).toBeEnabled();
-    await user.selectOptions(screen.getByLabelText('Mẫu'), 'sales');
+    await user.selectOptions(screen.getByLabelText('Mẫu'), 'commercial');
     await user.click(screen.getByRole('button', { name: /Tiếp tục/ }));
     expect(await screen.findByText(/Đã tạo agent/)).toBeInTheDocument();
     const put = calls.find((c) => c.method === 'PUT')!;
-    expect(put.body).toEqual({ name: 'Trợ lý Kinh doanh', role_desc: expect.any(String), template: 'sales' });
+    expect(put.body).toEqual({ name: 'Trợ lý Kinh doanh', role_desc: expect.any(String), template: 'commercial' });
     expect(Object.keys(put.body as object)).not.toContain('try_message');
     // Không có tin thử ⇒ không hiện "trả lời thử" lẫn khối lỗi thử.
     expect(screen.queryByText(/trả lời thử/)).toBeNull();

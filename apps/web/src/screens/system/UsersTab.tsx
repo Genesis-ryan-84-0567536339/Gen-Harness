@@ -12,6 +12,7 @@ import { validateEmail, validateRequired } from '../../setup/validation';
 import { CardError, InlineError, Panel, SkeletonLines } from '../common';
 import { TempPasswordDialog } from './TempPasswordDialog';
 import { useAccess } from './queries';
+import { roleLabel } from './systemModel';
 import { INVITE_ROLES, USERS_KEY, userStatus } from './usersModel';
 
 type Pending = { kind: 'deactivate' | 'reset'; user: ManagedUser };
@@ -109,7 +110,7 @@ function UserRow({ u, onAsk }: { u: ManagedUser; onAsk: (k: Pending['kind']) => 
     mutationFn: (r: InviteRole) => api.users.changeRole(u.id, r),
     onSuccess: (x) => {
       update(x);
-      toast(`Đã đổi vai trò ${x.display_name} thành ${x.role.name}.`);
+      toast(`Đã đổi vai trò ${x.display_name} thành ${roleLabel(x.role.code, x.role.name)}.`);
     },
     onError: (e) => toast(errorText(e), 'bad'),
   });
@@ -134,7 +135,7 @@ function UserRow({ u, onAsk }: { u: ManagedUser; onAsk: (k: Pending['kind']) => 
       </td>
       <td data-label="Vai trò">
         {u.is_self || isOwner ? (
-          <span className="users-table__role">{u.role.name}</span>
+          <span className="users-table__role">{roleLabel(u.role.code, u.role.name)}</span>
         ) : (
           <select
             className="gh-input users-table__select"

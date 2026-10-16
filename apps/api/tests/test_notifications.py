@@ -54,7 +54,7 @@ async def test_empty_then_role_change_notifies_target_only(owner_api: Api, app: 
         kinds = [x["kind"] for x in body["items"]]
         assert kinds == ["user.password_reset", "user.role_changed"]  # mới nhất trước
         role_item = body["items"][1]
-        assert role_item["read"] is False and "Manager" in role_item["body"]
+        assert role_item["read"] is False and "Quản lý" in role_item["body"]
         assert OWNER["display_name"] in role_item["body"]
         assert role_item["link"] == "/account"
 

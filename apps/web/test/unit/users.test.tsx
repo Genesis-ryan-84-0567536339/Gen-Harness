@@ -117,7 +117,7 @@ describe('UsersTab', () => {
     const select = await screen.findByLabelText('Vai trò của Chị Lan Phạm');
     await user.selectOptions(select, 'auditor');
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH' && (c.body as { role: string }).role === 'auditor')).toBe(true));
-    await waitFor(() => expect(useToasts.getState().toasts[0]?.text).toContain('Auditor'));
+    await waitFor(() => expect(useToasts.getState().toasts[0]?.text).toContain('Kiểm soát'));
 
     await user.click(screen.getByRole('button', { name: 'Khoá Chị Lan Phạm' }));
     const confirm = await screen.findByRole('dialog', { name: 'Khoá tài khoản Chị Lan Phạm?' });

@@ -1,4 +1,5 @@
 import type { Me } from '@gen-harness/contracts';
+import { roleLabel } from '../screens/system/systemModel';
 
 const HONORIFICS = new Set(['anh', 'chị', 'chi', 'em', 'ông', 'bà', 'cô', 'chú', 'bác', 'sếp']);
 
@@ -20,5 +21,5 @@ export function initials(displayName: string): string {
 /** Footer second line — design shows "Owner · thấy toàn cảnh" for the Owner. */
 export function roleLine(me: Pick<Me, 'role'>): string {
   if (me.role.code === 'owner') return 'Owner · thấy toàn cảnh';
-  return me.role.name;
+  return roleLabel(me.role.code, me.role.name);
 }
