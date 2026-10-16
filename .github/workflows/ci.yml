@@ -354,7 +354,7 @@ jobs:
         run: python3 .github/scripts/check_no_personal_info.py
       # v0.1.61 (lưới L5) — thuật ngữ chuẩn của CLAUDE.md (Kho dữ liệu, mã PIN, khoá, API & Model…): chữ cấm mới trong chuỗi
       # hiển thị làm hỏng CI; hiện trạng nằm trong baseline của terms.json và chỉ được giảm. Route-crawl (lưới L4) chạy trong
-      # bước "Playwright (mock)" bên dưới, dùng chung terms.json.
+      # job RIÊNG `crawl` (timeout riêng, không kéo job web quá 30 phút), dùng chung terms.json.
       - name: Kiểm thuật ngữ chuẩn (check_terms.py)
         run: python3 .github/scripts/check_terms.py
       - run: npm run -w apps/web typecheck
@@ -367,6 +367,8 @@ jobs:
         working-directory: apps/web
         run: npx playwright install --with-deps chromium
       - name: Playwright (mock)
+        env:
+          E2E_SKIP_CRAWL: "1"     # route-crawl (lưới L4) chạy ở job `crawl` riêng
         run: npm run -w apps/web test:e2e
       - name: Lưu báo cáo Playwright khi lỗi
         if: failure()
@@ -379,9 +381,37 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  # v0.1.61 (lưới L4, A13) — Route-crawl duyệt MỌI route ở 390 và 1440px (2 test, mỗi test tối đa 10 phút). Tách khỏi job `web` để:
+  # (1) bộ Playwright cũ (~17 phút của 30) không bị cộng thêm và mất báo cáo khi chạm trần thời gian;
+  # (2) crawl chậm/lỗi có timeout riêng và báo cáo riêng. "MỚI" (vượt baseline) làm đỏ; "DƯ" (baseline cao hơn thực tế) chỉ cảnh báo.
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with: { node-version: "22", cache: npm }
+      - run: npm ci --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000
+      - name: Cài Chromium cho Playwright
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+      - name: Route-crawl (mock)
+        working-directory: apps/web
+        run: npx playwright test e2e/route-crawl-v016x.spec.ts
+      - name: Lưu báo cáo route-crawl khi lỗi
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: crawl-report-${{ github.run_attempt }}
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+          retention-days: 7
+          if-no-files-found: ignore
+
   images:
     runs-on: ubuntu-latest
-    needs: [api, web, browser]
+    needs: [api, web, browser, crawl]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Build image api/worker, bridge, web, db, browser
@@ -493,7 +523,7 @@ jobs:
   ci-ok:
     name: ci-ok
     runs-on: ubuntu-latest
-    needs: [version, api, browser, web, images, renovate-config]
+    needs: [version, api, browser, web, crawl, images, renovate-config]
     if: always()
     steps:
       - name: Tổng hợp kết quả các job CI
@@ -502,12 +532,13 @@ jobs:
           R_API: ${{ needs.api.result }}
           R_BROWSER: ${{ needs.browser.result }}
           R_WEB: ${{ needs.web.result }}
+          R_CRAWL: ${{ needs.crawl.result }}
           R_IMAGES: ${{ needs.images.result }}
           R_RENOVATE: ${{ needs.renovate-config.result }}
           # renovate-config được phép skipped (không chạy khi release.yml gọi); mọi job khác phải success.
-          NOT_GREEN: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || needs.version.result == 'skipped' || needs.api.result == 'skipped' || needs.browser.result == 'skipped' || needs.web.result == 'skipped' || needs.images.result == 'skipped' }}
+          NOT_GREEN: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || needs.version.result == 'skipped' || needs.api.result == 'skipped' || needs.browser.result == 'skipped' || needs.web.result == 'skipped' || needs.crawl.result == 'skipped' || needs.images.result == 'skipped' }}
         run: |
-          echo "version=$R_VERSION api=$R_API browser=$R_BROWSER web=$R_WEB images=$R_IMAGES renovate-config=$R_RENOVATE"
+          echo "version=$R_VERSION api=$R_API browser=$R_BROWSER web=$R_WEB crawl=$R_CRAWL images=$R_IMAGES renovate-config=$R_RENOVATE"
           if [ "$NOT_GREEN" = "true" ]; then
             echo "::error::CI chưa xanh: có job failure/cancelled/skipped (xem dòng 'version=… api=…' của bước này) — mở job đỏ, sửa lỗi rồi đẩy lại hoặc bấm Re-run." >&2
             exit 1
