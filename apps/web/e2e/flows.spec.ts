@@ -797,7 +797,8 @@ test.describe('giai đoạn 4.5/4.6: Điều khiển hệ thống', () => {
 
       await page.getByLabel('Tìm trong nhật ký').fill('Policy Engine');
       await expect(page.getByText('Trợ lý thương mại')).toHaveCount(0);
-      await expect(page.getByText('action.blocked')).toBeVisible();
+      // A8 (F105): cột Hành động hiện câu tiếng Việt; mã kỹ thuật chỉ còn trong chú thích (title) khi rê chuột.
+      await expect(page.locator('td.sys-log__action[title="action.blocked"]')).toBeVisible();
       await page.getByLabel('Tìm trong nhật ký').fill('');
 
       const downloadPromise = page.waitForEvent('download');
