@@ -38,11 +38,14 @@ const LANGS: Array<{ value: 'vi' | 'en' | 'zh' | 'ja' | 'ko'; label: string }> =
   { value: 'ko', label: 'KO' },
 ];
 
-/** Nhãn trạng thái bản nháp bằng tiếng Việt (F086) — không bao giờ in thẳng mã `failed/approved/...`. */
+/**
+ * Nhãn trạng thái bản nháp bằng tiếng Việt (F086) — không bao giờ in thẳng mã `failed/approved/...`.
+ * `edited` = đã duyệt kèm chỉnh sửa nhưng CHƯA có kết quả từ kênh chat (có thể còn thành gửi lỗi) nên không được nói "đã gửi".
+ */
 const STATUS_LABEL: Record<DraftStatus, string> = {
   pending: 'Chờ duyệt',
   approved: 'Đã duyệt',
-  edited: 'Đã sửa và gửi',
+  edited: 'Đã sửa, chờ gửi',
   sent: 'Đã gửi',
   failed: 'Gửi lỗi',
   rejected: 'Đã huỷ',
@@ -55,10 +58,29 @@ const STATUS_TONE: Record<DraftStatus, Tone> = {
   failed: 'bad',
   rejected: 'neutral',
 };
-/** Việc nội bộ (nhắc việc, báo cáo, ghi hệ thống ngoài) không "gửi" tin nên nói "Đã thực hiện". */
-const INTERNAL_KINDS: ReadonlyArray<DraftItem['kind']> = ['reminder', 'report', 'mcp_write'];
-const statusLabel = (status: DraftStatus, kind: DraftItem['kind']): string =>
-  status === 'sent' && INTERNAL_KINDS.includes(kind) ? 'Đã thực hiện' : STATUS_LABEL[status];
+/** Chữ cho "đã duyệt nhưng chưa có việc nào được làm": mcp_write cũ (trước v0.1.61 duyệt xong là đặt `sent` dù chưa gọi tool). */
+const MCP_WRITE_LEGACY_LABEL = 'Đã duyệt — chưa thực hiện (bản cũ)';
+/**
+ * Nhãn theo cả loại. Chỉ nhắc việc mới có việc thật khi duyệt xong (tạo công việc) nên mới nói "Đã thực hiện".
+ * `mcp_write` + `sent` chỉ còn là yêu cầu cũ chưa hề gọi hệ thống ngoài (F074/Q8-1) → không báo "đã làm".
+ * `report` + `sent`: duyệt xong chưa tạo báo cáo nào (Nợ: nối bước tạo báo cáo) → chỉ nói "Đã duyệt".
+ * Bản gửi lỗi đã có bản gửi lại: nói rõ để không bấm gửi lại lần nữa.
+ */
+function statusLabel(status: DraftStatus, kind: DraftItem['kind'], resent = false): string {
+  if (status === 'failed' && resent) return 'Gửi lỗi · đã gửi lại';
+  if (status === 'sent') {
+    if (kind === 'reminder') return 'Đã thực hiện';
+    if (kind === 'mcp_write') return MCP_WRITE_LEGACY_LABEL;
+    if (kind === 'report') return 'Đã duyệt';
+  }
+  return STATUS_LABEL[status];
+}
+function statusTone(status: DraftStatus, kind: DraftItem['kind'], resent = false): Tone {
+  if (status === 'failed' && resent) return 'neutral';
+  if (status === 'sent' && kind === 'mcp_write') return 'warn';
+  if (status === 'sent' && kind === 'report') return 'neutral';
+  return STATUS_TONE[status];
+}
 
 /**
  * Câu tiếng Việt cho mã lỗi gửi. Máy chủ đã gửi sẵn `send_result.message`; bảng này chỉ cho bản nháp lỗi cũ
@@ -81,7 +103,7 @@ const MCP_WRITE_NOTICE =
 
 type Tab = 'pending' | 'decided' | 'failed';
 const TAB_TITLE: Record<Tab, string> = { pending: 'Chờ Sếp duyệt', decided: 'Đã xử lý', failed: 'Gửi lỗi — cần gửi lại' };
-/** Trần số trang tự tải thêm khi tab lọc ở máy khách (Gửi lỗi / chỉ đã gửi) chưa có dòng nào. */
+/** Trần số trang tự tải thêm khi bộ lọc "chỉ bản đã gửi" (lọc ở máy khách) chưa có dòng nào. */
 const MAX_AUTO_PAGES = 10;
 
 /** Địa chỉ `?status=&kind=&id=`: KPI ở Tổng quan dẫn vào đây nên phải đọc được bộ lọc (F084). */
@@ -120,27 +142,27 @@ export function WorkbenchScreen() {
 
   const pendingList = useDraftsPaged('pending', kind ?? undefined);
   const decidedList = useDraftsPaged('decided', kind ?? undefined);
-  const list = tab === 'pending' ? pendingList : decidedList;
+  // "Gửi lỗi" lọc ở MÁY CHỦ (status=failed, đã bỏ bản có bản gửi lại): đếm đúng cả khi bản lỗi nằm xa trong lịch sử.
+  const failedList = useDraftsPaged('failed', kind ?? undefined);
+  const list = tab === 'pending' ? pendingList : tab === 'failed' ? failedList : decidedList;
   const draft = useDraft(id || null);
 
   const rows = useMemo(() => {
     const all = list.data?.pages.flatMap((p) => p.items) ?? [];
-    if (tab === 'failed') return all.filter((d) => d.status === 'failed');
-    if (onlySent) return all.filter((d) => d.status === 'sent');
+    if (tab === 'decided' && onlySent) return all.filter((d) => d.status === 'sent');
     return all;
   }, [list.data, tab, onlySent]);
-  const failedLoaded = useMemo(
-    () => (decidedList.data?.pages.flatMap((p) => p.items) ?? []).filter((d) => d.status === 'failed').length,
-    [decidedList.data],
-  );
+  const failedTotal = failedList.data?.pages[0]?.total;
   const sentLoaded = useMemo(() => rows.filter((d) => d.status === 'sent').length, [rows]);
 
-  // Tab lọc ở máy khách: nếu các trang đã tải chưa có dòng nào mà còn trang sau thì tải tiếp (có trần).
-  const needMore = tab !== 'pending' && rows.length === 0 && !!list.hasNextPage && (list.data?.pages.length ?? 0) < MAX_AUTO_PAGES;
+  // Chỉ bộ lọc "bản đã gửi" còn lọc ở máy khách: chưa có dòng nào mà còn trang sau thì tải tiếp (có trần).
+  const needMore = tab === 'decided' && onlySent && rows.length === 0 && !!list.hasNextPage && (list.data?.pages.length ?? 0) < MAX_AUTO_PAGES;
   const { fetchNextPage, isFetchingNextPage } = list;
+  const loadedPages = list.data?.pages.length ?? 0;
   useEffect(() => {
     if (needMore && !isFetchingNextPage) void fetchNextPage();
-  }, [needMore, isFetchingNextPage, fetchNextPage]);
+    // `loadedPages` trong deps: trang về nhanh thì cờ isFetchingNextPage không kịp đổi giữa hai lần vẽ, thiếu nó vòng tải dừng ở trang 2.
+  }, [needMore, isFetchingNextPage, fetchNextPage, loadedPages]);
 
   useEffect(() => {
     if (!id && rows.length) patch({ id: rows[0].id });
@@ -149,7 +171,7 @@ export function WorkbenchScreen() {
   const tabOptions: Array<{ value: Tab; label: string }> = [
     { value: 'pending', label: 'Chờ duyệt' },
     { value: 'decided', label: 'Đã xử lý' },
-    { value: 'failed', label: failedLoaded > 0 ? `Gửi lỗi (${fmtInt(failedLoaded)}${decidedList.hasNextPage ? '+' : ''})` : 'Gửi lỗi' },
+    { value: 'failed', label: failedTotal ? `Gửi lỗi (${fmtInt(failedTotal)})` : 'Gửi lỗi' },
   ];
   const changeTab = (t: Tab) => patch({ status: t === 'pending' ? null : t, id: null });
 
@@ -160,7 +182,9 @@ export function WorkbenchScreen() {
         ? `${fmtInt(pendingTotal)} bản nháp`
         : 'Đang tải…'
       : list.data
-        ? `${fmtInt(rows.length)}${list.hasNextPage ? '+' : ''} bản nháp${tab === 'decided' && sentLoaded > 0 ? ` · ${fmtInt(sentLoaded)} đã gửi` : ''}`
+        ? tab === 'failed' && failedTotal !== undefined
+          ? `${fmtInt(failedTotal)} bản nháp`
+          : `${fmtInt(rows.length)}${list.hasNextPage ? '+' : ''} bản nháp${tab === 'decided' && sentLoaded > 0 ? ` · ${fmtInt(sentLoaded)} đã gửi` : ''}`
         : 'Đang tải…';
 
   return (
@@ -191,6 +215,18 @@ export function WorkbenchScreen() {
           ) : rows.length === 0 ? (
             list.isFetchingNextPage || needMore ? (
               <SkeletonLines rows={3} padding="12px 16px" />
+            ) : list.hasNextPage ? (
+              // Còn trang chưa tải mà các trang đã tải chưa có dòng nào khớp: KHÔNG được nói "không có" (có thể nằm ở trang sau).
+              <EmptyState
+                icon="ph ph-magnifying-glass"
+                title="Chưa quét hết danh sách"
+                description="Các bản nháp đã tải chưa có dòng nào khớp, nhưng còn bản cũ hơn chưa tải."
+                actions={
+                  <Button variant="secondary" className="btn-27" loading={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>
+                    Tải thêm
+                  </Button>
+                }
+              />
             ) : tab === 'pending' && !kind ? (
               <DataEmptyState fallback={<EmptyState icon="ph ph-tray" title="Không có bản nháp nào chờ duyệt" />} />
             ) : (
@@ -206,7 +242,7 @@ export function WorkbenchScreen() {
                 <button key={d.id} type="button" className="wb-list__row" aria-pressed={d.id === id} onClick={() => patch({ id: d.id })}>
                   <span className="wb-list__tags">
                     <Tag tone={KIND_TONE[d.kind]}>{d.kind_label}</Tag>
-                    {tab !== 'pending' ? <Tag tone={STATUS_TONE[d.status]}>{statusLabel(d.status, d.kind)}</Tag> : null}
+                    {tab !== 'pending' ? <Tag tone={statusTone(d.status, d.kind, !!d.resent_by)}>{statusLabel(d.status, d.kind, !!d.resent_by)}</Tag> : null}
                   </span>
                   <span className="wb-list__title">{d.title}</span>
                   <span className="wb-list__meta">
@@ -258,11 +294,35 @@ function resendBody(d: DraftDetail): DraftCreate | null {
     kind: d.kind,
     title: d.title,
     text: d.text,
-    target: { channel: t.channel, thread_type: t.thread_type, ...(t.group ? { group_id: t.group.id } : {}), ...(t.person ? { person_id: t.person.id } : {}) },
+    target: {
+      channel: t.channel,
+      thread_type: t.thread_type,
+      ...(t.group ? { group_id: t.group.id } : {}),
+      ...(t.person ? { person_id: t.person.id } : {}),
+      ...(t.identity_id ? { identity_id: t.identity_id } : {}),
+    },
     amount_vnd: d.amount_vnd,
     subject,
     sources: d.sources,
+    resend_of: d.id,     // nối bản mới về bản lỗi này: bản cũ ra khỏi thẻ "Gửi lỗi", bấm lần hai bị máy chủ chặn
   };
+}
+
+const CHANNEL_NAME: Record<string, string> = { zalo: 'Zalo', whatsapp: 'WhatsApp', telegram: 'Telegram', linkedin: 'LinkedIn' };
+
+/** "Gửi tới": nơi nhận + (tin 1-1) tài khoản cụ thể — Sếp nhìn thấy trước khi duyệt, không phải đoán tin sẽ đi đâu. */
+function TargetLine({ target }: { target: NonNullable<DraftDetail['target']> }) {
+  const channel = CHANNEL_NAME[target.channel] ?? target.channel;
+  const who = target.group ? `Nhóm ${target.group.name}` : (target.person?.name ?? 'Người nhận');
+  return (
+    <div className="wb-target">
+      <Icon name="ph ph-paper-plane-right" size={13} />
+      <span>
+        Gửi tới <strong>{who}</strong> qua {channel}
+        {!target.group ? (target.account ? <> · tài khoản <strong>{target.account.label}</strong></> : ' · chưa tìm thấy tài khoản nhận') : null}
+      </span>
+    </div>
+  );
 }
 
 function DraftDetailView({ d, onOpenDraft }: { d: DraftDetail; onOpenDraft: (id: string) => void }) {
@@ -326,7 +386,8 @@ function DraftDetailView({ d, onOpenDraft }: { d: DraftDetail; onOpenDraft: (id:
   const isMcpWrite = d.kind === 'mcp_write';
   const sendResult = d.send_result as SendResultView | null;
   const failed = d.status === 'failed';
-  const canResend = failed && canDraft && !!resendBody(d);
+  const resentBy = failed ? (d.resent_by ?? null) : null;
+  const canResend = failed && canDraft && !!resendBody(d) && !resentBy;
 
   return (
     <Card className="wb-detail" padded={false}>
@@ -388,6 +449,8 @@ function DraftDetailView({ d, onOpenDraft }: { d: DraftDetail; onOpenDraft: (id:
         )}
       </div>
 
+      {d.target ? <TargetLine target={d.target} /> : null}
+
       {failed && sendResult ? (
         <div className="wb-fail">
           <InlineError detail={sendResult.error ?? undefined}>{sendErrorText(sendResult)}</InlineError>
@@ -432,7 +495,7 @@ function DraftDetailView({ d, onOpenDraft }: { d: DraftDetail; onOpenDraft: (id:
       <div className="wb-footer">
         {decided ? (
           <div className="wb-footer__decided">
-            <Tag tone={STATUS_TONE[d.status]}>{statusLabel(d.status, d.kind)}</Tag>
+            <Tag tone={statusTone(d.status, d.kind, !!resentBy)}>{statusLabel(d.status, d.kind, !!resentBy)}</Tag>
             {d.decision ? (
               <span>
                 bởi {d.decision.by.name} · {fmtDMClock(d.decision.at)}
@@ -440,6 +503,15 @@ function DraftDetailView({ d, onOpenDraft }: { d: DraftDetail; onOpenDraft: (id:
               </span>
             ) : null}
             {d.status === 'approved' || d.status === 'edited' ? <span>Đang chờ kênh chat xác nhận đã gửi.</span> : null}
+            {d.status === 'sent' && isMcpWrite ? <span>Yêu cầu duyệt từ bản cũ — hệ thống ngoài chưa hề được gọi. Sếp cần làm việc đó bên ngoài.</span> : null}
+            {resentBy ? (
+              <>
+                <span>Đã gửi lại bằng bản {resentBy.code}.</span>
+                <Button variant="secondary" icon="ph ph-arrow-square-out" onClick={() => onOpenDraft(resentBy.id)}>
+                  Mở bản gửi lại
+                </Button>
+              </>
+            ) : null}
             {canResend ? (
               <Button variant="primary" icon="ph ph-paper-plane-tilt" loading={resend.isPending} onClick={() => resend.mutate()}>
                 Gửi lại

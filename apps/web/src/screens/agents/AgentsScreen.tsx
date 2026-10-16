@@ -235,7 +235,7 @@ function AgentFormDialog({ agent, template, onClose }: { agent: AgentIdentity | 
   const create = useCreateAgent();
   const update = useUpdateAgent();
   const channels = useChannels();
-  // F077: vai không có system.manage (vd. Kiểm toán) chỉ XEM danh tính agent — không có nút Lưu, các ô bị khoá.
+  // F077: vai không có system.manage (vd. Kiểm soát) chỉ XEM danh tính agent — không có nút Lưu, các ô bị khoá.
   const canManage = useCan('system.manage');
   const readOnly = !!agent && !canManage;
   const [name, setName] = useState(agent?.name ?? template?.name ?? '');

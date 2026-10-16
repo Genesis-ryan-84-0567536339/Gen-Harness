@@ -11,6 +11,8 @@ const PIN_ACTION_LABEL: Record<string, { label: string; tone: string }> = {
   'auth.pin_failed': { label: 'Nhập sai', tone: WARN },
   'auth.pin_locked': { label: 'Khoá 15 phút', tone: BAD },
   'auth.pin_attempt_while_locked': { label: 'Nhập khi đang khoá', tone: BAD },
+  'auth.pin_not_set': { label: 'Chưa đặt PIN', tone: WARN },
+  // Chỉ còn trong nhật ký cũ: từ v0.1.61 đổi PIN đi qua Tài khoản của tôi (ghi account.pin_changed), không vào bảng này.
   'auth.pin_changed': { label: 'Đổi PIN', tone: N4 },
 };
 

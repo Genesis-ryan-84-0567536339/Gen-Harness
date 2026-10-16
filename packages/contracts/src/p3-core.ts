@@ -110,6 +110,8 @@ export interface DraftItem {
   status: DraftStatus;
   hold_reason: string | null;
   subject: (PersonRef | GroupRef) | null;
+  /** Bản gửi lỗi đã được gửi lại bằng bản MỚI này (nối bằng `resend_of`); null = chưa gửi lại (hoặc bản mới đã bị huỷ). */
+  resent_by?: { id: string; code: string } | null;
 }
 export interface DraftPage {
   items: DraftItem[];
@@ -131,6 +133,10 @@ export interface DraftDetail extends DraftItem {
     thread_type: 'group' | 'user';
     group: GroupRef | null;
     person: PersonRef | null;
+    /** Tin 1-1: tài khoản kênh sẽ nhận (tên hiển thị) — Sếp thấy trước khi duyệt; null = nhóm hoặc chưa tìm thấy. */
+    account?: { label: string } | null;
+    /** Tài khoản kênh cụ thể đã chốt cho tin 1-1 (gửi lại giữ nguyên). */
+    identity_id?: string | null;
   } | null;
   amount_vnd: number | null;
   autonomy_level: number;
@@ -156,10 +162,13 @@ export interface DraftCreate {
     thread_type: 'group' | 'user';
     group_id?: string;
     person_id?: string;
+    identity_id?: string;
   } | null;
   amount_vnd?: number | null;
   subject?: { type: 'person' | 'group'; id: string } | null;
   sources?: { label: string; ref: EvidenceRef | null }[];
+  /** "Gửi lại": id bản nháp GỬI LỖI mà bản này thay thế — bản cũ ra khỏi thẻ "Gửi lỗi", bấm lần hai bị chặn (409 ALREADY_RESENT). */
+  resend_of?: string | null;
 }
 export interface DraftDecide {
   side_actions?: Record<string, boolean>;
@@ -203,7 +212,8 @@ export function coreEndpoints(r: ApiClient['request']) {
     drafts: {
       list: (
         q: {
-          status?: 'pending' | 'decided' | 'all';
+          /** `failed`: chỉ bản gửi lỗi CHƯA được gửi lại (lọc ở máy chủ). */
+          status?: 'pending' | 'decided' | 'failed' | 'all';
           kind?: string;
           cursor?: string;
           limit?: number;

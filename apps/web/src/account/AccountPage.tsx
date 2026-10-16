@@ -172,6 +172,11 @@ const EMPTY_PIN: PinValues = { current_password: '', new_pin: '', new_pin_confir
 function PinCard({ hasPin }: { hasPin: boolean }) {
   // v0.1.42 (F-61): "Lịch sử nhập PIN" chuyển về đây (trước ở thẻ PIN của Điều khiển hệ thống).
   const canAudit = useCan('audit.read');
+  // PIN chỉ cần cho thao tác ghi có PIN (duyệt bản nháp, đổi quyền/hệ thống). Vai chỉ xem (Kiểm soát) chưa cần — nói đúng thực tế.
+  const canApprove = useCan('action.approve');
+  const canManageSystem = useCan('system.manage');
+  const canManageRoles = useCan('roles.manage');
+  const needsPin = canApprove || canManageSystem || canManageRoles;
   const [historyOpen, setHistoryOpen] = useState(false);
   const [v, setV] = useState<PinValues>(EMPTY_PIN);
   const [busy, setBusy] = useState(false);
@@ -210,7 +215,13 @@ function PinCard({ hasPin }: { hasPin: boolean }) {
     <Card
       data-gen-target="account.pin"
       title={hasPin ? 'Đổi mã PIN' : 'Đặt mã PIN'}
-      kicker={hasPin ? 'PIN 6 số dùng cho thao tác nhạy cảm' : 'Bạn chưa có mã PIN — cần để duyệt bản nháp và thao tác nhạy cảm'}
+      kicker={
+        hasPin
+          ? 'PIN 6 số dùng cho thao tác nhạy cảm'
+          : needsPin
+            ? 'Bạn chưa có mã PIN — cần để duyệt bản nháp và thao tác nhạy cảm'
+            : 'Bạn chưa có mã PIN — vai trò hiện tại chưa có thao tác nào cần PIN, đặt sẵn để dùng khi được cấp thêm quyền'
+      }
     >
       <form className="acct-form" onSubmit={submit} noValidate aria-label={hasPin ? 'Đổi mã PIN' : 'Đặt mã PIN'}>
         <TextField

@@ -46,7 +46,7 @@ export const useDrafts = (status: 'pending' | 'decided' | 'all' = 'pending', kin
   });
 
 /** Danh sách nháp theo trang (con trỏ `next_cursor`) — Bàn làm việc gộp các trang đã tải, nút "Tải thêm" lấy trang kế. */
-export const useDraftsPaged = (status: 'pending' | 'decided' | 'all' = 'pending', kind?: string) =>
+export const useDraftsPaged = (status: 'pending' | 'decided' | 'failed' | 'all' = 'pending', kind?: string) =>
   useInfiniteQuery({
     queryKey: qk3.draftPages(status, kind),
     queryFn: ({ pageParam, signal }) => api.drafts.list({ status, kind, cursor: pageParam, limit: 50 }, signal),

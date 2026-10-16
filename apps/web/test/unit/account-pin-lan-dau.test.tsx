@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import type { Account } from '@gen-harness/contracts';
 import { AccountPage } from '../../src/account/AccountPage';
 import { queryClient } from '../../src/lib/queryClient';
+import { qk } from '../../src/lib/queries';
 import { usePinStore } from '../../src/lib/pinStore';
 import { useToasts } from '../../src/lib/toast';
 import { PinDialogHost } from '../../src/shell/PinDialogHost';
@@ -68,6 +69,24 @@ afterEach(() => {
 });
 
 describe('Tài khoản của tôi — đặt mã PIN lần đầu', () => {
+  it('lời nhắc theo quyền thật: vai duyệt được thấy "cần để duyệt bản nháp", vai chỉ xem thấy "chưa có thao tác nào cần PIN"', async () => {
+    const me = (permissions: Record<string, string>) => ({
+      id: 'u', email: 'x@example.vn', display_name: 'Người dùng thử', role: { code: 'x', name: 'x' },
+      org: { id: 'o', name: 'x', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
+      addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null, permissions,
+    });
+    stub((c) => (c.url.endsWith('/account') ? json(200, ACCOUNT) : undefined));
+    queryClient.setQueryData(qk.me, me({ 'action.approve': 'team' }));
+    renderAccount();
+    expect(await screen.findByText(/cần để duyệt bản nháp/)).toBeInTheDocument();
+    document.body.innerHTML = '';
+    queryClient.clear();
+    queryClient.setQueryData(qk.me, me({ 'system.read': 'all' }));
+    renderAccount();
+    expect(await screen.findByText(/chưa có thao tác nào cần PIN/)).toBeInTheDocument();
+    expect(screen.queryByText(/cần để duyệt bản nháp/)).toBeNull();
+  });
+
   it('chưa có PIN → hiện thẻ "Đặt mã PIN"; đặt xong thẻ đổi thành "Đổi mã PIN"', async () => {
     const user = userEvent.setup();
     let hasPin = false;

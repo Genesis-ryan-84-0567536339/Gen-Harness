@@ -51,6 +51,9 @@ const CODE_WORD: Record<string, string> = {
   'action.approve': 'duyệt',
   'audit.read': 'xem',
 };
+/** Quyền "duyệt & gửi ra ngoài": ô riêng, không đổi theo ô "soạn nháp" (cho soạn ≠ cho duyệt). */
+const APPROVE_CODE = 'action.approve';
+const SPLIT_LABEL: Record<string, string> = { 'action.draft': 'Soạn nháp', [APPROVE_CODE]: 'Duyệt & gửi ra ngoài' };
 const SCOPE_WORD: Record<PermScope, string> = { all: 'tất cả', team: 'theo team', assigned: 'khách được phân', none: 'không' };
 const MIXED = 'mixed';
 const MIXED_HINT = 'Các quyền trong cột đang khác mức — chọn một mức để đặt đồng loạt.';
@@ -78,8 +81,7 @@ function PermissionMatrix() {
 
   // Đổi cả cột: gửi PATCH cho TỪNG mã quyền sửa được của cột (máy chủ chỉ đổi đúng một mã mỗi lần gọi). Lỗi giữa chừng thì
   // dừng, tải lại bảng để ô nói đúng cái đang có (ô lệch mức sẽ hiện "Khác nhau" kèm chi tiết).
-  const onChange = async (role: string, colKey: string, codes: string[], current: Record<string, PermScope>, scope: PermScope) => {
-    const key = `${role}:${colKey}`;
+  const onChange = async (role: string, key: string, codes: string[], current: Record<string, PermScope>, scope: PermScope) => {
     setBusyCell(key);
     try {
       for (const permission of codes) {
@@ -133,51 +135,62 @@ function PermissionMatrix() {
                     <div className="roles-matrix__meta">{ROLE_LABEL[role.code]?.meta ?? role.meta}</div>
                   </td>
                   {q.data.columns.map((c) => {
-                    // Mỗi cột có thể gồm nhiều quyền (vd Hành động = soạn + duyệt) — ô là của CẢ CỘT: hiện mức chung,
-                    // lệch mức thì hiện "Khác nhau"; chọn mức mới là đổi mọi mã sửa được trong cột.
-                    const cell0 = columnCell(role.code, role.permissions, c.permissions);
-                    const locked = cell0.editable.length === 0;
-                    const cell = SCOPE_CELL[cell0.scope];
-                    const key = `${role.code}:${c.key}`;
-                    if (!canManage || locked) {
-                      return (
-                        <td key={c.key} className="roles-matrix__cell" data-label={c.label} data-locked={locked || undefined}>
-                          <span className="roles-matrix__mark" title={locked ? `${cell.title} — cố định, không sửa được` : cell.title}>
-                            <Icon name={cell.icon} size={15} color={cell.tone} label={cell.title} />
-                          </span>
-                          {cell0.mixed ? (
+                    // Mỗi cột có thể gồm nhiều quyền (vd Nhân sự = xem + sửa + chăm sóc) — ô là của CẢ CỘT: hiện mức chung,
+                    // lệch mức thì hiện "Khác nhau"; chọn mức mới là đổi mọi mã sửa được trong cột. NGOẠI LỆ: cột có quyền
+                    // "duyệt & gửi ra ngoài" tách thành ô riêng cho từng quyền, để cho phép SOẠN nháp không kéo theo cho phép DUYỆT.
+                    const groups: string[][] = c.permissions.includes(APPROVE_CODE) ? c.permissions.map((p) => [p]) : [c.permissions];
+                    const split = groups.length > 1;
+                    const roleName = ROLE_LABEL[role.code]?.name ?? role.name;
+                    return (
+                      <td key={c.key} className="roles-matrix__cell" data-label={c.label}>
+                        {groups.map((codes) => {
+                          const cell0 = columnCell(role.code, role.permissions, codes);
+                          const locked = cell0.editable.length === 0;
+                          const cell = SCOPE_CELL[cell0.scope];
+                          const key = `${role.code}:${c.key}:${codes.join('+')}`;
+                          const sub = split ? SPLIT_LABEL[codes[0]] ?? codes[0] : null;
+                          const subTitle = split && codes[0] === APPROVE_CODE ? 'Người có quyền này duyệt được và gửi tin ra ngoài (Zalo, WhatsApp…)' : undefined;
+                          const mixedNote = cell0.mixed ? (
                             <div className="roles-matrix__meta" style={{ color: WARN }} data-testid="roles-mixed" title={MIXED_HINT}>
                               {cell0.detail}
                             </div>
-                          ) : null}
-                        </td>
-                      );
-                    }
-                    return (
-                      <td key={c.key} className="roles-matrix__cell" data-label={c.label}>
-                        <select
-                          className="roles-matrix__select"
-                          aria-label={`${ROLE_LABEL[role.code]?.name ?? role.name} · ${c.label}`}
-                          value={cell0.mixed ? MIXED : cell0.scope}
-                          disabled={busyCell === key}
-                          onChange={(e) => void onChange(role.code, c.key, c.permissions, role.permissions, e.target.value as PermScope)}
-                        >
-                          {cell0.mixed ? (
-                            <option value={MIXED} disabled>
-                              Khác nhau
-                            </option>
-                          ) : null}
-                          {scopeOptionsFor(cell0.editable[0], cell0.mixed ? 'all' : cell0.scope).map((o) => (
-                            <option key={o.value} value={o.value} disabled={o.disabled}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </select>
-                        {cell0.mixed ? (
-                          <div className="roles-matrix__meta" style={{ color: WARN }} data-testid="roles-mixed" title={MIXED_HINT}>
-                            {cell0.detail}
-                          </div>
-                        ) : null}
+                          ) : null;
+                          if (!canManage || locked) {
+                            return (
+                              <div key={key} data-locked={locked || undefined} style={locked ? { opacity: 0.75 } : undefined}>
+                                {sub ? <div className="roles-matrix__meta" title={subTitle}>{sub}</div> : null}
+                                <span className="roles-matrix__mark" title={locked ? `${cell.title} — cố định, không sửa được` : cell.title}>
+                                  <Icon name={cell.icon} size={15} color={cell.tone} label={sub ? `${sub}: ${cell.title}` : cell.title} />
+                                </span>
+                                {mixedNote}
+                              </div>
+                            );
+                          }
+                          return (
+                            <div key={key}>
+                              {sub ? <div className="roles-matrix__meta" title={subTitle}>{sub}</div> : null}
+                              <select
+                                className="roles-matrix__select"
+                                aria-label={sub ? `${roleName} · ${c.label} · ${sub}` : `${roleName} · ${c.label}`}
+                                value={cell0.mixed ? MIXED : cell0.scope}
+                                disabled={busyCell === key}
+                                onChange={(e) => void onChange(role.code, key, codes, role.permissions, e.target.value as PermScope)}
+                              >
+                                {cell0.mixed ? (
+                                  <option value={MIXED} disabled>
+                                    Khác nhau
+                                  </option>
+                                ) : null}
+                                {scopeOptionsFor(cell0.editable[0], cell0.mixed ? 'all' : cell0.scope).map((o) => (
+                                  <option key={o.value} value={o.value} disabled={o.disabled}>
+                                    {o.label}
+                                  </option>
+                                ))}
+                              </select>
+                              {mixedNote}
+                            </div>
+                          );
+                        })}
                       </td>
                     );
                   })}

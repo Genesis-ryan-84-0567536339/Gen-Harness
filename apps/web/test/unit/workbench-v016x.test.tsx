@@ -79,7 +79,7 @@ function renderAt(url: string, ui: ReactElement, me = OWNER_ME) {
 }
 
 /** Máy chủ giả của Bàn làm việc: `pending`/`decided` theo tham số, chi tiết theo id. */
-function workbenchApi(opts: { pending?: DraftItem[]; decided?: DraftItem[]; details?: DraftDetail[]; decidedPages?: DraftPage[] }) {
+function workbenchApi(opts: { pending?: DraftItem[]; decided?: DraftItem[]; failed?: DraftItem[]; details?: DraftDetail[]; decidedPages?: DraftPage[] }) {
   const pending = opts.pending ?? [];
   const decided = opts.decided ?? [];
   const pages = opts.decidedPages;
@@ -94,6 +94,11 @@ function workbenchApi(opts: { pending?: DraftItem[]; decided?: DraftItem[]; deta
     if (u.pathname.endsWith('/drafts') && c.method === 'GET') {
       const status = u.searchParams.get('status');
       if (status === 'pending') return json(200, { items: pending, next_cursor: null, total: pending.length } satisfies DraftPage);
+      if (status === 'failed') {
+        // Máy chủ lọc: chỉ bản gửi lỗi CHƯA có bản gửi lại.
+        const f = opts.failed ?? decided.filter((d) => d.status === 'failed' && !d.resent_by);
+        return json(200, { items: f, next_cursor: null, total: f.length } satisfies DraftPage);
+      }
       if (pages) return json(200, u.searchParams.get('cursor') ? pages[1] : pages[0]);
       return json(200, { items: decided, next_cursor: null, total: decided.length } satisfies DraftPage);
     }
@@ -150,6 +155,7 @@ describe('Bàn làm việc — gửi lỗi có chỗ xem (F048)', () => {
     expect(post?.body).toMatchObject({
       kind: 'message', title: 'Trả lời chị Lan', text: 'Dạ em gửi anh báo giá ạ.',
       target: { channel: 'zalo', thread_type: 'group', group_id: 'g1' },
+      resend_of: 'f1',                                                        // nối bản mới về bản lỗi cũ
     });
     await waitFor(() => expect(screen.getByTestId('loc')).toHaveTextContent('/workbench?id=n1'));   // sang thẻ Chờ duyệt
     expect(await screen.findByRole('button', { name: 'Duyệt và gửi qua Zalo' })).toBeInTheDocument();
@@ -176,6 +182,56 @@ describe('Bàn làm việc — gửi lỗi có chỗ xem (F048)', () => {
   });
 });
 
+describe('Bàn làm việc — gửi lại nối về bản lỗi cũ và nơi nhận hiện rõ', () => {
+  const RESENT = detail({ ...FAILED, resent_by: { id: 'n1', code: 'ACT-n1' } });
+
+  it('bản lỗi đã có bản gửi lại: nói "Đã gửi lại bằng bản ACT-n1", không còn nút Gửi lại, mở được bản mới', async () => {
+    const created = detail({ id: 'n1', status: 'pending', title: 'Trả lời chị Lan' });
+    mockFetch(workbenchApi({
+      decided: [item({ id: 'f1', status: 'failed', title: 'Trả lời chị Lan', resent_by: { id: 'n1', code: 'ACT-n1' } })],
+      pending: [item({ id: 'n1', status: 'pending' })], details: [RESENT, created],
+    }));
+    renderAt('/workbench?status=decided&id=f1', <WorkbenchScreen />);
+    expect(await screen.findByText(/Đã gửi lại bằng bản ACT-n1/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Gửi lại' })).toBeNull();
+    expect(document.querySelector('.wb-list')?.textContent).toContain('Gửi lỗi · đã gửi lại');
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Mở bản gửi lại' }));
+    await waitFor(() => expect(screen.getByTestId('loc')).toHaveTextContent('/workbench?id=n1'));
+  });
+
+  it('thẻ và bộ đếm "Gửi lỗi" bỏ bản đã gửi lại (máy chủ lọc) — gửi lại xong thì bộ đếm giảm', async () => {
+    let resent = false;
+    const created = detail({ id: 'n1', status: 'pending', title: 'Trả lời chị Lan' });
+    mockFetch((c) => {
+      const u = new URL(c.url, 'http://x');
+      if (c.method === 'POST' && u.pathname.endsWith('/drafts')) {
+        resent = true;
+        return json(201, created);
+      }
+      if (u.pathname.endsWith('/drafts') && u.searchParams.get('status') === 'failed') {
+        const items = resent ? [] : [item({ id: 'f1', status: 'failed', title: 'Trả lời chị Lan' })];
+        return json(200, { items, next_cursor: null, total: items.length } satisfies DraftPage);
+      }
+      return workbenchApi({ pending: [item({ id: 'n1', status: 'pending' })], details: [FAILED, created] })(c);
+    });
+    renderAt('/workbench?status=failed&id=f1', <WorkbenchScreen />);
+    expect(await screen.findByRole('radio', { name: 'Gửi lỗi (1)' })).toBeInTheDocument();
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Gửi lại' }));
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'Gửi lỗi' })).toBeInTheDocument());   // bộ đếm hết số
+  });
+
+  it('"Gửi tới" nói rõ nơi nhận và tài khoản nhận của tin 1-1 trước khi duyệt', async () => {
+    const dm = detail({
+      id: 'd1', status: 'pending', title: 'Trả lời Hoa',
+      target: { channel: 'zalo', thread_type: 'user', group: null, person: { id: 'p1', code: 'PER-1', name: 'Chị Hoa', type: 'customer', org_name: null } as never, account: { label: 'Chị Hoa (số mới)' } },
+    });
+    mockFetch(workbenchApi({ pending: [item({ id: 'd1', status: 'pending' })], details: [dm] }));
+    renderAt('/workbench?id=d1', <WorkbenchScreen />);
+    const line = await screen.findByText(/Gửi tới/);
+    expect(line.closest('.wb-target')).toHaveTextContent('Gửi tới Chị Hoa qua Zalo · tài khoản Chị Hoa (số mới)');
+  });
+});
+
 describe('Bàn làm việc — nhãn trạng thái tiếng Việt (F086) và bộ lọc từ KPI (F084)', () => {
   const DECIDED = [
     item({ id: 'a', status: 'approved', title: 'Đã duyệt A' }),
@@ -183,6 +239,8 @@ describe('Bàn làm việc — nhãn trạng thái tiếng Việt (F086) và b�
     item({ id: 's', status: 'sent', title: 'Đã gửi C', kind: 'quotation', kind_label: 'Báo giá' }),
     item({ id: 'r', status: 'rejected', title: 'Đã huỷ D' }),
     item({ id: 'k', status: 'sent', title: 'Nhắc E', kind: 'reminder', kind_label: 'Nhắc việc' }),
+    item({ id: 'm', status: 'sent', title: 'Ghi CRM F', kind: 'mcp_write', kind_label: 'Ghi hệ thống ngoài' }),
+    item({ id: 'b', status: 'sent', title: 'Báo cáo G', kind: 'report', kind_label: 'Báo cáo' }),
   ];
 
   it('tab "Đã xử lý" dùng nhãn Việt, không in mã approved/edited/sent/rejected', async () => {
@@ -190,8 +248,22 @@ describe('Bàn làm việc — nhãn trạng thái tiếng Việt (F086) và b�
     renderAt('/workbench?status=decided', <WorkbenchScreen />);
     await screen.findByRole('button', { name: /Đã duyệt A/ });
     const text = document.querySelector('.wb-list')?.textContent ?? '';
-    for (const label of ['Đã duyệt', 'Đã sửa và gửi', 'Đã gửi', 'Đã huỷ', 'Đã thực hiện']) expect(text).toContain(label);
+    for (const label of ['Đã duyệt', 'Đã sửa, chờ gửi', 'Đã gửi', 'Đã huỷ', 'Đã thực hiện']) expect(text).toContain(label);
     for (const raw of ['approved', 'edited', 'rejected', 'sent', 'failed']) expect(text).not.toContain(raw);
+    // `edited` mới là duyệt kèm chỉnh sửa, chưa có kết quả từ kênh chat ⇒ không được nói "đã gửi".
+    expect(text).not.toContain('Đã sửa và gửi');
+  });
+
+  it('chỉ nhắc việc mới "Đã thực hiện"; mcp_write cũ và báo cáo không báo đã làm khi chưa làm gì', async () => {
+    mockFetch(workbenchApi({ decided: DECIDED }));
+    renderAt('/workbench?status=decided', <WorkbenchScreen />);
+    await screen.findByRole('button', { name: /Đã duyệt A/ });
+    const rowOf = (name: RegExp) => screen.getByRole('button', { name });
+    expect(rowOf(/Nhắc E/)).toHaveTextContent('Đã thực hiện');
+    expect(rowOf(/Ghi CRM F/)).toHaveTextContent('Đã duyệt — chưa thực hiện (bản cũ)');
+    expect(rowOf(/Ghi CRM F/)).not.toHaveTextContent('Đã thực hiện');
+    expect(rowOf(/Báo cáo G/)).not.toHaveTextContent('Đã thực hiện');
+    expect(rowOf(/Báo cáo G/)).toHaveTextContent('Đã duyệt');
   });
 
   it('?kind=quotation (KPI "Báo giá đã gửi") mở tab Đã xử lý và lọc đúng loại', async () => {
@@ -231,12 +303,37 @@ describe('Bàn làm việc — nhãn trạng thái tiếng Việt (F086) và b�
     expect(screen.queryByRole('button', { name: 'Tải thêm' })).toBeNull();
   });
 
-  it('tab "Gửi lỗi" tự tải trang kế khi trang đầu chưa có bản lỗi nào', async () => {
-    const page1: DraftPage = { items: [item({ id: 'x1', status: 'sent', title: 'Đã đi' })], next_cursor: '2026-10-09T00:00:00Z', total: 2 };
-    const page2: DraftPage = { items: [item({ id: 'x2', status: 'failed', title: 'Lỗi ở trang hai' })], next_cursor: null, total: 2 };
-    mockFetch(workbenchApi({ decidedPages: [page1, page2], details: [FAILED] }));
+  it('tab "Gửi lỗi" lọc ở máy chủ (status=failed): bản lỗi nằm xa trong lịch sử vẫn hiện và được đếm đúng', async () => {
+    const failed: DraftPage = { items: [item({ id: 'x2', status: 'failed', title: 'Lỗi từ tháng trước' })], next_cursor: null, total: 1 };
+    const calls = mockFetch((c) => {
+      const u = new URL(c.url, 'http://x');
+      if (u.pathname.endsWith('/drafts') && u.searchParams.get('status') === 'failed') return json(200, failed);
+      // Danh sách "đã xử lý" 50 dòng đầu toàn bản đã gửi — nếu lọc ở máy khách thì sẽ không thấy bản lỗi.
+      return workbenchApi({ decided: [item({ id: 's9', status: 'sent', title: 'Đã đi' })], details: [FAILED] })(c);
+    });
     renderAt('/workbench?status=failed', <WorkbenchScreen />);
-    expect(await screen.findByRole('button', { name: /Lỗi ở trang hai/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Lỗi từ tháng trước/ })).toBeInTheDocument();
+    expect(calls.some((c) => c.url.includes('status=failed'))).toBe(true);
+    expect(screen.getByRole('radio', { name: 'Gửi lỗi (1)' })).toBeInTheDocument();
+    expect(screen.queryByText('Không có tin nào gửi lỗi')).toBeNull();
+  });
+
+  it('bộ lọc "chỉ bản đã gửi" quét hết trần mà còn trang sau thì nói "Chưa quét hết" + Tải thêm, không nói "không có"', async () => {
+    let n = 0;
+    const calls = mockFetch((c) => {
+      const u = new URL(c.url, 'http://x');
+      if (u.pathname.endsWith('/drafts') && u.searchParams.get('status') === 'decided') {
+        n += 1;
+        return json(200, { items: [item({ id: `r${n}`, status: 'rejected', title: `Đã huỷ ${n}` })], next_cursor: `c${n}`, total: 999 } satisfies DraftPage);
+      }
+      return workbenchApi({})(c);
+    });
+    renderAt('/workbench?status=sent', <WorkbenchScreen />);
+    expect(await screen.findByText('Chưa quét hết danh sách', undefined, { timeout: 4000 })).toBeInTheDocument();
+    expect(screen.queryByText('Chưa có bản nháp nào đã xử lý')).toBeNull();
+    const before = calls.filter((c) => c.url.includes('status=decided')).length;
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Tải thêm' }));
+    await waitFor(() => expect(calls.filter((c) => c.url.includes('status=decided')).length).toBeGreaterThan(before));
   });
 
   it('sự kiện draft.failed làm mới danh sách nháp', async () => {
@@ -288,12 +385,16 @@ describe('Bàn làm việc — nút theo quyền (F077), mcp_write (F074) và b�
     await waitFor(() => expect(calls.some((c) => c.url.includes('/drafts/m1/reject'))).toBe(true));
   });
 
-  it('bản nháp mcp_write đã thực hiện không bao giờ hiện nhãn "Đã gửi"', async () => {
+  it('mcp_write đã duyệt từ bản cũ (trước v0.1.61) không bao giờ báo "Đã gửi" hay "Đã thực hiện" — hệ thống ngoài chưa hề được gọi', async () => {
     const done = detail({ id: 'm2', status: 'sent', kind: 'mcp_write', kind_label: 'Ghi hệ thống ngoài', title: 'Ghi CRM', target: null });
     mockFetch(workbenchApi({ decided: [item({ id: 'm2', status: 'sent', kind: 'mcp_write', kind_label: 'Ghi hệ thống ngoài', title: 'Ghi CRM' })], details: [done] }));
     renderAt('/workbench?status=decided&id=m2', <WorkbenchScreen />);
     await screen.findByRole('button', { name: /Ghi CRM/ });
-    expect(document.querySelector('.wb-list')?.textContent).toContain('Đã thực hiện');
+    const listText = document.querySelector('.wb-list')?.textContent ?? '';
+    expect(listText).toContain('Đã duyệt — chưa thực hiện (bản cũ)');
+    expect(listText).not.toContain('Đã thực hiện');
+    expect(listText).not.toContain('Đã gửi');
+    expect(await screen.findByText(/hệ thống ngoài chưa hề được gọi/)).toBeInTheDocument();
   });
 
   it('"Dùng bản dịch này" chép bản dịch vào ô Sửa rồi gửi', async () => {
