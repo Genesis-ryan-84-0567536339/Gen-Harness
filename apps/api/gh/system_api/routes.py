@@ -19,6 +19,7 @@ from gh import crypto, health, realtime, retention
 from gh.audit.routes import export_rows, query_log
 from gh.auth import rbac, service
 from gh.auth.deps import require, require_owner, require_pin
+from gh.boss_checks import service as boss_service
 from gh.chassis import actionlog
 from gh.chassis.bus import BRIDGE_CONTROL
 from gh.chassis.mcp_client import McpBlockedNetwork, McpError, pin_endpoint
@@ -27,6 +28,7 @@ from gh.data.ingest import sync_listen_sets, uptime_pct
 from gh.db import DB
 from gh.errors import ApiError, conflict, field_errors, forbidden, not_found, pin_required
 from gh.gen import jev
+from gh.gen.coach import cache as coach_cache
 from gh.hub_link import KHO_LABEL, load_kho_label, relabel
 from gh.providers import catalog
 from gh.providers import cli as climod
@@ -651,7 +653,11 @@ async def add_model(pid: uuid.UUID, body: ModelIn, request: Request, user: servi
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="provider.model_set", target_type="provider", target_id=str(pid),
                            target_label=p.name, detail=body.model_dump(), ip=user.ip)
-    return await _one_provider(db, request.app.state.redis, user.org_id, pid)
+    out = await _one_provider(db, request.app.state.redis, user.org_id, pid)
+    # v0.1.59: có model mới ⇒ thẻ "Hôm nay của Sếp" đọc lại ngay (không chờ cache 60 giây).
+    await db.commit()
+    await coach_cache.invalidate(request.app.state.redis, user.org_id)
+    return out
 
 
 @router.post("/providers/{pid}/test")
@@ -671,7 +677,34 @@ async def test_provider(pid: uuid.UUID, request: Request, user: service.CurrentU
         # không đụng.
         await mrouter.adopt_probed_model(db, user.org_id, pid, p.name, result, actor_type="user",
                                          actor_id=user.actor_id, ip=user.ip)
+        if result["ok"]:
+            await _record_cli_probe_evidence(db, user, p.kind, result)
+    # v0.1.59: commit TRƯỚC khi xoá cache — thẻ "Hôm nay của Sếp" đọc lại ngay (kể cả lượt gọi thử đỏ / nguồn khoá API:
+    # trạng thái nguồn đã đổi), không chờ cache 60 giây rồi dựng lại từ dữ liệu cũ.
+    await db.commit()
+    await coach_cache.invalidate(request.app.state.redis, user.org_id)
     return result
+
+
+#: Nguồn CLI → khoá kiểm "Việc Sếp cần làm" của đúng lượt gọi thử đó (Kết nối › dòng Google / Claude Code).
+CLI_CALL_CHECK = {climod.AGY: "agy_call", climod.CLAUDE: "claude_call"}
+
+
+async def _record_cli_probe_evidence(db: AsyncSession, user: service.CurrentUser, kind: str,
+                                     result: dict[str, Any]) -> None:
+    """v0.1.59 — "Kiểm tra kết nối" của nguồn CLI XANH là một lượt gọi model THẬT (`ModelRouter._cli_probe` sinh văn
+    bản) ⇒ ghi đúng bằng chứng đó vào "Việc Sếp cần làm": `ai_source` (dòng bắt buộc "nguồn AI") và `agy_call` /
+    `claude_call` (dòng Kết nối tương ứng) — Sếp không phải bấm Kiểm tra lần nữa ở chỗ khác. Chỉ ghi khi XANH: lượt
+    gọi thử lỗi KHÔNG ghi 'fail' ở đây (bản 'fail' chỉ do Sếp bấm Kiểm tra ở Việc Sếp cần làm / Kết nối). Nguồn khoá
+    API KHÔNG gọi hàm này: test của chúng chỉ liệt kê model, không phải lượt sinh văn bản."""
+    from gh.boss_checks import routes as boss_routes
+
+    detail = {**boss_routes._call_detail(result), "via": "provider_test"}
+    await boss_service.record(db, user.org_id, "ai_source", "pass", detail=detail, user_id=user.id)
+    await boss_service.record(db, user.org_id, CLI_CALL_CHECK[kind], "pass", detail=detail, user_id=user.id)
+    if kind == climod.CLAUDE:
+        # Phiên Claude Code có sẵn từ trước (không qua luồng đăng nhập) — như bấm Kiểm tra ở Việc Sếp cần làm.
+        await boss_routes._adopt_existing_claude_login(db, user, result)
 
 
 @router.post("/providers/{pid}/diagnose")

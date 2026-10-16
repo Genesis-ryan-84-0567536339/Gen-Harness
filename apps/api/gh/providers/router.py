@@ -672,6 +672,11 @@ class ModelRouter:
             async with self.sm() as db:
                 added = await adopt_probed_model(db, org_id, row.id, row.name, result)
                 await db.commit()
+            if added:
+                # v0.1.59: vừa có dòng model ⇒ thẻ "Hôm nay của Sếp" không còn báo "Gen chưa có model" (xoá cache 60 giây).
+                from gh.gen.coach import cache as coach_cache
+
+                await coach_cache.invalidate(self.redis, org_id)
             return added
         except asyncio.CancelledError:
             raise
