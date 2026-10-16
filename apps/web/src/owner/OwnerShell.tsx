@@ -73,7 +73,6 @@ export function OwnerShell() {
   const genOn = !!me.data?.features?.gen;
   const today = useOwnerToday();
   const counts = navCounts(today.data);
-  const spotting = useGenStore((s) => !!s.spotlight);
   const coachFocus = useGenStore((s) => s.coachFocus);
   useOpenGenFromUrl(me.data?.id ?? null, genOn, { coachPath: OWNER_PATHS.intel, conversationPath: OWNER_PATHS.gen });
   // `?gen=coach` (chuông "Gen hướng dẫn"): thẻ "Hôm nay của Sếp" nằm trong khung Gen ⇒ mở ngăn Hỏi Gen để thẻ nhận cờ.
@@ -97,7 +96,7 @@ export function OwnerShell() {
   const active = activeNavKey(pathname);
   const onGenPage = active === 'gen';
   return (
-    <div className="owner-app kit-scope" data-screen={active} data-spot={spotting ? 'on' : undefined}>
+    <div className="owner-app kit-scope" data-screen={active}>
       <a className="skip-link" href="#owner-main">
         Bỏ qua tới nội dung
       </a>
@@ -329,8 +328,10 @@ function AvatarMenu({ userId, name, email }: { userId: string; name: string; ema
             }}
           >
             <Icon name={isLight ? 'ph ph-moon' : 'ph ph-sun'} size={20} />
-            <span className="owner-menu__label">Đổi giao diện sáng/tối</span>
-            <span className="owner-menu__hint">{pref === 'system' ? 'Theo hệ thống' : isLight ? 'Đang sáng' : 'Đang tối'}</span>
+            <span className="owner-menu__text">
+              Đổi giao diện sáng/tối
+              <span className="owner-menu__hint">{pref === 'system' ? 'Đang theo hệ thống' : isLight ? 'Đang sáng' : 'Đang tối'}</span>
+            </span>
           </button>
           <div className="owner-menu__sep" role="separator" />
           <button type="button" role="menuitem" className="owner-menu__item" onClick={() => void logout()} disabled={busy}>
