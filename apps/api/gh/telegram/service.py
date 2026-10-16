@@ -1,7 +1,8 @@
 """Kênh "Báo động & bản tin" qua Telegram (v0.1.44 — F-8c, F-6b): cấu hình mã hoá, hộp thư đi, tệp cho trực canh.
 
-Một chiều: Gen gửi bản tin 07:30/17:30 và nhắc việc cho Sếp; Telegram không có nút/hành động, không nhận tin từ Sếp —
-mọi thao tác Sếp xác nhận trong Console. KHÔNG đi qua bridge/Zalo ở bất kỳ đường nào.
+Gen gửi bản tin 07:30/17:30 và nhắc việc cho Sếp; Telegram không có nút duyệt/hành động — mọi thao tác Sếp xác nhận
+trong Console. v0.1.64: Sếp có thể nhắn Gen qua bot (chỉ tài khoản đã ghép, chỉ đọc/đề xuất) — xem
+`gh.telegram.inbound`, `gh.telegram.commands`. KHÔNG đi qua bridge/Zalo ở bất kỳ đường nào.
 
 - `ops.notify_channels` (migration 0029): một cấu hình mỗi tổ chức. Token bot CHỈ ở `token_enc`
   (`crypto.encrypt(token, TOKEN_AAD)`, có trong gh/bundle.py::REENCRYPT_TARGETS). Không bao giờ vào log, phản hồi,
@@ -71,6 +72,7 @@ MESSAGES: dict[str, str] = {
                     "(Start)",
     tg.RATE_LIMITED: "Telegram đang giới hạn tốc độ gửi — thử lại sau ít phút",
     tg.UNREACHABLE: "Không kết nối được tới Telegram — kiểm tra mạng của máy chủ rồi thử lại",
+    tg.POLL_CONFLICT: "Bot đang bị nơi khác giữ kênh nhận tin (webhook hoặc máy khác) — Gen chưa nhận được tin của Sếp",
     tg.BAD_REQUEST: "Telegram không nhận tin này — thử lại; nếu vẫn lỗi, gửi Gói chẩn đoán cho người hỗ trợ",
 }
 ALERT_BODIES: dict[str, str] = {
@@ -174,6 +176,10 @@ async def save_config(db: AsyncSession, org_id: uuid.UUID, token: str | None, ch
         bot_username = uname[:64] if isinstance(uname, str) and uname else None
         token_enc = crypto.encrypt(clean_token.encode(), TOKEN_AAD)
 
+    # v0.1.64: đổi sang BOT khác ⇒ ghép cũ không còn nghĩa (bot mới là ranh giới tin cậy mới, dãy update_id khác):
+    # gỡ ghép, tắt "Nhận tin từ Sếp", về offset 0 — Sếp ghép lại bằng mã 6 số.
+    token_replaced = existing is not None and clean_token is not None and not _same_token(existing, clean_token)
+
     # Token hoặc chat_id thật sự đổi (hoặc nối lần đầu) ⇒ kết quả Gửi thử cũ không còn nói gì về cấu hình mới:
     # xoá để thẻ Telegram và dòng 6 "Việc Sếp cần làm" cùng về "Chưa kiểm" (Sếp phải Gửi thử lại).
     if existing is None or chat_id != existing.chat_id or (clean_token is not None
@@ -192,6 +198,11 @@ async def save_config(db: AsyncSession, org_id: uuid.UUID, token: str | None, ch
                reminders = EXCLUDED.reminders, updated_at = now(), updated_by = EXCLUDED.updated_by"""),
         {"o": org_id, "t": token_enc, "c": chat_id, "b": bot_username, "e": pick(enabled, "enabled"),
          "br": pick(briefing, "briefing"), "r": pick(reminders, "reminders"), "u": user_id})
+    if token_replaced:
+        from gh.telegram import inbound
+
+        await inbound.unpair(db, org_id)
+        await db.execute(text("UPDATE ops.notify_channels SET inbound_offset = 0 WHERE org_id = :o"), {"o": org_id})
     return await get_config(db, org_id)
 
 
