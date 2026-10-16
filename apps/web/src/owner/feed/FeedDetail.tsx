@@ -116,9 +116,20 @@ export function FeedDetail({ id, item, onResolved }: FeedDetailProps) {
   const silence = useSilenceItem(id);
   const ack = useAckItem(id);
 
-  // Nháp vừa tạo: đưa vào tầm mắt (thanh hành động dính đáy che một phần màn).
+  // Nháp vừa tạo: đưa vào tầm mắt (thanh hành động dính đáy che một phần màn). DraftDecide tải nội dung nháp SAU khi khung xuất hiện nên khung
+  // cao dần — cuộn lại theo chiều cao mới trong vài giây đầu để nút "Duyệt và gửi" không nằm dưới thanh hành động.
   useEffect(() => {
-    if (draftId) draftRef.current?.scrollIntoView?.({ block: 'end', behavior: 'smooth' });
+    const el = draftRef.current;
+    if (!draftId || !el) return;
+    el.scrollIntoView?.({ block: 'end', behavior: 'smooth' });
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => el.scrollIntoView?.({ block: 'end', behavior: 'auto' }));
+    ro.observe(el);
+    const stop = setTimeout(() => ro.disconnect(), 3_000);
+    return () => {
+      clearTimeout(stop);
+      ro.disconnect();
+    };
   }, [draftId]);
 
   if (!head) {
