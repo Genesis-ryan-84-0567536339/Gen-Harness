@@ -1,12 +1,16 @@
 # Gen-Harness — ghi chú cho Claude
 
-Ghi chú vận hành riêng của Sếp nằm ở repo Brain › Project/gen-harness (riêng tư).
+Từ 16/10/2026 Sếp tạm ngưng quy trình Gen-hub (Kho dữ liệu) và Brain trong việc thi công: không đọc/ghi Kho, không dùng Brain.
+Tiến độ và việc dở ghi ở `docs/ROADMAP.md` và `docs/reports/HANDOFF-v0.1.1.md`.
 
-## Cách làm việc (Kho dữ liệu của Sếp — QD-2, QD-3, QD-4, QD-14)
+## Cách làm việc (QD-2, QD-3, QD-4, QD-14)
 - Việc nặng ngữ cảnh (đọc log CI, dò nhiều file, review diff lớn, chạy test/e2e, chụp màn hình) → giao sub agent
   (công cụ Agent); ngữ cảnh chính chỉ giữ quyết định, kết luận, báo cáo Boss. Việc 1–2 thao tác thì làm thẳng.
 - Phân vai model: Sonnet thi công (dò/sửa code, chạy test) · Opus thiết kế + review trước merge · Haiku đọc log,
   kiểm trạng thái PR/release · Fable chỉ khi Opus đã bí.
+- Kỹ năng chính hãng Anthropic (Sếp chốt 16/10, xem `.claude/skills/README.md`): làm giao diện theo `frontend-design`;
+  kiểm trên ứng dụng chạy thật (bấm thử, lỗi console, ảnh 390/1440 trước khi báo Sếp) theo `webapp-testing` hoặc `/run`;
+  review trước merge bằng `/code-review`, thêm `/security-review` khi chạm mã PIN, khoá, quyền, bí mật; `/simplify` khi diff lớn.
 - Dự phóng trước khi thi công (QD-14): việc cỡ một bản thì lập kế hoạch + chia gói việc KHÔNG chồng file (mỗi gói ghi rõ
   file được sửa, hợp đồng API giữa các gói) rồi mới giao thi công song song, mỗi gói một worktree/nhánh `claude/wip/<bản>/<gói>`.
 - Trả lời Boss (QD-4): tiếng Việt có dấu, THẬT NGẮN, đi thẳng vào việc Boss cần làm (hoặc "không cần làm gì");
@@ -26,7 +30,7 @@ Ghi chú vận hành riêng của Sếp nằm ở repo Brain › Project/gen-har
 - Ghi mỗi bản: `CHANGELOG.md` (3–5 dòng, mới nhất trên cùng) + `docs/releases/vX.Y.Z.md` (chi tiết, có mục "Boss phải làm").
   `docs/reports/HANDOFF-v0.1.1.md` CHỈ giữ hiện trạng + việc dở, ≤ 200 dòng. Tiến độ + mục Nợ: `docs/ROADMAP.md`.
   Trước khi commit tài liệu: `python3 .github/scripts/check_doc_links.py` (link chết) và `python3 -m unittest discover -s .github/scripts`.
-- Sửa CLAUDE.md cần Boss duyệt (bản 09/10/2026 đã duyệt — QD-18).
+- Sửa CLAUDE.md cần Boss duyệt (bản 09/10/2026 đã duyệt — QD-18; bổ sung 16/10/2026 theo chỉ đạo Sếp: tạm ngưng Gen-hub/Brain, dùng kỹ năng chính hãng).
 
 ## Luật cứng
 - Gen chỉ ĐỀ XUẤT. Không ghi Kho/Gen-hub khi chưa có Xác nhận + mã PIN của Sếp (QD-18: chỉ Kho — Phiên, Việc; kanban, warroom,
