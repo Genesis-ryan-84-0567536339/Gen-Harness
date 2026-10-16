@@ -7,9 +7,9 @@ Ngày = ngày Release trên GitHub theo giờ Việt Nam; tiêu đề trong `doc
 (v0.1.32–v0.1.34, v0.1.40, v0.1.46) hoặc vài ngày (v0.1.47, v0.1.48: làm 03/10, phát hành 09/10).
 Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) ghi ở [ROADMAP › Bản phản ứng](docs/ROADMAP.md).
 
-## v0.1.59 — Bản vá: WhatsApp quét QR được, thẻ "Hôm nay của Sếp" đọc lại ngay (16/10/2026)
-- **WhatsApp quét QR**: mã QR WhatsApp dày gấp đôi Zalo nay vẽ lớn ở màn Kết nối (trước 88px nên điện thoại không đọc); ghép cặp xử lý `companion_reg_refresh`; socket lỗi trước khi ra mã thử lại 4 lần có giãn cách thay vì mở lại vô hạn; ghim Baileys `7.0.0-rc14`; thẻ kênh nói lý do lỗi bằng tiếng Việt kèm "Chi tiết kỹ thuật".
-- **Hôm nay của Sếp**: "Kiểm tra kết nối" của nguồn CLI xanh được tính là bằng chứng nguồn AI chạy được (dòng bắt buộc đạt ngay); thẻ cập nhật ngay, không trễ 60 giây.
+## v0.1.59 — Bản vá: sửa quét QR WhatsApp (chưa kiểm với máy chủ WhatsApp thật), thẻ "Hôm nay của Sếp" đọc lại ngay (16/10/2026)
+- **Sửa quét QR WhatsApp**: mã QR WhatsApp dày gấp đôi Zalo nay vẽ lớn ở màn Kết nối (trước 88px nên điện thoại không đọc); ghép cặp luôn đổi khoá khi máy chủ gửi `companion_reg_refresh` (kể cả trước mã đầu); socket lỗi trước khi ra mã thử lại 4 lần có giãn cách thay vì mở lại vô hạn; ghim Baileys `7.0.0-rc14`; yêu cầu lấy phiên bản WA Web tự nhận là bridge Gen-Harness (không giả trình duyệt); thẻ kênh nói lý do lỗi bằng tiếng Việt kèm "Chi tiết kỹ thuật".
+- **Hôm nay của Sếp**: "Kiểm tra kết nối" của nguồn CLI xanh do Owner bấm được tính là bằng chứng nguồn AI chạy được (dòng bắt buộc đạt ngay khi nguồn đang bật); thẻ cập nhật ngay khi đổi nguồn, khoá, model hay gán model, không trễ 60 giây.
 - Chưa thử được với máy chủ WhatsApp thật (máy kiểm thử bị chặn mạng); kiểm trên máy Owner là Nợ #35.
 - Chi tiết: [docs/releases/v0.1.59.md](docs/releases/v0.1.59.md)
 

@@ -23,7 +23,7 @@ Còn hiệu lực từ v0.1.1 (vai trò DB, volume, gói hồ sơ); chi tiết �
 
 ## Hiện trạng (v0.1.59)
 
-Bản mới nhất **v0.1.59** (16/10/2026, `VERSION` = v0.1.59): **bản vá** — WhatsApp quét QR được (mã vẽ lớn, xử lý `companion_reg_refresh`, thử lại có giãn cách trước khi ra mã, Baileys ghim 7.0.0-rc14, thẻ kênh nói lý do lỗi); thẻ "Hôm nay của Sếp" đọc lại ngay sau Kiểm tra nguồn CLI xanh ([v0.1.59.md](../releases/v0.1.59.md)); đang chờ PR vào main + cổng phát hành. Chưa kiểm với máy chủ WhatsApp thật (Nợ #35).
+Bản mới nhất **v0.1.59** (16/10/2026, `VERSION` = v0.1.59): **bản vá** — sửa quét QR WhatsApp, chưa kiểm với máy chủ thật (mã vẽ lớn, xử lý `companion_reg_refresh`, thử lại có giãn cách trước khi ra mã, Baileys ghim 7.0.0-rc14, thẻ kênh nói lý do lỗi); thẻ "Hôm nay của Sếp" đọc lại ngay sau khi đổi nguồn AI hoặc Kiểm tra nguồn CLI xanh ([v0.1.59.md](../releases/v0.1.59.md)); đang chờ PR vào main + cổng phát hành. Chưa kiểm với máy chủ WhatsApp thật (Nợ #35).
 Trước đó **v0.1.58** (11/10/2026, bản vá nóng): Antigravity CLI đòi mức suy nghĩ — Kiểm tra thử lại với mức, tự lưu model, Gen tự lành, bảng gán nói lý do thật ([v0.1.58.md](../releases/v0.1.58.md)).
 Trước đó **v0.1.57** (10/10/2026): **khoá nạp dữ liệu mẫu** (cờ + DB chưa có dữ liệu thật), **Owner tự đặt Tên Kho** (Nợ #30), **CI `api` chạy hai lượt pytest song song**, bộ kiểm chống lộ chỉ giữ quy tắc chung (mẫu riêng ở secret `GH_PERSONAL_PATTERNS`), bản công khai đã gọt danh tính riêng ([v0.1.57.md](../releases/v0.1.57.md)); đã vào main.
 Trước đó **v0.1.56** (10/10/2026): **không lộ thông tin riêng của Sếp cho Owner khác** — bỏ địa chỉ Gen-hub khỏi mã giao đi, tên Kho chung "Kho dữ liệu", CI chống lộ ([v0.1.56.md](../releases/v0.1.56.md)).
@@ -48,10 +48,10 @@ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)),
 - **Kênh**: Zalo/WhatsApp qua bridge (QR; WhatsApp v0.1.59: mã vẽ lớn, Baileys ghim 7.0.0-rc14, thử lại có giãn cách); Telegram một chiều tới Sếp; Facebook cá nhân đọc + Trả lời bình luận/Nhắn tin có Xác nhận + PIN + ảnh chụp (đăng bài = lát 2).
 - **Dữ liệu & bảo mật**: Postgres 16 (pgvector, pg_partman), RLS chỉ là phòng thủ phụ (mỗi bản cài 1 tổ chức), hạn lưu thật, bí mật mã hoá phong bì, DNS ghim cho MCP/Gen-hub, ngắt mạch Gen-hub 60 giây.
 
-## v0.1.59 — Bản vá: WhatsApp quét QR được, thẻ Hôm nay của Sếp đọc lại ngay (nhánh `claude/hotfix-v0159`)
+## v0.1.59 — Bản vá: sửa quét QR WhatsApp (chưa kiểm với máy chủ thật), thẻ Hôm nay của Sếp đọc lại ngay (nhánh `claude/hotfix-v0159`)
 
 - **Vì sao**: Owner báo (v0.1.58) "WhatsApp quét QR chưa được" ở màn Kết nối, Zalo không lỗi. Mã WhatsApp dày vẽ 88px nên điện thoại không đọc; bridge chưa xử lý `companion_reg_refresh`; socket lỗi trước khi ra mã mở lại vô hạn (1755 socket / 40 giây); thẻ Hôm nay đọc cache 60 giây.
-- **Thay đổi**: web `ChannelCard` (WhatsApp luôn vẽ lớn, lỗi tiếng Việt + Chi tiết kỹ thuật); bridge `whatsapp.js` (refresh đổi khoá ADV dựng lại đúng mã, ảnh L/640px, thử lại 2s·4s·8s, `sw.js` cho phiên bản WA Web, ghim Baileys 7.0.0-rc14); `gen/coach/cache.py` `invalidate` sau thao tác đổi nguồn AI; Kiểm tra CLI xanh ghi `ai_source` + `agy_call`/`claude_call`. Không migration.
+- **Thay đổi**: web `ChannelCard` (WhatsApp luôn vẽ lớn, lỗi tiếng Việt + Chi tiết kỹ thuật); bridge `whatsapp.js` (refresh luôn đổi khoá ADV và dựng lại đúng mã đang hiện, ảnh L/640px, thử lại 2s·4s·8s, `sw.js` cho phiên bản WA Web với user-agent tự nhận, ghim Baileys 7.0.0-rc14); `gen/coach/cache.py` làm mới thẻ sau mọi thao tác đổi nguồn/khoá/model/gán model (bộ đếm phiên bản chống ghi đè bản cũ); Kiểm tra CLI xanh của Owner ghi `agy_call`/`claude_call` và `ai_source` (chỉ khi nguồn bật). Không migration.
 - **Chưa làm**: mở Antigravity CLI cho mọi agent (Nợ #33, Owner chọn "mở thẳng" 16/10); tách agy ra container riêng (Nợ #34); kiểm WhatsApp với máy chủ thật (Nợ #35, máy kiểm thử bị chặn mạng).
 - **Boss cần làm**: xem "Boss phải làm — v0.1.59" dưới. Chi tiết: [v0.1.59.md](../releases/v0.1.59.md).
 
