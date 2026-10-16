@@ -38,32 +38,32 @@ export const SETUP_STEPS: StepMeta[] = [
   {
     n: 5, key: 'channels', title: 'Kết nối kênh', required: false, built: true,
     content: 'Thẻ từng kênh. Zalo/WhatsApp: tạo mã QR, đếm ngược 60 giây tự làm mới, chờ quét → đã quét → đồng bộ danh sách nhóm. Cảnh báo rủi ro tài khoản cá nhân trước khi hiện QR. Telegram và kênh khác chưa có trong bản này — thẻ ghi rõ, không có nút cài.',
-    doneWhen: 'Ít nhất một kênh đang hoạt động · hoặc Để sau (hiện ở "Việc thiết lập tiếp" trên Hôm nay)',
+    doneWhen: 'Ít nhất một kênh đang hoạt động · hoặc Để sau (hiện ở Cài đặt › Việc nên làm tiếp)',
   },
   {
     n: 6, key: 'groups', title: 'Chọn nhóm lắng nghe', required: false, built: true,
     content: 'Bảng nhóm vừa đồng bộ. Mỗi nhóm chọn chế độ: Không nghe · Chỉ khi được tag · Nghe im lặng · Chủ động bắt tín hiệu, và phạm vi xem. Mặc định Không nghe cho mọi nhóm — Sếp bật từng nhóm.',
-    doneWhen: 'Ít nhất một nhóm được bật · hoặc Để sau (hiện ở "Việc thiết lập tiếp" trên Hôm nay)',
+    doneWhen: 'Ít nhất một nhóm được bật · hoặc Để sau (hiện ở Cài đặt › Việc nên làm tiếp)',
   },
   {
     n: 7, key: 'refinery', title: 'Sàng lọc dữ liệu', required: false, built: true,
     content: 'Chỉ hỏi một câu: Sếp làm ngành nào (chọn bộ quy tắc khởi đầu). Lịch sàng lọc 900 giây / 500 tin / lô 250 / tin cậy ≥ 0,6 đã điền sẵn; chu kỳ, ngưỡng, từng quy tắc và trọng số chấm điểm (tổng 100%) chỉnh ở mục Nâng cao.',
-    doneWhen: 'Lưu · hoặc Để sau (hiện ở "Việc thiết lập tiếp" trên Hôm nay)',
+    doneWhen: 'Lưu · hoặc Để sau (hiện ở Cài đặt › Việc nên làm tiếp)',
   },
   {
     n: 8, key: 'agent', title: 'Agent đầu tiên', required: false, built: true,
     content: 'Chọn mẫu (Trợ lý thương mại, Khách hàng lớn, Hậu cần, Chăm sóc khách hàng, Tuyển dụng, Thư ký cá nhân) hoặc tạo trống — chọn mẫu là xong, tên và vai trò điền sẵn theo mẫu. Gán kênh/nhóm và chỉnh giọng nói làm sau ở Danh tính Agent.',
-    doneWhen: 'Agent được lưu · hoặc Để sau (hiện ở "Việc thiết lập tiếp" trên Hôm nay)',
+    doneWhen: 'Agent được lưu · hoặc Để sau (hiện ở Cài đặt › Việc nên làm tiếp)',
   },
   {
     n: 9, key: 'autonomy', title: 'Tự trị & ranh giới', required: false, built: true,
     content: 'Mức tự trị (Gợi ý hoặc Soạn sẵn chờ duyệt), mặc định Soạn sẵn chờ duyệt; ngưỡng tiền phải duyệt mặc định 50.000.000 ₫. Danh sách ranh giới khoá cứng kèm một dòng ghi chú "bấm Tiếp tục là đã đọc" — không còn ô tích.',
-    doneWhen: 'Lưu · hoặc Để sau (hiện ở "Việc thiết lập tiếp" trên Hôm nay)',
+    doneWhen: 'Lưu · hoặc Để sau (hiện ở Cài đặt › Việc nên làm tiếp)',
   },
   {
     n: 10, key: 'team', title: 'Mời đội ngũ', required: false, built: true,
     content: 'Thẻ gợi ý có nút "Để sau": Sếp một mình dùng được ngay. Muốn mời luôn thì bấm "Mời ngay", thêm email và vai trò (Quản lý, Vận hành, Nhân viên phụ trách, Kiểm soát) — mật khẩu tạm hiện ngay để Sếp tự gửi.',
-    doneWhen: 'Để sau được — hiện ở "Việc thiết lập tiếp" trên Hôm nay',
+    doneWhen: 'Để sau được — hiện ở Cài đặt › Việc nên làm tiếp',
   },
   {
     n: 11, key: 'backup', title: 'Sao lưu', required: false, built: true,
@@ -72,7 +72,7 @@ export const SETUP_STEPS: StepMeta[] = [
   },
   {
     n: 12, key: 'finish', title: 'Hoàn tất', required: true, built: true,
-    content: 'Tóm tắt những gì đã bật. Tiến độ lần sàng lọc đầu tiên theo thời gian thực: bản ghi thô đã gom · đang phân loại · đã vào kho sạch. Nút Vào Console (mở trang chủ theo vai trò — Owner là Hôm nay).',
+    content: 'Tóm tắt những gì đã bật. Tiến độ lần sàng lọc đầu tiên theo thời gian thực: bản ghi thô đã gom · đang phân loại · đã vào kho sạch. Nút Vào Console (mở trang chủ theo vai trò — Owner là Mặt tiền).',
     doneWhen: 'Bấm nút',
   },
 ];
@@ -90,7 +90,7 @@ export const STEP_DESCRIPTIONS: Record<number, string> = {
   9: 'Mức trợ lý được tự làm đã chọn sẵn: Soạn sẵn chờ duyệt. Những giới hạn bên dưới luôn bật để bảo vệ Sếp và nhân viên — không ai tắt được.',
   10: 'Gợi ý, không bắt buộc — Sếp một mình dùng được ngay. Có người cùng làm thì mời lúc nào cũng được ở Đội ngũ › Người dùng; hệ thống chưa tự gửi email mời, mật khẩu tạm hiện ngay để Sếp tự gửi.',
   11: 'Sao lưu đã tự bật: hằng ngày lúc 02:00, giữ 7 bản gần nhất. Đi tiếp hay bấm Để sau thì lịch này vẫn chạy — đổi giờ ở mục "Đổi lịch" nếu muốn.',
-  12: 'Kiểm tra lại những gì đã bật. Việc còn thiếu có liên kết để làm tiếp — làm ngay hoặc sau ở Hôm nay.',
+  12: 'Kiểm tra lại những gì đã bật. Việc còn thiếu có liên kết để làm tiếp — làm ngay hoặc sau ở Cài đặt › Việc nên làm tiếp.',
 };
 
 /** When the PIN is asked for — design `pinRules` (Tài khoản của tôi › Mã PIN). */
@@ -167,6 +167,11 @@ const stepStatus = (state: SetupState, n: number) => state.steps.find((s) => s.n
 /** Bước 1–3 (mã thiết lập, tài khoản Owner, tổ chức) đã xong. */
 export function accountReady(state: SetupState): boolean {
   return state.finished || state.current_step >= 4 || [1, 2, 3].every((n) => stepStatus(state, n) === 'done');
+}
+
+/** Bước 4 (nguồn AI) đã xong THẬT (có nguồn chạy được) — khác `aiSettled` (cả "để sau"). Bước Xong dùng để nói "Gen đã sẵn sàng". */
+export function aiRunning(state: SetupState): boolean {
+  return stepStatus(state, 4) === 'done';
 }
 
 /** Bước 4 (nguồn AI) đã xong hoặc đã được để sau ở máy chủ. */

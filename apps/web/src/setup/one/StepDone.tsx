@@ -11,7 +11,7 @@ import { qk } from '../../lib/queries';
 import { queryClient } from '../../lib/queryClient';
 import { InlineError } from '../../screens/common';
 import { firstRunCounters } from '../phase2Model';
-import { aiSettled } from '../steps';
+import { aiRunning } from '../steps';
 import { describeError } from '../types';
 import { AI_LATER_TEXT } from './StepAiSource';
 
@@ -58,7 +58,7 @@ export function StepDone({ state, aiLater, onFinished, onBack }: StepDoneProps) 
   });
   const c = firstRunCounters(first.data, live.data);
 
-  const aiReady = aiSettled(state);
+  const aiReady = aiRunning(state);
   const who = me.data?.display_name;
   const org = me.data?.org?.name;
 
@@ -108,7 +108,9 @@ export function StepDone({ state, aiLater, onFinished, onBack }: StepDoneProps) 
       <h1 className="setup-one__title" id="setup-one-title">
         Xong rồi, thưa Sếp
       </h1>
-      <p className="setup-one__lead">Gen đã sẵn sàng. Đây là những gì đã bật:</p>
+      <p className="setup-one__lead">
+        {aiReady ? 'Gen đã sẵn sàng. Đây là những gì đã bật:' : 'Tài khoản đã xong. Nối nguồn AI lúc nào cũng được.'}
+      </p>
 
       <ul className="setup-one__sum" aria-label="Tóm tắt thiết lập">
         <li className="setup-one__sum-row" data-testid="setup-done-account">
@@ -128,7 +130,7 @@ export function StepDone({ state, aiLater, onFinished, onBack }: StepDoneProps) 
           <div className="setup-one__sum-body">
             <span className="setup-one__sum-k">Nguồn AI</span>
             <span className="setup-one__sum-v">{aiReady ? 'Đã chạy' : `Làm sau — ${AI_LATER_TEXT}`}</span>
-            {!aiReady && !aiLater ? <span className="setup-one__muted">Sếp nối lúc nào cũng được ở nút “Chọn model”.</span> : null}
+            {!aiReady && !aiLater ? <span className="setup-one__muted">Sếp nối lúc nào cũng được ở Cài đặt › Nguồn AI › Đổi nguồn AI.</span> : null}
           </div>
         </li>
         <li className="setup-one__sum-row" data-testid="setup-done-first-run" aria-live="polite">

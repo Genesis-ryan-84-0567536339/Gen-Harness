@@ -561,6 +561,9 @@ describe('Bước 2 · Nguồn AI', () => {
     await screen.findByRole('heading', { name: 'Xong rồi, thưa Sếp' });
     expect(sessionStorage.getItem(AI_LATER_KEY)).toBe('1');
     expect(screen.getByTestId('setup-done-ai')).toHaveTextContent('Làm sau — Gen sẽ chưa tóm tắt được bản tin');
+    // câu mở đầu không nói "Gen đã sẵn sàng" khi Sếp chọn Làm sau (mâu thuẫn với dòng Nguồn AI)
+    expect(screen.getByText('Tài khoản đã xong. Nối nguồn AI lúc nào cũng được.')).toBeInTheDocument();
+    expect(screen.queryByText(/Gen đã sẵn sàng/)).toBeNull();
     expect(puts(4)).toEqual([]);
     await waitFor(() => expect(loc()).toBe('/setup?buoc=xong'));
   });
@@ -586,6 +589,19 @@ describe('Bước 3 · Xong', () => {
     expect(screen.getByText('Zalo là nguồn tin chính — chưa nối thì Mặt tiền còn trống.')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Nhận bản tin qua Telegram' })).toHaveAttribute('href', '/connections#telegram');
     expect(screen.getByRole('link', { name: 'Mời đội' })).toHaveAttribute('href', '/guide/10');
+  });
+
+  it('nguồn AI chưa nối (không phải "Làm sau"): gợi ý chỉ tới nơi có thật — Cài đặt › Nguồn AI › Đổi nguồn AI; nguồn AI xong thì "Gen đã sẵn sàng"', async () => {
+    startServer({ done: [1, 2, 3], skipped: [4], session: true }); // máy chủ đã ghi "để sau" nguồn AI, trình duyệt không nhớ "Làm sau"
+    const first = renderAt('/setup?buoc=xong');
+    await screen.findByRole('heading', { name: 'Xong rồi, thưa Sếp' });
+    expect(screen.getByText(/Cài đặt › Nguồn AI › Đổi nguồn AI/)).toBeInTheDocument();
+    expect(screen.queryByText(/nút “Chọn model”/)).toBeNull();
+    first.unmount();
+    queryClient.clear();
+    startServer({ done: [1, 2, 3, 4], session: true });
+    renderAt('/setup?buoc=xong');
+    expect(await screen.findByText('Gen đã sẵn sàng. Đây là những gì đã bật:')).toBeInTheDocument();
   });
 
   it('"Vào Mặt tiền": PUT 12 rồi /owner; "Nối Zalo ngay": PUT 12 rồi /guide/5', async () => {

@@ -358,7 +358,7 @@ export function SkipBrainDialog({
         </div>
         <ul className="risk-list">
           <li>Tin nhắn vẫn được gom về kho thô, sẽ được lọc khi có model.</li>
-          <li>Hôm nay sẽ hiện dải "Chưa có model" kèm nút Chọn model để làm lại bất cứ lúc nào.</li>
+          <li>Cài đặt › Việc nên làm tiếp sẽ nhắc “Nguồn AI” để Sếp làm lại bất cứ lúc nào.</li>
         </ul>
       </div>
     </Dialog>

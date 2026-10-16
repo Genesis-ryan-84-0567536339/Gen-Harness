@@ -8,7 +8,7 @@ Ngày = ngày Release trên GitHub theo giờ Việt Nam; tiêu đề trong `doc
 Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) ghi ở [ROADMAP › Bản phản ứng](docs/ROADMAP.md).
 
 ## v0.1.60 — Mặt tiền Owner v2: 5 trụ cột có số thật + Thiết lập một màn 3 bước (16/10/2026)
-- **Mặt tiền 5 trụ cột**: Tình báo (bản tin, Việc phải quyết có Duyệt + mã PIN, cảnh báo, 4 ô số), Thông tin (tin Khẩn/Quan trọng/Thường, hội thoại 10 tin, Trả lời chỉ tạo nháp → "Duyệt và gửi"), Quan hệ (Cần chăm, Khách nóng, Cầu nối, Cung–cầu, hồ sơ sống), Phân tích (7/30 ngày, biểu đồ, phễu, chi phí, 9 chỉ số), Việc (tick Xong, Dời sang mai). Thanh trái ở máy tính, thanh dưới 5 nút ở điện thoại; Hỏi Gen là ngăn kéo.
+- **Mặt tiền 5 trụ cột**: Tình báo (bản tin, Việc phải quyết có Duyệt + mã PIN, cảnh báo, 4 ô số), Thông tin (lọc Quan trọng · Tất cả · Cơ hội · Cảnh báo · Chờ duyệt, tin xếp Khẩn/Quan trọng/Thường, hội thoại 10 tin, Trả lời chỉ tạo nháp → "Duyệt và gửi"), Quan hệ (Cần chăm, Khách nóng, Cầu nối, Cung–cầu, hồ sơ sống), Phân tích (7/30 ngày, biểu đồ, phễu, chi phí, 9 chỉ số), Việc (tick Xong, Dời sang mai). Thanh trái ở máy tính, thanh dưới 5 nút ở điện thoại; Hỏi Gen là ngăn kéo.
 - **API chỉ đọc, chỉ Owner**: `GET /owner/brief|feed|feed/{id}/context|insights|proposals`, `relations?list=care`, `today.nav`; không gọi model, không migration.
 - **Thiết lập một màn** Tài khoản → Nguồn AI → Xong; mọi nút "Chọn model" dẫn `/setup?buoc=nguon-ai`; Cài đặt `/owner/them` đúng 4 khối. Hệ hình ảnh mới (token sáng/tối, 8 thành phần kit) + lính gác thiết kế.
 - Chi tiết: [docs/releases/v0.1.60.md](docs/releases/v0.1.60.md)

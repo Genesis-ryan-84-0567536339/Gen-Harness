@@ -861,6 +861,28 @@ describe('Việc (/owner/viec)', () => {
     noRawObjects();
   });
 
+  it('Việc hôm nay: lời hứa lỗi mà không có việc nào ⇒ vẫn hiện dòng báo lỗi (Thử lại + Chi tiết kỹ thuật), không chỉ "không có việc"', async () => {
+    setViewport(true);
+    state.tasks = [];
+    mockApi({ '/tasks/promises': () => problem500() });
+    mount(<WorkScreen />, '/owner/viec');
+    const note = await screen.findByTestId('work-today-partial');
+    expect(screen.getByText('Hôm nay không có việc đến hạn.')).toBeInTheDocument();
+    expect(note).toHaveTextContent('Chưa tải được danh sách lời hứa');
+    expect(within(note).getByRole('button', { name: 'Thử lại' })).toBeInTheDocument();
+    expect(within(note).getAllByText('Chi tiết kỹ thuật').length).toBeGreaterThan(0);
+    noRawObjects();
+  });
+
+  it('Việc hôm nay: chỉ MỘT nguồn việc (doing) lỗi ⇒ báo một phần, các việc đã tải vẫn hiện', async () => {
+    setViewport(true);
+    mockApi({ '/tasks': (c) => (c.method === 'GET' && c.search.includes('status=doing') ? problem500() : undefined) });
+    mount(<WorkScreen />, '/owner/viec');
+    const note = await screen.findByTestId('work-today-partial');
+    expect(note).toHaveTextContent('Chưa tải được một phần danh sách việc');
+    expect(within(note).getAllByText('Chi tiết kỹ thuật').length).toBeGreaterThan(0);
+  });
+
   it('DecideList tách riêng: nháp và đề xuất lỗi cả hai ⇒ MỘT OwnerError có nút Thử lại', async () => {
     mockApi({ '/drafts': () => problem500(), '/owner/proposals': () => problem500() });
     mount(<WorkListHarness />, '/owner/viec');

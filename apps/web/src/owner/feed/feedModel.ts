@@ -197,7 +197,7 @@ export function draftDoneText(status: unknown): string {
     case 'rejected':
       return 'Đã từ chối bản nháp trả lời.';
     case 'failed':
-      return 'Bản nháp chưa gửi được — Sếp mở lại ở Việc để thử lại.';
+      return 'Bản nháp chưa gửi được — Sếp mở Bàn làm việc (Console) để xem lỗi và thử lại.';
     default:
       return 'Đã duyệt và gửi bản nháp trả lời.';
   }

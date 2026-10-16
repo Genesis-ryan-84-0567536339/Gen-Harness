@@ -35,7 +35,7 @@ function MatchActions({ row }: { row: OwnerRelationRow }) {
         onClick={() => introduce.mutate(matchId)}
       >
         {done ? <Icon name="ph ph-check" size={16} /> : null}
-        {done ? 'Đã giới thiệu' : introduce.isPending ? 'Đang tạo nháp…' : 'Giới thiệu'}
+        {done ? 'Đã tạo nháp' : introduce.isPending ? 'Đang tạo nháp…' : 'Giới thiệu'}
       </button>
       <button type="button" className="kit-btn kit-btn--ghost" data-testid={`match-reject-${matchId}`} disabled={busy} onClick={() => reject.mutate(matchId)}>
         Bỏ qua

@@ -22,7 +22,7 @@ import { usePromises, useTasks } from '../../screens/queue/queries';
 import { invalidateAfterWrite, useCreateReminder, useTaskDone, useTaskPostpone, tomorrowMorning } from '../actions/useOwnerActions';
 import { ASK_GEN_PROMPTS, OWNER_PATHS, asText, moneyText, safeLink } from '../ownerModel';
 import { openAskGen } from '../AskGenScreen';
-import { OwnerError } from '../parts';
+import { OwnerError, PartialLoadNote } from '../parts';
 import './work.css';
 
 // ── mô hình thuần ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -116,6 +116,10 @@ export interface TodayData {
   isError: boolean;
   /** Lời hứa lỗi riêng — vẫn hiện việc, kèm một dòng báo. */
   promisesFailed: boolean;
+  /** Chỉ MỘT trong hai nguồn việc (todo / doing) lỗi — danh sách có thể thiếu. */
+  tasksPartialFailed: boolean;
+  /** Lỗi của phần không tải được (lời hứa, hoặc nguồn việc lỗi) — cho "Chi tiết kỹ thuật" của dòng báo một phần. */
+  partialError: unknown;
   error: unknown;
   isFetching: boolean;
   refetch: () => void;
@@ -132,6 +136,8 @@ export function useTodayData(tz: string = DEFAULT_TZ): TodayData {
     isPending: todo.isPending && doing.isPending,
     isError: todo.isError && doing.isError,
     promisesFailed: promises.isError,
+    tasksPartialFailed: todo.isError !== doing.isError,
+    partialError: promises.error ?? todo.error ?? doing.error,
     error: todo.error ?? doing.error,
     isFetching: todo.isFetching || doing.isFetching || promises.isFetching,
     refetch: () => {
@@ -177,6 +183,12 @@ export function TodayTasks({ data, kicker, tz = DEFAULT_TZ, className }: { data:
     );
   }
   const failed = done.error ?? postpone.error ?? keep.error;
+  // Một phần không tải được (lời hứa, hoặc chỉ một nguồn việc) KHÔNG được che bằng "Hôm nay không có việc" hay chỉ một dòng chữ.
+  const partial = data.promisesFailed || data.tasksPartialFailed ? (
+    <PartialLoadNote error={data.partialError} onRetry={data.refetch} retrying={data.isFetching} testId="work-today-partial">
+      {data.tasksPartialFailed ? 'Chưa tải được một phần danh sách việc — danh sách dưới đây có thể thiếu.' : 'Chưa tải được danh sách lời hứa — danh sách dưới đây có thể thiếu.'}
+    </PartialLoadNote>
+  ) : null;
   if (data.items.length === 0) {
     return (
       <Card title={title} kicker={kicker} className={className} data-testid="work-today">
@@ -189,6 +201,7 @@ export function TodayTasks({ data, kicker, tz = DEFAULT_TZ, className }: { data:
             </button>
           }
         />
+        {partial}
         {failed ? <InlineError detail={errorDetail(failed)}>{errorText(failed)}</InlineError> : null}
       </Card>
     );
@@ -201,7 +214,7 @@ export function TodayTasks({ data, kicker, tz = DEFAULT_TZ, className }: { data:
           <InlineError detail={errorDetail(failed)}>{errorText(failed)}</InlineError>
         </div>
       ) : null}
-      {data.promisesFailed ? <p className="work-note owner-muted">Chưa tải được danh sách lời hứa — Sếp thử lại sau ít phút.</p> : null}
+      {partial ? <div className="work-note">{partial}</div> : null}
       <ul className="work-list" aria-label="Việc hôm nay">
         {data.items.map((it) => {
           const key = `${it.kind}-${it.id}`;
