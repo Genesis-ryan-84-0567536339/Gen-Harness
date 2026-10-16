@@ -93,6 +93,17 @@ describe('ghép WhatsApp không thành: câu thân thiện + Chi tiết kỹ thu
     expect(screen.getByRole('button', { name: /Quét lại QR/ })).toBeInTheDocument();
   });
 
+  it('Zalo hết hạn QR (lỗi hay gặp nhất của Zalo) không nhận lời khuyên riêng của WhatsApp', () => {
+    renderCard(channel({ type: 'zalo', name: 'Zalo', state: 'expired', error: 'QR_EXPIRED' }));
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent('Mã QR đã hết hạn mà chưa quét');
+    expect(alert).toHaveTextContent('Mở Zalo trên điện thoại');
+    expect(alert).not.toHaveTextContent('không liên kết được thiết bị');
+    expect(alert).not.toHaveTextContent('WhatsApp');
+    expect(channelErrorText('QR_EXPIRED', 'WhatsApp', 'whatsapp')).toContain('không liên kết được thiết bị');
+    expect(channelErrorText('QR_EXPIRED', 'Zalo', 'zalo')).not.toContain('không liên kết được thiết bị');
+  });
+
   it('WhatsApp từ chối mở phiên (405) và không tới được máy chủ đều có câu riêng', () => {
     const { unmount } = renderCard(channel({ state: 'error', error: 'WA_NO_QR_405' }));
     expect(screen.getByRole('alert')).toHaveTextContent('từ chối mở phiên ghép thiết bị mới (mã 405)');
@@ -149,7 +160,7 @@ describe('ghép WhatsApp không thành: câu thân thiện + Chi tiết kỹ thu
     const codes = [
       'QR_EXPIRED', 'PAIRING_REJECTED', 'WA_NETWORK', 'WA_NO_QR_405', 'WA_NO_QR_428', 'FORBIDDEN', 'LOGGED_OUT_REMOTELY',
       'CREDENTIAL_REJECTED', 'CREDENTIAL_INVALID', 'CREDENTIAL_UNREADABLE', 'CONNECTION_REPLACED', 'MULTIDEVICE_MISMATCH',
-      'RECONNECT_FAILED', 'BRIDGE_KEY_MISSING', 'LOGIN_FAILED', 'NO_LOGIN_INFO', 'KHÔNG_BIẾT',
+      'RECONNECT_FAILED', 'BRIDGE_KEY_MISSING', 'LOGIN_FAILED', 'NO_LOGIN_INFO', 'CHANNEL_UNAVAILABLE', 'KHÔNG_BIẾT',
     ];
     for (const code of codes) {
       const text = channelErrorText(code, 'WhatsApp');

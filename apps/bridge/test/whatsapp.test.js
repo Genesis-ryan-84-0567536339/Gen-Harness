@@ -2,8 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
-  WhatsAppAdapter, isCompanionRefresh, loadWhatsAppLib, memoryAuthState, noQrErrorCode, pickWaVersion,
+  WhatsAppAdapter, isCompanionRefresh, loadWhatsAppLib, memoryAuthState, noQrErrorCode, pickWaVersion, waVersionHeaders,
 } from '../src/channels/whatsapp.js';
+import { VERSION } from '../src/config.js';
 import { STREAMS } from '../src/envelope.js';
 import { ADV0, BufferJSON, ctl, makeBaileysLib, setup, tick, waitFor, waMessage } from './fakes.js';
 
@@ -281,18 +282,34 @@ test('companion_reg_refresh: đổi khoá ADV, dựng lại ĐÚNG mã đang hi�
   mgr.shutdown();
 });
 
-test('companion_reg_refresh: nhận qua nút con, bỏ trùng; không xoay khi đã ghép cặp, thông báo khác hoặc chưa có mã', async () => {
-  const { bus, wa, sock, mgr } = await startQr();
+test('companion_reg_refresh TRƯỚC mã QR đầu: vẫn đổi khoá ADV (không phát qr thừa); mã đầu tiên mang khoá mới', async () => {
+  const { bus, wa, sock, adapter, mgr } = await startQr();
   sock.ws.emit('CB:notification,type:companion_reg_refresh', refreshNode()); // chưa có mã nào để dựng lại
-  await tick(10);
-  assert.equal(sock.config.auth.creds.advSecretKey, ADV0);
-  assert.equal(bus.of(STREAMS.status, 'session.qr').length, 0);
+  await waitFor(() => sock.config.auth.creds.advSecretKey !== ADV0);
+  const rotated = sock.config.auth.creds.advSecretKey;
+  assert.equal(Buffer.from(rotated, 'base64').length, 32);
+  await tick(15);
+  assert.equal(bus.of(STREAMS.status, 'session.qr').length, 0); // chưa có mã ⇒ không có gì để phát lại
+  assert.equal(wa.ctrl.qrTexts.length, 0);
+  assert.equal(adapter().qrCount, 0);
 
+  // Baileys đọc creds.advSecretKey lúc nhận iq pair-device ⇒ mã đầu tiên đã mang khoá mới; kể cả mã còn mang khoá cũ
+  // (chốt trong closure) thì adapter cũng thay bằng khoá hiện hành.
+  sock.ev.emit('connection.update', { qr: waQr('REF1', ADV0) });
+  await waitFor(() => bus.of(STREAMS.status, 'session.qr').length === 1);
+  assert.equal(advOf(wa.ctrl.qrTexts[0]), rotated);
+  assert.equal(adapter().qrCount, 1);
+  mgr.shutdown();
+});
+
+test('companion_reg_refresh: nhận qua nút con, bỏ trùng; không xoay khi đã ghép cặp hoặc thông báo khác', async () => {
+  const { bus, wa, sock, mgr } = await startQr();
   sock.ev.emit('connection.update', { qr: waQr('REF1') });
   await waitFor(() => bus.of(STREAMS.status, 'session.qr').length === 1);
   sock.ws.emit('CB:notification,,devices', { tag: 'notification', attrs: { type: 'devices' }, content: [{ tag: 'add', attrs: {} }] });
   await tick(10);
   assert.equal(bus.of(STREAMS.status, 'session.qr').length, 1);
+  assert.equal(sock.config.auth.creds.advSecretKey, ADV0); // thông báo khác: không đụng khoá
 
   const node = refreshNode({ attrs: { type: 'other' }, content: [{ tag: 'pair-device-rotate-qr', attrs: {} }] });
   sock.ws.emit('CB:notification,,pair-device-rotate-qr', node);
@@ -309,6 +326,13 @@ test('companion_reg_refresh: nhận qua nút con, bỏ trùng; không xoay khi �
   assert.equal(sock.config.auth.creds.advSecretKey, before);
   assert.equal(bus.of(STREAMS.status, 'session.qr').length, 2);
   mgr.shutdown();
+});
+
+test('waVersionHeaders: user-agent tự nhận, không giả trình duyệt', () => {
+  const h = waVersionHeaders();
+  assert.match(h['user-agent'], /^Gen-Harness-bridge\/\d+\.\d+\.\d+/);
+  assert.doesNotMatch(h['user-agent'], /Mozilla|Chrome|Safari|AppleWebKit/i);
+  assert.equal(h['sec-fetch-site'], 'cross-site');
 });
 
 test('isCompanionRefresh / noQrErrorCode / pickWaVersion', () => {
@@ -429,12 +453,22 @@ test('Baileys thật: getVersion lấy client_revision từ sw.js, nhớ 30 phú
   const hits = [];
   let body = 'x{"client_revision":1049999999}y';
   let ok = true;
-  globalThis.fetch = async (url) => { hits.push(String(url)); return { ok, statusText: 'X', text: async () => body }; };
+  const sent = [];
+  globalThis.fetch = async (url, init) => {
+    hits.push(String(url));
+    sent.push(init?.headers || {});
+    return { ok, statusText: 'X', text: async () => body };
+  };
   try {
     const lib = await loadWhatsAppLib();
     assert.deepEqual(await lib.getVersion(), [2, 3000, 1049999999]);
     assert.deepEqual(await lib.getVersion(), [2, 3000, 1049999999]); // trong 30 phút: không gọi lại
     assert.deepEqual(hits, ['https://web.whatsapp.com/sw.js']);
+    // Tự nhận là bridge Gen-Harness: KHÔNG giả user-agent trình duyệt, KHÔNG giữ mặc định "qua mặt chống bot" của Baileys.
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]['user-agent'], `Gen-Harness-bridge/${VERSION}`);
+    assert.equal(sent[0]['sec-fetch-site'], 'cross-site');
+    assert.doesNotMatch(String(sent[0]['user-agent']), /Mozilla|Chrome|Safari|AppleWebKit/i);
 
     const stale = await loadWhatsAppLib();
     body = '{"client_revision":1000000}';

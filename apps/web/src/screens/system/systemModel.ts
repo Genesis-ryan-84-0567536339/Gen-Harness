@@ -157,7 +157,8 @@ export const isDenseQr = (c: Pick<Channel, 'type'>) => c.type === 'whatsapp';
 const RESCAN = 'Bấm "Quét lại QR" để thử lại.';
 const SAFE_WAIT = 'Đợi vài phút rồi bấm "Quét lại QR"; đừng bấm liên tục vì WhatsApp dễ tạm khoá ghép thiết bị.';
 
-export function channelErrorText(code: string, name: string): string {
+/** Câu thân thiện cho mã lỗi phiên của bridge. `type` quyết định lời khuyên riêng của kênh (mẹo "không liên kết được thiết bị" chỉ có ở WhatsApp). */
+export function channelErrorText(code: string, name: string, type?: Channel['type']): string {
   const no = /^WA_NO_QR_(\d+)$/.exec(code);
   if (no) {
     return `${name} từ chối mở phiên ghép thiết bị mới (mã ${no[1]}). Thường do địa chỉ mạng bị hạn chế hoặc thư viện WhatsApp trong bản này đã cũ. ${SAFE_WAIT}`;
@@ -168,7 +169,9 @@ export function channelErrorText(code: string, name: string): string {
     case 'PAIRING_REJECTED':
       return `${name} từ chối lần ghép này (điện thoại có thể đã báo "không liên kết được thiết bị"). ${SAFE_WAIT}`;
     case 'QR_EXPIRED':
-      return `Mã QR đã hết hạn mà chưa ghép được. ${RESCAN} Nếu điện thoại báo "không liên kết được thiết bị", đợi mã mới hiện rồi quét lại ngay; vẫn không được thì thử lại sau ít phút.`;
+      return type === 'whatsapp'
+        ? `Mã QR đã hết hạn mà chưa ghép được. ${RESCAN} Nếu điện thoại báo "không liên kết được thiết bị", đợi mã mới hiện rồi quét lại ngay; vẫn không được thì thử lại sau ít phút.`
+        : `Mã QR đã hết hạn mà chưa quét. ${RESCAN} Mở ${name} trên điện thoại trước, rồi quét mã ngay khi nó hiện.`;
     case 'FORBIDDEN':
       return `${name} từ chối kết nối từ địa chỉ mạng này (403). Thử lại sau, hoặc đổi mạng cho máy chạy Gen-Harness.`;
     case 'LOGGED_OUT_REMOTELY':
@@ -183,6 +186,10 @@ export function channelErrorText(code: string, name: string): string {
       return `Tài khoản ${name} chưa bật chế độ nhiều thiết bị. Cập nhật ${name} trên điện thoại rồi bấm "Quét lại QR".`;
     case 'RECONNECT_FAILED':
       return `Mất kết nối với ${name} và nối lại nhiều lần không được. Kiểm tra mạng của máy chạy Gen-Harness rồi bấm "Quét lại QR".`;
+    case 'CHANNEL_UNAVAILABLE':
+      return `Bridge chưa mở được kênh ${name} (thư viện ${name} trong bản này không khởi tạo được). Nhờ người quản trị kiểm tra bridge rồi bấm "Quét lại QR".`;
+    case 'NO_LOGIN_INFO':
+      return `${name} báo quét xong nhưng không trả về thông tin đăng nhập. ${RESCAN}`;
     case 'BRIDGE_KEY_MISSING':
       return 'Bridge chưa có khoá bảo mật nên chưa đăng nhập được. Nhờ người quản trị máy chủ kiểm tra khoá bridge.';
     default:

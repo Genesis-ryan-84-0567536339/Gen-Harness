@@ -171,7 +171,7 @@ export function ChannelCard({ channel: c, canManage, large }: { channel: Channel
       {showQr ? <QrBlock channel={c} large={large} /> : null}
 
       {!showQr && (c.state === 'expired' || c.state === 'error') && c.error ? (
-        <ErrorWithDetail className="write-error ch-fail" text={channelErrorText(c.error, c.name)} detail={c.error} />
+        <ErrorWithDetail className="write-error ch-fail" text={channelErrorText(c.error, c.name, c.type)} detail={c.error} />
       ) : null}
 
       <div className="ch-stats">
@@ -230,7 +230,8 @@ export function ChannelCard({ channel: c, canManage, large }: { channel: Channel
 
 /**
  * QR block with the countdown. Zalo's code is sparse (~30 modules): 88px on the Console, 240px in setup. WhatsApp's is
- * dense (~60 modules) and unreadable below ~4px/module, so it is always drawn large (`qr-block--dense`, up to 320px).
+ * dense (~60 modules) and hard to read when small, so it is always drawn large (`qr-block--dense`: up to 320px, shrinking
+ * only with the card's width).
  */
 export function QrBlock({ channel: c, large }: { channel: Channel; large?: boolean }) {
   const now = useNow(1000, !!c.qr);

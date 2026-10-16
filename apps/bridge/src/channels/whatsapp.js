@@ -3,17 +3,26 @@
 // Sự kiện phát ra: qr · scanned · active · credential · ended · inbound.
 import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { VERSION } from '../config.js';
 import { silentLogger } from '../log.js';
 import { RecentIds, errorCode, toIso, toPlain } from '../util.js';
 
 export const WA_FIRST_QR_TTL_MS = 60000; // Baileys: QR đầu sống 60 giây, các QR sau 20 giây
 export const WA_NEXT_QR_TTL_MS = 20000;
 const MAX_RECONNECTS = 10;
-// Socket đóng TRƯỚC khi ra được mã QR nào (mất mạng/DNS, máy chủ WhatsApp từ chối đăng ký thiết bị: 405/428/403…):
+// Socket đóng TRƯỚC khi ra được mã QR nào (mất mạng/DNS, máy chủ WhatsApp từ chối đăng ký thiết bị: 405/428…):
 // thử lại có giãn cách rồi báo lỗi thật, không quay vòng vô hạn (bản cũ mở >40 socket/giây và UI kẹt "Đang tạo mã QR…").
+// 403 (DR.forbidden) KHÔNG nằm trong nhóm này: kết thúc ngay với FORBIDDEN (xem #onClose).
 const MAX_NO_QR_ATTEMPTS = 4;
 const VERSION_FETCH_TIMEOUT_MS = 5000;
 const VERSION_CACHE_MS = 30 * 60 * 1000;
+// Yêu cầu lấy phiên bản WA Web TỰ NHẬN là bridge của Gen-Harness. `fetchLatestWaWebVersion` của Baileys mặc định giả
+// user-agent Chrome + `sec-fetch-site: none` "để qua mặt chống bot" — luật cứng của repo: không né chống bot. Ở đây ghi
+// đè cả hai (options.headers thắng mặc định); nếu WhatsApp từ chối thì dùng phiên bản đóng gói trong Baileys.
+export const waVersionHeaders = () => ({
+  'user-agent': `Gen-Harness-bridge/${VERSION}`,
+  'sec-fetch-site': 'cross-site',
+});
 // Máy chủ WhatsApp (2026-07 trở đi) gửi <notification type="companion_reg_refresh"> tới thiết bị chưa ghép cặp: khoá ADV
 // trong mã QR đã cũ → điện thoại báo "không liên kết được thiết bị". Baileys 7.0.0-rc14 bỏ qua thông báo này
 // (WhiskeySockets/Baileys#2737, bản vá #2765 chưa phát hành) nên adapter tự xử lý như WhatsApp Web.
@@ -57,7 +66,8 @@ export async function loadWhatsAppLib() {
   const bundled = b.DEFAULT_CONNECTION_CONFIG?.version;
   let cache = { at: 0, version: undefined };
   let inflight = null;
-  // Phiên bản WA Web hiện hành lấy từ sw.js của chính web.whatsapp.com (cùng máy chủ với websocket, không cần thêm đường ra).
+  // Phiên bản WA Web hiện hành lấy từ sw.js của chính web.whatsapp.com (cùng máy chủ với websocket, không cần thêm đường ra),
+  // với user-agent TỰ NHẬN `Gen-Harness-bridge/<phiên bản>` (không giả trình duyệt — xem `waVersionHeaders`).
   // Bản cũ đọc dòng 7 của master Baileys = đúng bản đóng gói ⇒ không bao giờ mới hơn và hỏng khi chặn raw.githubusercontent.com.
   // Lấy lại mỗi 30 phút theo từng lần đăng nhập (không chốt một lần lúc khởi động); lỗi ⇒ dùng bản lần trước/đóng gói.
   const getVersion = async () => {
@@ -65,7 +75,7 @@ export async function loadWhatsAppLib() {
     inflight ||= (async () => {
       try {
         const fetched = await Promise.race([
-          b.fetchLatestWaWebVersion({ signal: AbortSignal.timeout(VERSION_FETCH_TIMEOUT_MS) }),
+          b.fetchLatestWaWebVersion({ signal: AbortSignal.timeout(VERSION_FETCH_TIMEOUT_MS), headers: waVersionHeaders() }),
           new Promise((_, rej) => { setTimeout(() => rej(new Error('timeout')), VERSION_FETCH_TIMEOUT_MS + 500).unref?.(); }),
         ]);
         const v = pickWaVersion(fetched, bundled);
@@ -274,18 +284,24 @@ export class WhatsAppAdapter extends EventEmitter {
   }
 
   /**
-   * Máy chủ báo companion_reg_refresh cho thiết bị CHƯA ghép cặp: đổi khoá ADV (32 byte ngẫu nhiên, như WhatsApp Web) rồi
-   * dựng lại đúng mã QR đang hiện bằng khoá mới — không tốn thêm mã (qrCount) và không đổi hạn của mã.
+   * Máy chủ báo companion_reg_refresh cho thiết bị CHƯA ghép cặp: LUÔN đổi khoá ADV (32 byte ngẫu nhiên, như WhatsApp Web) —
+   * kể cả khi chưa có mã QR nào (thông báo có thể tới trước / cùng lúc iq pair-device: Baileys đọc `creds.advSecretKey` đúng
+   * lúc dựng mã đầu tiên nên sẽ dùng khoá mới). Chỉ khi đã có mã đang hiện mới dựng lại đúng mã đó bằng khoá mới — không tốn
+   * thêm mã (qrCount) và không đổi hạn của mã.
    */
   async #onCompanionRefresh(node, gen) {
     if (gen !== this.gen || this.cancelled || this.state === 'ended') return;
     if (!isCompanionRefresh(node) || node === this.lastRefreshNode) return;
     this.lastRefreshNode = node;
     const creds = this.auth?.state?.creds;
-    if (!creds || creds.me?.id || !this.lastQr) return; // đã ghép cặp, hoặc chưa có mã nào để dựng lại
-    const { raw, expiresAt } = this.lastQr;
+    if (!creds || creds.me?.id) return; // đã ghép cặp: giữ nguyên khoá
     creds.advSecretKey = randomBytes(32).toString('base64');
     try { this.sock?.ev?.emit?.('creds.update', { advSecretKey: creds.advSecretKey }); } catch { /* chỉ để thư viện đồng bộ */ }
+    if (!this.lastQr) {
+      this.log.info('whatsapp: máy chủ yêu cầu làm mới mã QR (companion_reg_refresh) trước khi có mã — đã đổi khoá ghép cặp');
+      return;
+    }
+    const { raw, expiresAt } = this.lastQr;
     this.log.info('whatsapp: máy chủ yêu cầu làm mới mã QR (companion_reg_refresh) — đã đổi khoá ghép cặp, dựng lại mã');
     const image = await this.lib.toDataURL(this.#currentQr(raw));
     if (gen !== this.gen || this.cancelled || this.state === 'ended') return;
