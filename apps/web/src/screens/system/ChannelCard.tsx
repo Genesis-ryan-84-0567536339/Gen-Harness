@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { ApiError, type Channel, type ChannelGroup, type ListenMode, type ViewScope } from '@gen-harness/contracts';
 import { Button, Dialog, EmptyState, Icon, Switch, TextField } from '@gen-harness/ui';
-import { api, apiClient } from '../../lib/api';
+import { api } from '../../lib/api';
 import { qk2, useChannelGroups } from '../../lib/dataQueries';
 import { fmtInt } from '../../lib/format';
 import { useOrgTimezone } from '../../lib/permissions';
@@ -34,7 +34,6 @@ import {
   qrHint,
   qrLifetimeMs,
   qrRemaining,
-  type ChannelView,
 } from './systemModel';
 
 /**
@@ -42,8 +41,7 @@ import {
  * risk warning first: the QR never appears before `accept_risk: true` is sent.
  */
 export function ChannelCard({ channel, canManage, large }: { channel: Channel; canManage: boolean; large?: boolean }) {
-  // `resumable` / `bridge_online` do lõi thêm (v0.1.62); máy chủ cũ không gửi ⇒ undefined ⇒ hiện như trước.
-  const c: ChannelView = channel;
+  const c = channel;
   const tz = useOrgTimezone();
   const now = useNow(30_000);
   const st = channelStatus(c);
@@ -76,7 +74,7 @@ export function ChannelCard({ channel, canManage, large }: { channel: Channel; c
   });
   /** v0.1.62 (F046): nối lại bằng phiên đã lưu — không quét QR, không cần hộp cảnh báo rủi ro (đã chấp nhận lần đăng nhập đầu). */
   const resume = useMutation({
-    mutationFn: () => apiClient.request<{ session_id: string }>(`/channels/${encodeURIComponent(c.type)}/resume`, { method: 'POST' }),
+    mutationFn: () => api.channels.resume(c.type),
     onMutate: () => setBridgeDown(null),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qk2.channels });

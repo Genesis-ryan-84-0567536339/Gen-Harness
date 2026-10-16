@@ -36,27 +36,18 @@ export function channelState(s: ChannelState | string): { label: string; tone: s
   return { ...v, border: v.tone === N4 ? N8 : v.tone };
 }
 
-/**
- * v0.1.62 (F046/F051): hai trường lõi thêm cho thẻ kênh QR — `resumable` (phiên 'Lỗi kết nối' còn credential ⇒ nối lại
- * được không cần quét QR) và `bridge_online` (bộ nhận tin còn nhịp tim; false ⇒ "Mất liên lạc"). Giữ ở đây vì kiểu
- * `Channel` dùng chung của hợp đồng chưa khai báo; máy chủ cũ không gửi ⇒ undefined ⇒ cách hiện như trước.
- */
-export interface ChannelExtras {
-  resumable?: boolean;
-  bridge_online?: boolean | null;
-}
-export type ChannelView = Channel & ChannelExtras;
+/** `resumable` / `bridge_online` (v0.1.62) nay nằm ở kiểu `Channel` của hợp đồng; máy chủ cũ không gửi ⇒ undefined ⇒ cách hiện như trước. */
 
 /** Mã lỗi bridge báo khi mất mạng nhưng đang tự nối lại (phiên còn nguyên). */
 export const NETWORK_UNAVAILABLE = 'NETWORK_UNAVAILABLE';
 
 /** Thẻ nói còn phiên chạy mà bộ nhận tin (bridge) đã ngừng báo nhịp tim ⇒ tin có thể đang không về. */
-export function isBridgeLost(c: Pick<Channel, 'type' | 'state'> & ChannelExtras): boolean {
+export function isBridgeLost(c: Pick<Channel, 'type' | 'state' | 'resumable' | 'bridge_online'>): boolean {
   return (c.type === 'zalo' || c.type === 'whatsapp') && c.bridge_online === false && (c.state === 'active' || c.state === 'error');
 }
 
 /** Nhãn + màu trạng thái của thẻ: thêm "Mất liên lạc" và "Mất mạng — đang nối lại" mà `channelState` (theo state thuần) không có. */
-export function channelStatus(c: Pick<Channel, 'type' | 'state' | 'error'> & ChannelExtras): { label: string; tone: string; border: string } {
+export function channelStatus(c: Pick<Channel, 'type' | 'state' | 'error' | 'resumable' | 'bridge_online'>): { label: string; tone: string; border: string } {
   if (isBridgeLost(c)) return { label: 'Mất liên lạc', tone: WARN, border: WARN };
   if (c.state === 'error' && c.error === NETWORK_UNAVAILABLE) return { label: 'Mất mạng — đang nối lại', tone: WARN, border: WARN };
   return channelState(c.state);
@@ -78,7 +69,7 @@ export const isQrChannel = (c: Pick<Channel, 'type' | 'state'>) =>
   c.state !== 'not_installed' && c.state !== 'identity_only' && (c.type === 'zalo' || c.type === 'whatsapp');
 
 /** Meta line under the channel name — segments so "N nhóm lắng nghe" can be a button. */
-export function channelMeta(c: Channel & ChannelExtras, now = Date.now(), tz?: string): { before: string; groups: string | null; after: string } {
+export function channelMeta(c: Channel, now = Date.now(), tz?: string): { before: string; groups: string | null; after: string } {
   const groups = `${fmtInt(c.groups_listening)} nhóm lắng nghe`;
   const device = c.account_label ? `thiết bị ${c.account_label}` : '';
   switch (c.state) {
@@ -112,7 +103,7 @@ export function channelMeta(c: Channel & ChannelExtras, now = Date.now(), tz?: s
 
 export type ChannelAction = 'logout' | 'rescan' | 'login' | 'resume' | 'unavailable' | 'configure' | null;
 
-export function channelAction(c: Pick<Channel, 'type' | 'state'> & ChannelExtras): { action: ChannelAction; label: string; icon: string; accent: boolean } {
+export function channelAction(c: Pick<Channel, 'type' | 'state' | 'resumable' | 'bridge_online'>): { action: ChannelAction; label: string; icon: string; accent: boolean } {
   switch (c.state) {
     case 'active':
       return { action: 'logout', label: 'Đăng xuất', icon: 'ph ph-sign-out', accent: false };
@@ -135,7 +126,7 @@ export function channelAction(c: Pick<Channel, 'type' | 'state'> & ChannelExtras
 }
 
 /** Nút phụ: phiên 'Lỗi kết nối' nối lại được thì vẫn cho quét lại QR khi nối lại không xong. */
-export function channelSecondaryAction(c: Pick<Channel, 'type' | 'state'> & ChannelExtras): { action: 'rescan'; label: string; icon: string } | null {
+export function channelSecondaryAction(c: Pick<Channel, 'type' | 'state' | 'resumable' | 'bridge_online'>): { action: 'rescan'; label: string; icon: string } | null {
   return c.state === 'error' && c.resumable ? { action: 'rescan', label: 'Quét lại QR', icon: 'ph ph-qr-code' } : null;
 }
 

@@ -13,7 +13,6 @@ import {
   channelStatus,
   qrHint,
   qrRemaining,
-  type ChannelExtras,
 } from '../../src/screens/system/systemModel';
 import { PinDialogHost } from '../../src/shell/PinDialogHost';
 import { ToastHost } from '../../src/shell/ToastHost';
@@ -43,7 +42,7 @@ function mockFetch(handler: (c: Call) => Response | Promise<Response>) {
   return calls;
 }
 
-type View = Channel & ChannelExtras;
+type View = Channel;
 const zalo = (over: Partial<View> = {}): View => ({
   type: 'zalo', name: 'Zalo', installed: true, id: 'c1', state: 'active', account_label: 'iPhone của Sếp',
   started_at: new Date(Date.now() - 3600_000).toISOString(), groups_listening: 3, outbound_queued: 0,
