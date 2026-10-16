@@ -306,6 +306,23 @@ async def _move_refs(db: AsyncSession, src: uuid.UUID, dst: uuid.UUID) -> dict[s
     return out
 
 
+async def _pin_dm_targets(db: AsyncSession, *people: uuid.UUID) -> None:
+    """Bản nháp 1-1 đang chờ duyệt chỉ ghi `person_id` + kênh trong đích gửi. Sau gộp, hồ sơ giữ có thể có 2 tài
+    khoản cùng kênh nên "tài khoản cũ nhất" có thể không phải tài khoản người đó vốn dùng. Trước khi dời, ghi cố định
+    `identity_id` (tài khoản cũ nhất của đúng người đó trên kênh đó) vào đích; tài khoản đi theo người nên đích vẫn
+    đúng sau gộp VÀ sau đảo ngược.
+    Chạy lại an toàn: chỉ đụng nháp chưa có `identity_id`. Nháp đã duyệt/gửi không đụng (permit đã chốt thread)."""
+    await db.execute(text("""
+        UPDATE biz.action_drafts d SET body = jsonb_set(d.body, '{target,identity_id}', to_jsonb(pi.id::text))
+        FROM (SELECT DISTINCT ON (i.person_id, c.type) i.id, i.person_id, c.type AS channel
+              FROM core.person_identities i JOIN core.channels c ON c.id = i.channel_id
+              WHERE i.person_id = ANY(:ps) ORDER BY i.person_id, c.type, i.first_seen_at, i.id) pi
+        WHERE d.status = 'pending' AND d.body->'target'->>'thread_type' = 'user'
+          AND d.body->'target'->>'identity_id' IS NULL
+          AND d.body->'target'->>'person_id' = pi.person_id::text AND d.body->'target'->>'channel' = pi.channel"""),
+        {"ps": list(people)})
+
+
 async def _move_scores(db: AsyncSession, src: uuid.UUID) -> list[dict[str, Any]]:
     """Điểm hiện tại của hồ sơ bị gộp: lưu vào snapshot rồi xoá (hồ sơ giữ được tính lại từ đơn vị ý nghĩa đã dời)."""
     rows = (await db.execute(text("""DELETE FROM clean.current_scores WHERE subject_type = 'person' AND subject_id = :s
@@ -366,6 +383,7 @@ async def merge(db: AsyncSession, org_id: uuid.UUID, candidate_id: uuid.UUID, ac
     if c.a_pid == c.b_pid:
         raise conflict("ALREADY_MERGED", "Hai tài khoản đã thuộc cùng một người")
     keep, drop = await _pick_keep(db, c.a_pid, c.b_pid)
+    await _pin_dm_targets(db, keep, drop)      # bản nháp 1-1 đang chờ giữ đúng tài khoản nhận qua gộp/đảo ngược
     moved = await _move(db, drop, keep, None)
     await _refresh_scores(db, org_id, keep)
     await db.execute(text("""UPDATE core.persons SET merged_into_id = :k,

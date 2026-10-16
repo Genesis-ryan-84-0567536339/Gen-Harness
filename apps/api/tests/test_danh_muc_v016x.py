@@ -12,10 +12,13 @@ from pathlib import Path
 from typing import Any
 
 import psycopg
+import pytest
+from pydantic import ValidationError
 from sqlalchemy import text
 
 from gh.agents_api.routes import TEMPLATES
 from gh.auth import rbac
+from gh.setup.routes import Step8In
 from tests.conftest import PG, Api
 from tests.phase2 import org_id
 
@@ -127,3 +130,19 @@ async def test_legacy_step8_agent_cannot_save_until_migrated_then_can(owner_api:
         r = await owner_api.send("PATCH", f"/agents/{ids[tpl]}", {"name": "Đổi tên", "template": now})
         assert r.status_code == 200, r.text
         assert r.json()["template"] == now
+
+
+def test_step8_server_accepts_only_real_template_keys_and_maps_legacy_ones() -> None:
+    """Bản web cũ còn trong bộ nhớ đệm gửi 'sales'/'ops': máy chủ đổi sang khoá thật, không lưu khoá sai (F070)."""
+    assert Step8In(template="sales").template == "commercial"
+    assert Step8In(template="ops").template == "admin"
+    assert Step8In(template="").template is None and Step8In().template is None
+    for key in TEMPLATES:
+        assert Step8In(template=key).template == key
+    with pytest.raises(ValidationError, match="Mẫu không tồn tại"):
+        Step8In(template="khong-co-mau-nay")
+
+
+async def test_step8_api_rejects_unknown_template_with_422(owner_api: Api) -> None:
+    r = await owner_api.send("PUT", "/setup/steps/8", {"template": "khong-co-mau-nay"})
+    assert r.status_code == 422, r.text

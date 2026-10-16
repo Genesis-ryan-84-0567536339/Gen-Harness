@@ -112,3 +112,22 @@ async def test_upgrade_touches_profile_so_detect_rescans_it(app, db, redis) -> N
     db.expire_all()
     after = (await db.execute(text("SELECT updated_at FROM core.persons"))).scalar_one()
     assert after > before
+
+
+def test_only_known_places_write_person_display_name() -> None:
+    """Lưới nhắc việc: chốt "không đè tên Sếp sửa" dựa vào `attrs.name_source = 'owner'` mà CHƯA có route nào ghi nó.
+    Ai thêm một UPDATE ghi `core.persons.display_name` ở file khác (vd. route đổi tên người) phải đặt
+    `name_source = 'owner'` cùng lúc rồi thêm file đó vào danh sách này — nếu quên, tên Sếp đặt kiểu số/email sẽ bị
+    tin nhắn sau đè mất."""
+    import re
+    from pathlib import Path
+
+    import gh
+
+    allowed = {"data/ingest.py",              # nâng tên thô → tên thật (có chốt name_source)
+               "system_api/routes.py"}        # xoá dữ liệu cá nhân theo yêu cầu (đặt tên "Người dùng đã xoá")
+    pat = re.compile(r"UPDATE\s+core\.persons\b[^;\"]*?\bdisplay_name\s*=", re.S | re.I)
+    root = Path(gh.__file__).parent
+    found = {str(p.relative_to(root)).replace("\\", "/") for p in root.rglob("*.py")
+             if pat.search(p.read_text(encoding="utf-8"))}
+    assert found == allowed, f"có nơi mới ghi core.persons.display_name: {sorted(found - allowed)}"

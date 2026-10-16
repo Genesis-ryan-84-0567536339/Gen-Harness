@@ -120,7 +120,12 @@ async def _upgrade_name(db: AsyncSession, person_id: uuid.UUID, name: str) -> No
     """v0.1.61 (F047): tên hiển thị còn là mã thô → nâng lên tên thật vừa gặp (tên kênh/pushName). KHÔNG đè tên Sếp đã
     sửa (`attrs.name_source = 'owner'`) hay tên khác mã thô (chỉ nâng khi tên hiện tại rỗng hoặc là mã/SĐT/dãy số/địa
     chỉ kiểu `...@...` — điều kiện kiểm lại trong SQL, an toàn khi hai tin cùng lúc). Chạm `updated_at` ⇒ lượt dò
-    trùng danh tính xét lại hồ sơ vì tên đổi."""
+    trùng danh tính xét lại hồ sơ vì tên đổi.
+
+    LƯU Ý cho người viết route đổi tên người sau này: hiện KHÔNG đường nào ghi `name_source = 'owner'` (chưa có
+    route đổi tên người), nên chốt "không đè tên Sếp" chỉ dựa vào điều kiện "tên trông như mã thô". Route đổi tên PHẢI
+    đặt `attrs.name_source = 'owner'` cùng lúc đổi `display_name` — `test_ten_hien_thi_v016x` có lưới dò, thêm UPDATE
+    mới ghi `display_name` ở file khác sẽ đỏ để nhắc việc này."""
     await db.execute(text("""
         UPDATE core.persons p SET display_name = :n, updated_at = now(),
                attrs = p.attrs || '{"name_source": "channel"}'::jsonb

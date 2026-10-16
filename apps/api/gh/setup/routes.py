@@ -626,6 +626,8 @@ async def step7(body: Step7In, request: Request, db: AsyncSession = DB,
 #: chuyện (không gọi model, không tốn lượt).
 STEP8_DEFAULT_NAME = "Trợ lý"
 STEP8_DEFAULT_ROLE = "Theo dõi tin nhắn, báo việc quan trọng và soạn sẵn trả lời chờ Sếp duyệt."
+#: Khoá mẫu cũ của web ≤ 0.1.60 → khoá thật của máy chủ (khớp migration 0036).
+STEP8_LEGACY_TEMPLATES = {"sales": "commercial", "ops": "admin"}
 
 
 class Step8In(BaseModel):
@@ -635,6 +637,16 @@ class Step8In(BaseModel):
     speak_when: str = Field(default="Khi được hỏi trực tiếp hoặc có việc cần báo", max_length=500)
     template: str | None = Field(default=None, max_length=40)
     try_message: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("template", mode="before")
+    @classmethod
+    def _v_template(cls, v: Any) -> Any:
+        """F070: chỉ nhận khoá có thật trong `agents_api.TEMPLATES`. Bản web cũ còn trong bộ nhớ đệm gửi 'sales'/'ops'
+        thì đổi sang khoá mới (commercial/admin) thay vì lưu khoá sai làm PATCH ở Danh tính Agent báo 422 lần nữa."""
+        from gh.agents_api.routes import _check_template
+
+        v = STEP8_LEGACY_TEMPLATES.get(v, v) if isinstance(v, str) else v
+        return _check_template(v if v != "" else None)
 
 
 @router.put("/steps/8")
