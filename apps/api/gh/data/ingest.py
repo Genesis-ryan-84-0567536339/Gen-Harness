@@ -105,7 +105,7 @@ async def upsert_identity(db: AsyncSession, org_id: uuid.UUID, channel: Any, ext
         INSERT INTO core.persons (org_id, code, display_name, relation_to_owner, attrs)
         VALUES (:o, :code, :n, 'stranger', CAST(:a AS jsonb)) RETURNING id"""),
         {"o": org_id, "code": code, "n": (use_name or external_id)[:200],
-         "a": orjson.dumps({"auto": True, "name_source": "channel" if use_name else "external_id"}).decode()}
+         "a": orjson.dumps({"auto": True}).decode()}
     )).scalar_one()
     return (await db.execute(text("""
         INSERT INTO core.person_identities (person_id, channel_id, external_id, handle, phone_e164)

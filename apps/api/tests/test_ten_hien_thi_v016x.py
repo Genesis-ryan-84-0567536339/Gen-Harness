@@ -34,7 +34,7 @@ async def test_directory_before_message_name_upgrades_from_raw_id(app, db, redis
     org = await org_id(db)
     await _directory(db, redis, org)  # thành viên chưa có tên ⇒ hồ sơ mang mã tài khoản
     p = await _person(db)
-    assert p.display_name == WA and p.attrs["name_source"] == "external_id"
+    assert p.display_name == WA and "name_source" not in p.attrs
     await _say(org, "Anh Tùng")
     p = await _person(db)
     assert p.display_name == "Anh Tùng" and p.handle == "Anh Tùng" and p.attrs["name_source"] == "channel"
@@ -48,7 +48,7 @@ async def test_message_with_name_creates_profile_with_that_name(app, db, redis) 
     await _directory(db, redis, org, name="Anh Tùng")
     await db.commit()
     p = await _person(db)
-    assert p.display_name == "Anh Tùng" and p.attrs["name_source"] == "channel"
+    assert p.display_name == "Anh Tùng" and "name_source" not in p.attrs
 
 
 async def test_directory_name_after_message_without_name_upgrades_too(app, db, redis) -> None:  # type: ignore[no-untyped-def]
@@ -91,7 +91,7 @@ async def test_name_equal_to_raw_id_is_not_an_upgrade(app, db, redis) -> None:  
     await _directory(db, redis, org)
     await _say(org, WA)
     p = await _person(db)
-    assert p.display_name == WA and p.attrs["name_source"] == "external_id"
+    assert p.display_name == WA and "name_source" not in p.attrs
 
 
 async def test_legacy_profile_without_marker_is_upgraded(app, db, redis) -> None:  # type: ignore[no-untyped-def]
