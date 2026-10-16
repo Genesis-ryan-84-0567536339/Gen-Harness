@@ -18,6 +18,9 @@ agent CÓ THỂ đọc nội dung ngoài (không theo mẫu / mức tự trị).
 Sếp (vd lượt thử trong trình thiết lập) ⇒ nội bộ. Quyết định tính LÚC GỌI (không lưu): gắn kênh cho agent sau này thì
 dòng gán agy cũ của agent đó tự hết hiệu lực.
 
+Soạn lại / dịch nháp (purpose `draft_translate` / `draft_regenerate`) luôn ngoại giao theo MỤC ĐÍCH, bất kể khoá của
+nháp (`agent:<id>` có thể hết "ngoại giao" sau khi nháp được tạo) — review lần 2 v0.1.62.
+
 Hàm `decide` THUẦN (không DB); các nơi dùng: `set_binding` (agents_api), `ModelRouter.generate`, hồ sơ tiêu chuẩn
 (`gh.defaults.profiles.resolve` / `missing_reason`), ô chọn model của khung chat Gen (`choice_options`) và danh sách
 gán model của web (`agy_blocked_reason`).
@@ -41,6 +44,10 @@ CODE_STAFF_GEN = "staff_gen"
 REASON_DIPLOMATIC = "Antigravity chưa dùng cho việc trả lời người ngoài — chờ hộp riêng (bản sau)"
 REASON_STAFF_GEN = "Antigravity chưa dùng cho Gen của nhân viên — Gen của nhân viên dùng khoá API"
 
+#: Việc soạn lại / dịch nháp tin gửi khách: LUÔN ngoại giao, bất kể khoá (`core.reply` hay `agent:<id>` của nháp — agent
+#: có thể hết "ngoại giao" sau khi nháp được tạo, và lời yêu cầu soạn lại là chữ Sếp gõ tự do).
+DIPLOMATIC_PURPOSES = frozenset({"draft_translate", "draft_regenerate"})
+
 
 @dataclass(frozen=True)
 class AgyVerdict:
@@ -56,12 +63,16 @@ DENIED_DIPLOMATIC = AgyVerdict(False, CODE_DIPLOMATIC, REASON_DIPLOMATIC)
 DENIED_STAFF_GEN = AgyVerdict(False, CODE_STAFF_GEN, REASON_STAFF_GEN)
 
 
-def decide(agent_key: str, *, owner: bool = True, diplomatic: bool = False) -> AgyVerdict:
+def decide(agent_key: str, *, owner: bool = True, diplomatic: bool = False, purpose: str | None = None) -> AgyVerdict:
     """Khoá agent này có được chạy bằng Antigravity CLI không?
 
     - `owner`: người hỏi là Owner (chỉ ảnh hưởng `core.gen`; mặc định True cho mọi lượt không có người hỏi cụ thể);
     - `diplomatic`: với `agent:<id>` — agent đó là ngoại giao (`diplomatic_agent_ids`); khoá khác bỏ qua tham số này.
+    - `purpose`: việc đang làm (`ModelRouter.generate`). Soạn lại / dịch nháp (`DIPLOMATIC_PURPOSES`) không dùng agy
+      bất kể khoá.
     Khoá lạ (core.embedding…) không bị chặn ở đây — chúng không dùng agy."""
+    if purpose in DIPLOMATIC_PURPOSES:
+        return DENIED_DIPLOMATIC
     if agent_key == ROLE_REPLY:
         return DENIED_DIPLOMATIC
     if agent_key.startswith(AGENT_PREFIX) and diplomatic:
@@ -99,11 +110,14 @@ async def diplomatic_agent_ids(db: AsyncSession, org_id: uuid.UUID,
     return {r.id for r in rows}
 
 
-async def verdict_for(db: AsyncSession, org_id: uuid.UUID, agent_key: str, *, owner: bool = True) -> AgyVerdict:
-    """`decide` cho MỘT khoá, tự tra DB khi là `agent:<id>` (các khoá khác không tốn truy vấn)."""
+async def verdict_for(db: AsyncSession, org_id: uuid.UUID, agent_key: str, *, owner: bool = True,
+                      purpose: str | None = None) -> AgyVerdict:
+    """`decide` cho MỘT khoá, tự tra DB khi là `agent:<id>` (các khoá khác, và việc đã bị cấm theo `purpose`, không tốn
+    truy vấn)."""
     aid = agent_id_of(agent_key)
-    diplomatic = aid is not None and aid in await diplomatic_agent_ids(db, org_id, only=aid)
-    return decide(agent_key, owner=owner, diplomatic=diplomatic)
+    diplomatic = (aid is not None and purpose not in DIPLOMATIC_PURPOSES
+                  and aid in await diplomatic_agent_ids(db, org_id, only=aid))
+    return decide(agent_key, owner=owner, diplomatic=diplomatic, purpose=purpose)
 
 
 async def verdicts_for(db: AsyncSession, org_id: uuid.UUID, agent_keys: list[str], *,
