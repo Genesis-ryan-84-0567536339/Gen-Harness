@@ -504,6 +504,11 @@ export function retentionRowView(r: RetentionPolicy, tz = DEFAULT_TZ, viewer: Re
 
 export const DATA_REQUEST_KIND: Record<string, { label: string; icon: string; tone: string }> = {
   export: { label: 'Xuất dữ liệu', icon: 'ph ph-download-simple', tone: N3 },
-  erase: { label: 'Xoá dữ liệu', icon: 'ph ph-trash', tone: BAD },
+  erase: { label: 'Ẩn danh hoá', icon: 'ph ph-eye-slash', tone: BAD },
   restrict: { label: 'Giới hạn dùng', icon: 'ph ph-lock-simple', tone: WARN },
 };
+
+/** Tên tệp tải về khi xuất dữ liệu một người: `du-lieu-<mã người>-<ngày>.json` (mã làm sạch, không ký tự lạ trong tên tệp). */
+export function personExportFileName(code: string, now = new Date()): string {
+  return `du-lieu-${code.replace(/[^A-Za-z0-9_-]/g, '') || 'nguoi'}-${now.toISOString().slice(0, 10)}.json`;
+}

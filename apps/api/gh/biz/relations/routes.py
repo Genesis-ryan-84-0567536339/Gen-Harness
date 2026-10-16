@@ -11,10 +11,13 @@ import mimetypes
 import re
 import urllib.parse
 import uuid
+from collections.abc import Sequence
+from datetime import datetime
 from typing import Any, Literal
 
 import orjson
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,7 +29,7 @@ from gh.biz.core.scope import Scope, ensure_active_user, ensure_group, ensure_pe
 from gh.biz.relations import service as rsvc
 from gh.chassis import actionlog
 from gh.chassis.objects import ObjectNotFound, content_hash, get_object_store, new_key
-from gh.data.common import iso, mask_text, parse_cursor
+from gh.data.common import iso, live_person, mask_text, parse_cursor
 from gh.db import DB
 from gh.errors import ApiError
 from gh.memory import notebook
@@ -53,6 +56,38 @@ async def list_channels(user: service.CurrentUser = Depends(READ), db: AsyncSess
              "events_24h": r.events_24h} for r in rows]
 
 
+# ── Con trỏ phân trang (created_at, id) + tìm tên ────────────────────────────
+# Con trỏ chỉ theo created_at làm RƠI mọi dòng cùng thời điểm tạo (nhập danh bạ hàng loạt trong một giao dịch ⇒
+# trang 2 trống). Khoá phụ `id` làm thứ tự toàn phần: `ORDER BY created_at DESC, id DESC` và so sánh theo cặp.
+_MAX_UUID = uuid.UUID(int=(1 << 128) - 1)
+_CURSOR_ERR = "Con trỏ phân trang không hợp lệ — hãy tải lại danh sách"
+
+
+def _page_cursor(cursor: str | None) -> tuple[datetime, uuid.UUID] | None:
+    """`<created_at ISO>|<id>`. Con trỏ kiểu cũ (chỉ thời điểm) vẫn nhận: id = lớn nhất ⇒ lấy mọi dòng cũ hơn hoặc
+    bằng thời điểm đó (không bỏ sót dòng nào). Hỏng ⇒ 422 (không để thành 500)."""
+    if not cursor:
+        return None
+    ts, _, rid = cursor.partition("|")
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")), (uuid.UUID(rid) if rid else _MAX_UUID)
+    except ValueError:
+        raise ApiError(422, "BAD_CURSOR", _CURSOR_ERR) from None
+
+
+def _next_cursor(rows: Sequence[Any], limit: int) -> str | None:
+    if len(rows) <= limit:
+        return None
+    last = rows[limit - 1]
+    return f"{iso(last.created_at)}|{last.id}"
+
+
+def _like_pattern(q: str) -> str:
+    """Ký tự đặc biệt của LIKE (% _ \\) hiểu theo nghĩa đen — gõ "100%" tìm đúng "100%"."""
+    esc = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{esc}%"
+
+
 _GROUP_SELECT = """
 SELECT g.id, g.code, g.name, g.kind, g.listen_mode, g.member_count, g.created_at,
        c.type AS channel_type, c.name AS channel_name, ag.id AS agent_id, ag.name AS agent_name,
@@ -76,7 +111,8 @@ def _group_payload(r: Any) -> dict[str, Any]:
 
 @router.get("/directory/groups")
 async def list_groups(channel_id: uuid.UUID | None = None, kind: str | None = None, listen_mode: str | None = None,
-                      cursor: str | None = None, limit: int = Query(50, ge=1, le=200),
+                      q: str | None = Query(None, max_length=100), cursor: str | None = None,
+                      limit: int = Query(50, ge=1, le=200),
                       user: service.CurrentUser = Depends(READ), db: AsyncSession = DB) -> dict[str, Any]:
     sc = await scope_for(db, user, "profile.read")
     where, params = sc.group_sql("g")
@@ -87,17 +123,25 @@ async def list_groups(channel_id: uuid.UUID | None = None, kind: str | None = No
         conds.append("g.kind = :k")
     if listen_mode:
         conds.append("g.listen_mode = :lm")
-    if cursor:
-        conds.append("g.created_at < :c")
+    if q and q.strip():
+        conds.append("(g.name ILIKE :q ESCAPE '\\' OR g.code ILIKE :q ESCAPE '\\')")
+    base: dict[str, Any] = {"o": user.org_id, "ch": channel_id, "k": kind, "lm": listen_mode, **params}
+    if q and q.strip():
+        base["q"] = _like_pattern(q)
     sql_where = " AND ".join(conds)
-    base = {"o": user.org_id, "ch": channel_id, "k": kind, "lm": listen_mode, "c": parse_cursor(cursor), **params}
+    # `total` đếm theo bộ lọc, KHÔNG theo con trỏ — nếu không, sang trang 2 tổng tụt theo (nút Xem thêm sai số còn lại).
     total = (await db.execute(text(f"SELECT count(*) FROM core.groups g WHERE {sql_where}"),  # noqa: S608
                               base)).scalar_one()
-    rows = (await db.execute(text(_GROUP_SELECT + f" WHERE {sql_where} ORDER BY g.created_at DESC LIMIT :n"),  # noqa: S608
+    cur = _page_cursor(cursor)
+    page_where = sql_where
+    if cur:
+        page_where += " AND (g.created_at, g.id) < (:c, :cid)"
+        base |= {"c": cur[0], "cid": cur[1]}
+    order = " ORDER BY g.created_at DESC, g.id DESC LIMIT :n"
+    rows = (await db.execute(text(_GROUP_SELECT + f" WHERE {page_where}" + order),  # noqa: S608
                              {**base, "n": limit + 1})).all()
     items = [_group_payload(r) for r in rows[:limit]]
-    return {"items": items, "next_cursor": iso(rows[limit - 1].created_at) if len(rows) > limit else None,
-            "total": total}
+    return {"items": items, "next_cursor": _next_cursor(rows, limit), "total": total}
 
 
 class GroupBotIn(BaseModel):
@@ -153,49 +197,146 @@ def _person_row(r: Any, *, owner: bool) -> dict[str, Any]:
             "owner_user_id": str(r.owner_user_id) if r.owner_user_id else None}
 
 
+class PeopleFilter(BaseModel):
+    """Bộ lọc danh sách người — dùng chung cho GET (query string) và thao tác hàng loạt (thân JSON), để "những người
+    khớp bộ lọc" luôn do MÁY CHỦ xác định, không phải phần giao diện đã tải."""
+    relation: str | None = None
+    heat: Literal["high", "mid", "cold"] | None = None
+    value: Literal["high", "mid", "unknown"] | None = None
+    priority: Literal["P1", "P2", "P3"] | None = None
+    bot: Literal["assigned", "unassigned"] | None = None
+    channel: str | None = Field(default=None, max_length=32, pattern=r"^[a-z][a-z0-9_]*$")
+    q: str | None = Field(default=None, max_length=100)
+
+
+def _people_filter(f: PeopleFilter, *, owner: bool) -> tuple[str, dict[str, Any]]:
+    """WHERE trên CTE `rows` (chưa gồm phạm vi) + tham số."""
+    conds = ["TRUE"]
+    params: dict[str, Any] = {}
+    if f.relation:
+        conds.append("relation = :rel")
+        params["rel"] = f.relation
+    if f.heat == "high":
+        conds.append("heat >= 80")
+    elif f.heat == "mid":
+        conds.append("heat >= 50 AND heat < 80")
+    elif f.heat == "cold":
+        conds.append("(heat IS NULL OR heat < 50)")
+    if f.value == "high":
+        conds.append("value_vnd >= 500000000")
+    elif f.value == "mid":
+        conds.append("value_vnd >= 100000000 AND value_vnd < 500000000")
+    elif f.value == "unknown":
+        conds.append("value_vnd = 0")
+    if f.priority:
+        conds.append("pri_rank = :prirank")
+        params["prirank"] = {"P1": 1, "P2": 2, "P3": 3}[f.priority]
+    if f.bot == "assigned":
+        conds.append("(attrs->>'agent_id') IS NOT NULL")
+    elif f.bot == "unassigned":
+        conds.append("(attrs->>'agent_id') IS NULL")
+    if f.channel:
+        conds.append("CAST(:chan AS text) = ANY(channels)")
+        params["chan"] = f.channel
+    if f.q and f.q.strip():
+        # Tên có dãy số dài bị che với vai dưới Owner (khoá cứng 8) ⇒ vai đó không được tìm theo tên bằng ≥ 4 chữ
+        # số, nếu không dò dần từng chữ số sẽ lộ số đã che. Tìm theo mã người vẫn dùng được.
+        digits = len(re.sub(r"\D", "", f.q))
+        by_name = "name ILIKE :q ESCAPE '\\'" if owner or digits < 4 else "FALSE"
+        conds.append(f"({by_name} OR code ILIKE :q ESCAPE '\\')")
+        params["q"] = _like_pattern(f.q)
+    return " AND ".join(conds), params
+
+
 @router.get("/directory/people")
 async def list_people(relation: str | None = None, heat: Literal["high", "mid", "cold"] | None = None,
                       value: Literal["high", "mid", "unknown"] | None = None,
                       priority: Literal["P1", "P2", "P3"] | None = None,
-                      bot: Literal["assigned", "unassigned"] | None = None, cursor: str | None = None,
+                      bot: Literal["assigned", "unassigned"] | None = None,
+                      channel: str | None = Query(None, max_length=32, pattern=r"^[a-z][a-z0-9_]*$"),
+                      q: str | None = Query(None, max_length=100), cursor: str | None = None,
                       limit: int = Query(50, ge=1, le=200), user: service.CurrentUser = Depends(READ),
                       db: AsyncSession = DB) -> dict[str, Any]:
     sc = await scope_for(db, user, "profile.read")
     where, params = sc.person_sql("p")
-    conds = ["TRUE"]
-    if relation:
-        conds.append("relation = :rel")
-    if heat == "high":
-        conds.append("heat >= 80")
-    elif heat == "mid":
-        conds.append("heat >= 50 AND heat < 80")
-    elif heat == "cold":
-        conds.append("(heat IS NULL OR heat < 50)")
-    if value == "high":
-        conds.append("value_vnd >= 500000000")
-    elif value == "mid":
-        conds.append("value_vnd >= 100000000 AND value_vnd < 500000000")
-    elif value == "unknown":
-        conds.append("value_vnd = 0")
-    if priority:
-        conds.append("pri_rank = :prirank")
-    if bot == "assigned":
-        conds.append("(attrs->>'agent_id') IS NOT NULL")
-    elif bot == "unassigned":
-        conds.append("(attrs->>'agent_id') IS NULL")
-    if cursor:
-        conds.append("created_at < :c")
-    filt = " AND ".join(conds)
-    prirank = {"P1": 1, "P2": 2, "P3": 3}.get(priority) if priority else None
-    base = {"o": user.org_id, "rel": relation, "prirank": prirank, "c": parse_cursor(cursor), **params}
-    cte = _PEOPLE_CTE.format(scope=where)
-    total = (await db.execute(text(cte + f" SELECT count(*) FROM rows WHERE {filt}"), base)).scalar_one()  # noqa: S608
-    rows = (await db.execute(text(cte + f" SELECT * FROM rows WHERE {filt} ORDER BY created_at DESC LIMIT :n"),  # noqa: S608
-                             {**base, "n": limit + 1})).all()
     owner = user.role_code == rbac.OWNER
+    filt, fparams = _people_filter(PeopleFilter(relation=relation, heat=heat, value=value, priority=priority,
+                                                bot=bot, channel=channel, q=q), owner=owner)
+    base: dict[str, Any] = {"o": user.org_id, **fparams, **params}
+    cte = _PEOPLE_CTE.format(scope=where)
+    # `total` theo bộ lọc, không theo con trỏ (xem list_groups).
+    total = (await db.execute(text(cte + f" SELECT count(*) FROM rows WHERE {filt}"), base)).scalar_one()  # noqa: S608
+    cur = _page_cursor(cursor)
+    page_filt = filt
+    if cur:
+        page_filt += " AND (created_at, id) < (:c, :cid)"
+        base |= {"c": cur[0], "cid": cur[1]}
+    order = " ORDER BY created_at DESC, id DESC LIMIT :n"
+    rows = (await db.execute(text(cte + f" SELECT * FROM rows WHERE {page_filt}" + order),  # noqa: S608
+                             {**base, "n": limit + 1})).all()
     items = [_person_row(r, owner=owner) for r in rows[:limit]]
-    return {"items": items, "next_cursor": iso(rows[limit - 1].created_at) if len(rows) > limit else None,
-            "total": total}
+    return {"items": items, "next_cursor": _next_cursor(rows, limit), "total": total}
+
+
+class BulkBotIn(BaseModel):
+    filter: PeopleFilter = Field(default_factory=PeopleFilter)
+    agent_id: uuid.UUID | None = None
+    autonomy_level: int | None = Field(default=None, ge=0, le=6)
+    expected_total: int | None = Field(default=None, ge=0)
+
+
+@router.post("/directory/people/bulk-bot")
+async def set_people_bot_bulk(body: BulkBotIn, user: service.CurrentUser = Depends(WRITE),
+                              db: AsyncSession = DB) -> dict[str, Any]:
+    """Gán BOT / mức tự trị cho MỌI người khớp bộ lọc (trong phạm vi ghi của người gọi) — một câu lệnh, một giao
+    dịch (đủ hoặc không gì cả). `expected_total` là số giao diện đã hiện cho Sếp: lệch (có người mới vào/ra khỏi bộ
+    lọc) ⇒ 409, không đổi gì — Sếp thấy số mới rồi quyết lại."""
+    fields = body.model_fields_set
+    set_agent, set_autonomy = "agent_id" in fields, "autonomy_level" in fields
+    if not set_agent and not set_autonomy:
+        raise ApiError(422, "VALIDATION_ERROR", "Chưa chọn thay đổi nào",
+                       errors={"agent_id": "Chọn BOT hoặc mức tự trị cần đổi"})
+    sc = await scope_for(db, user, "profile.write")
+    if set_agent and body.agent_id is not None:
+        ok = (await db.execute(text("SELECT 1 FROM agent.identities WHERE id = :a AND org_id = :o"),
+                               {"a": body.agent_id, "o": user.org_id})).first()
+        if ok is None:
+            raise not_found("Agent")
+    where, params = sc.person_sql("p")
+    filt, fparams = _people_filter(body.filter, owner=user.role_code == rbac.OWNER)
+    cte = _PEOPLE_CTE.format(scope=where)
+    base: dict[str, Any] = {"o": user.org_id, **fparams, **params}
+    if body.expected_total is not None:
+        now_total = (await db.execute(text(cte + f" SELECT count(*) FROM rows WHERE {filt}"),  # noqa: S608
+                                      base)).scalar_one()
+        if now_total != body.expected_total:
+            raise ApiError(409, "BULK_FILTER_CHANGED", "Danh sách đã thay đổi",
+                           f"Bộ lọc hiện khớp {now_total} người (không phải {body.expected_total}). "
+                           "Hãy xem lại số rồi áp dụng lại.")
+    expr = "COALESCE(p.attrs, '{}'::jsonb)"
+    if set_agent:
+        expr = f"({expr} - 'agent_id')"
+        if body.agent_id is not None:
+            expr += " || jsonb_build_object('agent_id', CAST(:aid AS text))"
+            base["aid"] = str(body.agent_id)
+    if set_autonomy:
+        expr = f"({expr} - 'autonomy_level')"
+        if body.autonomy_level is not None:
+            expr += " || jsonb_build_object('autonomy_level', CAST(:lvl AS int))"
+            base["lvl"] = body.autonomy_level
+    done = (await db.execute(text(cte.rstrip() + f""",
+        targets AS (SELECT id FROM rows WHERE {filt})
+        UPDATE core.persons p SET attrs = {expr}, updated_at = now()
+        FROM targets t WHERE p.id = t.id AND p.org_id = :o RETURNING p.id"""), base)).all()  # noqa: S608
+    detail: dict[str, Any] = {"updated": len(done), "filter": body.filter.model_dump(exclude_none=True)}
+    if set_agent:
+        detail["agent_id"] = str(body.agent_id) if body.agent_id else None
+    if set_autonomy:
+        detail["autonomy_level"] = body.autonomy_level
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action="directory.bulk_bot_set", target_type="person", target_id=None,
+                           result="ok", detail=detail, ip=user.ip)
+    return {"ok": True, "updated": len(done)}
 
 
 class PersonBotIn(BaseModel):
@@ -235,11 +376,22 @@ async def _person_or_404(db: AsyncSession, sc: Scope, person_id: uuid.UUID) -> A
     return r
 
 
-@router.get("/profile/{person_id}")
-async def get_profile(person_id: uuid.UUID, user: service.CurrentUser = Depends(READ),
-                      db: AsyncSession = DB) -> dict[str, Any]:
+@router.get("/profile/{person_id}", response_model=None)
+async def get_profile(person_id: uuid.UUID, request: Request, user: service.CurrentUser = Depends(READ),
+                      db: AsyncSession = DB) -> dict[str, Any] | Response:
     sc = await scope_for(db, user, "profile.read")
     r = await _person_or_404(db, sc, person_id)
+    # Hồ sơ đã gộp (`merged_into_id`, chỉ đọc ở đây) không còn là hồ sơ sống: đưa người xem tới hồ sơ gốc thay vì
+    # hiện một vỏ rỗng. 307 (không phải 308) vì tách danh tính có thể trả hồ sơ này về trạng thái sống. Đích ngoài
+    # phạm vi của người xem ⇒ 404 như mọi hồ sơ không thấy được.
+    live = await live_person(db, person_id)
+    if live != person_id:
+        await ensure_person(db, sc, live)
+        return RedirectResponse(f"{request.url.path.rsplit('/', 1)[0]}/{live}", status_code=307)
+    return await _profile_payload(person_id, user, db, r)
+
+
+async def _profile_payload(person_id: uuid.UUID, user: service.CurrentUser, db: AsyncSession, r: Any) -> dict[str, Any]:
     owner = user.role_code == rbac.OWNER
 
     identities = (await db.execute(text("""
@@ -348,7 +500,7 @@ async def patch_profile(person_id: uuid.UUID, body: ProfilePatch, user: service.
         await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                                action="profile.updated", target_type="person", target_id=str(person_id),
                                result="ok", detail=detail, ip=user.ip)
-    return await get_profile(person_id, user, db)
+    return await _profile_payload(person_id, user, db, await _person_or_404(db, sc, person_id))
 
 
 # ═══ Sổ tay nhận thức (notebook) ═════════════════════════════════════════════

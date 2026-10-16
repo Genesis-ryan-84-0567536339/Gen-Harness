@@ -406,7 +406,7 @@ describe('Nhóm & Con người › Thiết lập BOT cho nhóm đã lọc', () =
       if (c.url.includes('/pickers/agents')) return agents();
       if (c.url.includes('/directory/channels')) return json(200, CHANNELS);
       if (c.url.includes('/directory/groups')) return json(200, GROUPS);
-      if (c.method === 'POST' && c.url.match(/\/directory\/people\/p\d\/bot$/)) return json(200, { ok: true });
+      if (c.method === 'POST' && c.url.includes('/directory/people/bulk-bot')) return json(200, { ok: true, updated: 2 });
       if (c.url.includes('/directory/people')) return json(200, PEOPLE);
       return json(404);
     });
@@ -426,8 +426,9 @@ describe('Nhóm & Con người › Thiết lập BOT cho nhóm đã lọc', () =
     await user.click(within(within(dlg).getByRole('group', { name: 'Mức tự trị' })).getByRole('button', { name: 'Soạn sẵn chờ duyệt' }));
     expect(apply).toBeEnabled();
     await user.click(apply);
-    await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.url.includes('/bot')).length).toBe(2));
-    for (const c of calls.filter((x) => x.method === 'POST' && x.url.includes('/bot'))) expect(c.body).toEqual({ autonomy_level: 4 });
+    // F053: MỘT lần gọi gửi bộ lọc + số đã hiện cho máy chủ (không còn lặp từng người ở trình duyệt).
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.url.includes('/bulk-bot')).length).toBe(1));
+    expect(calls.find((x) => x.method === 'POST' && x.url.includes('/bulk-bot'))?.body).toEqual({ filter: {}, expected_total: 2, autonomy_level: 4 });
   });
 
   it('/pickers/agents lỗi → vẫn mặc định giữ nguyên, nút Áp dụng tắt cho tới khi chọn mức tự trị', async () => {
@@ -453,8 +454,8 @@ describe('Nhóm & Con người › Thiết lập BOT cho nhóm đã lọc', () =
     const dlg = await screen.findByRole('dialog', { name: 'Thiết lập BOT cho nhóm đã lọc' });
     await user.click(within(dlg).getByText('Chưa gán (gỡ BOT)'));
     await user.click(within(dlg).getByRole('button', { name: /Áp dụng cho 2 người/ }));
-    await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.url.includes('/bot')).length).toBe(2));
-    for (const c of calls.filter((x) => x.method === 'POST' && x.url.includes('/bot'))) expect(c.body).toEqual({ agent_id: null });
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.url.includes('/bulk-bot')).length).toBe(1));
+    expect(calls.find((x) => x.method === 'POST' && x.url.includes('/bulk-bot'))?.body).toEqual({ filter: {}, expected_total: 2, agent_id: null });
   });
 
   it('vai trò chỉ đọc (Auditor: không profile.write) → không có nút "Đổi" và nút thiết lập hàng loạt', async () => {

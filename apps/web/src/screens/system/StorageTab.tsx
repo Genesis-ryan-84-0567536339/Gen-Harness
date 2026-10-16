@@ -1,19 +1,21 @@
 import { useMemo, useState } from 'react';
 import { ApiError, type RetentionEditableDataset, type RetentionPolicy } from '@gen-harness/contracts';
-import { Button, EmptyState, Icon, SelectField, TextField } from '@gen-harness/ui';
+import { Button, Dialog, EmptyState, Icon, SelectField, TextField } from '@gen-harness/ui';
 import { useDirPeople } from '../relations/queries';
-import { fmtDMClock } from '../../lib/format';
+import { downloadBlob } from '../../lib/download';
+import { fmtDMClock, fmtInt } from '../../lib/format';
 import { useCan, useOrgTimezone } from '../../lib/permissions';
 import { useMe } from '../../lib/queries';
 import { errorText } from '../../lib/errorText';
 import { toast } from '../../lib/toast';
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { CardError, InlineError, Panel, SkeletonLines } from '../common';
 import { UpdateCard } from '../../update/UpdateCard';
 import { BackupPanel } from './BackupPanel';
 import { OffsitePanel } from './OffsitePanel';
 import { HealthCard } from './HealthCard';
 import { RemoteAccessCard } from './RemoteAccessCard';
-import { DATA_REQUEST_KIND, RETENTION_LABEL, RETENTION_OWNER_ONLY_REASON, retentionConfirmText, retentionDeletes, retentionOwnerOnly, retentionRowView } from './systemModel';
+import { DATA_REQUEST_KIND, RETENTION_LABEL, personExportFileName, RETENTION_OWNER_ONLY_REASON, retentionConfirmText, retentionDeletes, retentionOwnerOnly, retentionRowView } from './systemModel';
 import { useCreateDataRequest, usePatchRetention, usePersonDataRequests, useRetentionPolicies } from './queries';
 
 /** Cài đặt › Sao lưu & cập nhật (trước v0.1.42: Dữ liệu & lưu trữ) — sao lưu & khôi phục (v0.1.20), bản sao ngoài máy (v0.1.40); spec I: hạn lưu theo tập dữ liệu, yêu cầu xuất/xoá/giới hạn
@@ -226,28 +228,65 @@ function RetentionPanel() {
   );
 }
 
+/** Người được chọn để xuất / ẩn danh hoá — giữ riêng để vẫn còn khi ô tìm kiếm đổi và danh sách kết quả thay đổi. */
+interface PickedPerson {
+  id: string;
+  name: string;
+  code: string;
+}
+
+/**
+ * Yêu cầu xuất / ẩn danh hoá / giới hạn dữ liệu một người (spec I).
+ *
+ * - Chọn người bằng tìm kiếm Ở MÁY CHỦ (tên hoặc mã) — không chỉ 50 người đầu.
+ * - "Xuất dữ liệu": máy chủ trả gói dữ liệu ngay trong phản hồi (không lưu lại) ⇒ giao diện TẢI NGAY thành tệp JSON; chỉ
+ *   báo "đã tải" khi thật sự có tệp.
+ * - "Ẩn danh hoá" (trước đây "Xoá dữ liệu"): hộp xác nhận nêu rõ xoá gì và KHÔNG xoá tin nhắn gốc.
+ */
 function PersonDataRequestPanel() {
   const canManage = useCan('system.manage');
   const tz = useOrgTimezone();
-  const people = useDirPeople({ limit: 50 });
   const [search, setSearch] = useState('');
-  const [personId, setPersonId] = useState('');
+  const q = useDebouncedValue(search.trim(), 300);
+  const people = useDirPeople({ q: q || undefined, limit: 30 });
+  const [picked, setPicked] = useState<PickedPerson | null>(null);
+  const [confirmErase, setConfirmErase] = useState(false);
+  const personId = picked?.id ?? '';
   const create = useCreateDataRequest();
   const history = usePersonDataRequests(personId, !!personId);
 
   const options = useMemo(() => {
-    const s = search.trim().toLowerCase();
-    const items = people.data?.items ?? [];
-    return (s ? items.filter((p) => p.name.toLowerCase().includes(s) || p.code.toLowerCase().includes(s)) : items).slice(0, 30);
-  }, [people.data, search]);
-  const person = options.find((p) => p.id === personId) ?? (people.data?.items ?? []).find((p) => p.id === personId);
+    const list: PickedPerson[] = (people.data?.items ?? []).map((p) => ({ id: p.id, name: p.name, code: p.code }));
+    // Người đang chọn luôn có mặt trong danh sách, kể cả khi kết quả tìm kiếm mới không còn nêu họ.
+    return picked && !list.some((p) => p.id === picked.id) ? [picked, ...list] : list;
+  }, [people.data, picked]);
+  const matched = people.data?.total ?? 0;
+  const shown = people.data?.items.length ?? 0;
 
   const request = (kind: 'export' | 'erase' | 'restrict') => {
-    if (!personId) return;
+    if (!picked) return;
     create.mutate(
-      { personId, kind },
+      { personId: picked.id, kind },
       {
-        onSuccess: () => toast(kind === 'export' ? 'Đã tạo gói xuất dữ liệu' : kind === 'erase' ? 'Đã xoá dữ liệu suy ra của người này' : 'Đã giới hạn dùng dữ liệu người này', 'ok'),
+        onSuccess: (res) => {
+          if (kind === 'export') {
+            // Chỉ nói "đã tải" khi thật sự có tệp: máy chủ không lưu gói, nên không có dữ liệu = không có gì để đưa.
+            if (res.result == null) {
+              toast('Máy chủ không trả dữ liệu để xuất — thử lại, nếu vẫn vậy hãy báo quản trị', 'bad');
+              return;
+            }
+            try {
+              downloadBlob(new Blob([JSON.stringify(res.result, null, 2)], { type: 'application/json' }), personExportFileName(picked.code));
+              toast(`Đã tải tệp dữ liệu của ${picked.name}`, 'ok');
+            } catch {
+              toast('Đã lấy được dữ liệu nhưng trình duyệt không tạo được tệp tải về — thử lại', 'bad');
+            }
+          } else if (kind === 'erase') {
+            toast('Đã ẩn danh hoá người này — tin nhắn gốc vẫn được giữ', 'ok');
+          } else {
+            toast('Đã giới hạn dùng dữ liệu người này', 'ok');
+          }
+        },
         onError: (e) => toast(errorText(e), 'bad'),
       },
     );
@@ -256,16 +295,22 @@ function PersonDataRequestPanel() {
   return (
     <Panel
       title="Yêu cầu xuất / xoá dữ liệu một người"
-      kicker="Có ghi vào Nhật ký — dữ liệu gốc không bị sửa"
+      kicker="Có ghi vào Nhật ký — tin nhắn gốc không bị xoá"
       label="Yêu cầu xuất / xoá dữ liệu một người"
       bodyClass="data-request"
     >
       <div className="data-request__picker">
-        <TextField label="Tìm người (tên hoặc mã)" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Nguyễn Văn Bảo, PER-0042…" />
+        <TextField
+          label="Tìm người (tên hoặc mã)"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Nguyễn Văn Bảo, PER-0042…"
+          hint={people.data && matched > shown ? `Hiện ${fmtInt(shown)} / ${fmtInt(matched)} người khớp — gõ thêm để thu hẹp` : undefined}
+        />
         <SelectField
           label="Người"
           value={personId}
-          onChange={(e) => setPersonId(e.target.value)}
+          onChange={(e) => setPicked(options.find((p) => p.id === e.target.value) ?? null)}
           options={[{ value: '', label: people.isPending ? 'Đang tải…' : 'Chọn người' }, ...options.map((p) => ({ value: p.id, label: `${p.name} · ${p.code}` }))]}
         />
       </div>
@@ -277,11 +322,11 @@ function PersonDataRequestPanel() {
           return (
             <Button
               key={kind}
-              variant={kind === 'erase' ? 'primary' : 'secondary'}
+              variant="secondary"
               icon={info.icon}
               disabled={!personId || create.isPending || !canManage}
               loading={create.isPending && create.variables?.kind === kind}
-              onClick={() => request(kind)}
+              onClick={() => (kind === 'erase' ? setConfirmErase(true) : request(kind))}
             >
               {info.label}
             </Button>
@@ -293,7 +338,7 @@ function PersonDataRequestPanel() {
 
       {personId ? (
         <div className="data-request__history">
-          <div className="data-request__history-title">Lịch sử yêu cầu — {person?.name ?? '…'}</div>
+          <div className="data-request__history-title">Lịch sử yêu cầu — {picked?.name ?? '…'}</div>
           {history.isPending ? (
             <SkeletonLines rows={2} padding="0" />
           ) : history.isError ? (
@@ -312,6 +357,41 @@ function PersonDataRequestPanel() {
             ))
           )}
         </div>
+      ) : null}
+      {confirmErase && picked ? (
+        <Dialog
+          open
+          onClose={() => setConfirmErase(false)}
+          width={440}
+          title="Ẩn danh hoá người này?"
+          kicker={`${picked.name} · ${picked.code}`}
+          actions={
+            <>
+              <Button variant="secondary" onClick={() => setConfirmErase(false)}>
+                Huỷ
+              </Button>
+              <Button
+                variant="primary"
+                icon="ph ph-eye-slash"
+                onClick={() => {
+                  setConfirmErase(false);
+                  request('erase');
+                }}
+              >
+                Ẩn danh hoá
+              </Button>
+            </>
+          }
+        >
+          <div className="dlg-fields" data-testid="erase-confirm">
+            <p className="muted-note">
+              Sẽ xoá điểm số, sổ tay nhận thức, handle và số điện thoại gắn với người này; tên đổi thành “Người dùng đã xoá”. Việc này không hoàn tác được.
+            </p>
+            <p className="muted-note">
+              <strong>Không xoá tin nhắn gốc</strong> — tin thô vẫn còn trong kho, chỉ không còn nhận ra là của người này.
+            </p>
+          </div>
+        </Dialog>
       ) : null}
     </Panel>
   );

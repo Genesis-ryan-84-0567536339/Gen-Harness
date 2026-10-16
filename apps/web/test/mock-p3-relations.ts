@@ -126,6 +126,22 @@ function seedPeople(): PersonSeed[] {
   ];
 }
 
+/** Lọc theo kênh + tìm tên/mã như máy chủ (`q` so khớp không phân biệt hoa thường). */
+function matchPeople(rows: PersonSeed[], f: { channel: string | null; q: string | null }): PersonSeed[] {
+  const q = (f.q ?? '').trim().toLowerCase();
+  return rows.filter(
+    (r) => (!f.channel || r.ch.includes(f.channel as PersonSeed['ch'][number])) && (!q || r.name.toLowerCase().includes(q) || r.code.toLowerCase().includes(q)),
+  );
+}
+
+/** Phân trang như máy chủ: `limit` (mặc định 50) + `cursor` (ở đây là vị trí bắt đầu); `total` đếm theo bộ lọc, không theo con trỏ. */
+function pageOf<T>(rows: T[], url: URL): { items: T[]; next_cursor: string | null; total: number } {
+  const limit = Number(url.searchParams.get('limit') ?? 50);
+  const from = Number(url.searchParams.get('cursor') ?? 0) || 0;
+  const items = rows.slice(from, from + limit);
+  return { items, next_cursor: from + limit < rows.length ? String(from + limit) : null, total: rows.length };
+}
+
 function toDirPerson(p: PersonSeed): DirPerson {
   return {
     id: p.id, code: p.code, name: p.name, type: p.type, org_name: p.org,
@@ -430,11 +446,13 @@ export function createMock(opts: P3Options) {
         const channelId = url.searchParams.get('channel_id');
         const kind = url.searchParams.get('kind');
         const listenMode = url.searchParams.get('listen_mode');
+        const gq = (url.searchParams.get('q') ?? '').trim().toLowerCase();
         let rows = groups;
         if (channelId) rows = rows.filter((g) => `ch-${g.channel.type}` === channelId);
         if (kind) rows = rows.filter((g) => g.kind === kind);
         if (listenMode) rows = rows.filter((g) => g.listen_mode === listenMode);
-        return reply(200, { items: rows, next_cursor: null, total: rows.length });
+        if (gq) rows = rows.filter((g) => g.name.toLowerCase().includes(gq) || g.code.toLowerCase().includes(gq));
+        return reply(200, pageOf(rows, url));
       }
       if (seg.length === 4 && seg[3] === 'bot' && m === 'POST') {
         if (!has(ctx, 'profile.write')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
@@ -461,8 +479,30 @@ export function createMock(opts: P3Options) {
         if (value) rows = rows.filter((r) => (value === 'high' ? (r.valueVnd ?? 0) >= 500_000_000 : value === 'mid' ? (r.valueVnd ?? 0) >= 100_000_000 && (r.valueVnd ?? 0) < 500_000_000 : !r.valueVnd));
         if (priority) rows = rows.filter((r) => r.priority === priority);
         if (bot) rows = rows.filter((r) => (bot === 'assigned' ? !!r.agentId : !r.agentId));
-        const items = rows.map(toDirPerson);
-        return reply(200, { items, next_cursor: null, total: items.length });
+        rows = matchPeople(rows, { channel: url.searchParams.get('channel'), q: url.searchParams.get('q') });
+        return reply(200, pageOf(rows.map(toDirPerson), url));
+      }
+      // Gán BOT hàng loạt theo bộ lọc: máy chủ tự tìm MỌI người khớp (không giới hạn ở trang đã tải).
+      if (seg.length === 3 && seg[2] === 'bulk-bot' && m === 'POST') {
+        if (!has(ctx, 'profile.write')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
+        const b = body as { filter?: Record<string, string | undefined>; agent_id?: string | null; autonomy_level?: number | null; expected_total?: number };
+        const f = b.filter ?? {};
+        let rows = people;
+        if (f.relation) rows = rows.filter((r) => relationOf(r.relation) === f.relation);
+        if (f.heat) rows = rows.filter((r) => (f.heat === 'high' ? r.heat >= 80 : f.heat === 'mid' ? r.heat >= 50 && r.heat < 80 : r.heat < 50));
+        if (f.priority) rows = rows.filter((r) => r.priority === f.priority);
+        if (f.bot) rows = rows.filter((r) => (f.bot === 'assigned' ? !!r.agentId : !r.agentId));
+        rows = matchPeople(rows, { channel: f.channel ?? null, q: f.q ?? null });
+        if (b.expected_total != null && b.expected_total !== rows.length) {
+          return problem(409, 'BULK_FILTER_CHANGED', 'Danh sách đã thay đổi', { detail: `Bộ lọc hiện khớp ${rows.length} người (không phải ${b.expected_total}).` });
+        }
+        const agent = b.agent_id != null ? agentRef(ctx, b.agent_id) : null;
+        if (agent === false) return true;
+        for (const r of rows) {
+          if ('agent_id' in b) r.agentId = agent ? agent.id : null;
+          if ('autonomy_level' in b) r.autonomy = b.autonomy_level ?? null;
+        }
+        return reply(200, { ok: true, updated: rows.length });
       }
     }
     const peopleBot = /^directory\/people\/([^/]+)\/bot$/.exec(seg.join('/'));
