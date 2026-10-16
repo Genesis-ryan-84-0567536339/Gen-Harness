@@ -49,7 +49,7 @@ describe('detail không phải chuỗi → chữ đọc được', () => {
     expect(screen.getByText(MODEL_UNAVAILABLE_TEXT)).toBeInTheDocument();
   });
 
-  it('CardError với MODEL_UNAVAILABLE → trạng thái "Chọn model" (link /guide/4) + chi tiết kỹ thuật', () => {
+  it('CardError với MODEL_UNAVAILABLE → trạng thái "Chọn model" (link /setup?buoc=nguon-ai, v0.1.59) + chi tiết kỹ thuật', () => {
     const e = new ApiError(503, { code: 'MODEL_UNAVAILABLE', title: 't', detail: { reasons: REASONS } });
     render(
       <MemoryRouter>
@@ -57,7 +57,7 @@ describe('detail không phải chuỗi → chữ đọc được', () => {
       </MemoryRouter>,
     );
     expect(screen.getByText(MODEL_UNAVAILABLE_TEXT)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Chọn model/ })).toHaveAttribute('href', '/guide/4');
+    expect(screen.getByRole('link', { name: /Chọn model/ })).toHaveAttribute('href', '/setup?buoc=nguon-ai');
     expect(screen.getByText('gemini: 429; deepseek: đang ngắt mạch')).toBeInTheDocument();
   });
 });
@@ -119,7 +119,7 @@ describe('/guide/8 — thử trò chuyện khi không có model', () => {
     await createAgent();
     expect(await screen.findByText(/Đã tạo agent/)).toBeInTheDocument();
     expect(screen.getByText(MODEL_UNAVAILABLE_TEXT)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Chọn model/ })).toHaveAttribute('href', '/guide/4');
+    expect(screen.getByRole('link', { name: /Chọn model/ })).toHaveAttribute('href', '/setup?buoc=nguon-ai');
   });
 
   it('máy chủ v0.1.30: try_error chuỗi + try_error_code + try_reasons', async () => {

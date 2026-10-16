@@ -12,6 +12,7 @@ Nguyên tắc:
   của chúng không làm sập `GET /owner/today` (bọc savepoint để giao dịch không bị hỏng; lỗi ⇒ giá trị rỗng).
 """
 
+import asyncio
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
@@ -22,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.biz.graph.jobs import COLD_DAYS, WINDOW_DAYS
 from gh.biz.market.service import OPEN_STAGES
-from gh.biz.queue.service import EVENT_LABELS
+from gh.biz.queue.service import EVENT_LABELS, not_silenced_sql
 from gh.boss_checks import service as boss_service
 from gh.data.common import iso
 from gh.defaults import registry as defaults_registry
@@ -32,7 +33,7 @@ from gh.refinery import triage
 
 log = logging.getLogger("gh.owner")
 
-LIST_NAMES = ("hot", "cooling", "bridges", "matches")
+LIST_NAMES = ("hot", "cooling", "bridges", "matches", "care")
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 50
 #: "Cần Sếp duyệt" tối đa 10 dòng; mỗi nguồn lấy tối đa PER_SOURCE rồi xếp theo mức khẩn.
@@ -50,6 +51,17 @@ HOT_MIN = 80
 SUMMARY_MAX = 240
 #: Đề xuất của Gen sống 24 giờ (gh.gen.proposals.PROPOSAL_TTL_S) — chỉ tìm trong cửa sổ đó.
 PROPOSAL_WINDOW_H = 24
+#: "Khách cần chăm" (v0.1.59): rủi ro rời bỏ từ mức này, HOẶC đã nhắn ≥ CARE_MIN_MSGS tin mà ≥ CARE_SILENT_DAYS ngày
+#: không có tin mới. Phạm vi "khách" = mọi người KHÔNG thuộc CARE_EXCLUDED_TYPES (gồm cả `unknown`).
+CARE_CHURN_MIN = 60
+CARE_SILENT_DAYS = 14
+CARE_MIN_MSGS = 3
+CARE_EXCLUDED_TYPES = ("staff", "candidate", "learner")
+#: Chỉ xét người có tin trong cửa sổ này (ngày) cho luật "im lặng" — không dò cả nghìn người ngoài lề và cắt được
+#: phân vùng `raw.events`. Người im lặng quá lâu vẫn hiện nếu rủi ro rời bỏ ≥ CARE_CHURN_MIN.
+CARE_WINDOW_DAYS = 180
+#: Kênh KHÔNG tính là "kênh nhận tin" (Facebook/Telegram không đưa tin khách về Thông tin).
+NON_INTAKE_CHANNELS = ("facebook", "telegram")
 
 BG_ALERT_KEY = "ai.background_no_source"
 BG_SUGGESTION = {
@@ -94,6 +106,27 @@ async def _count(db: AsyncSession, sql: str, params: dict[str, Any]) -> int:
     """`sql` là câu `SELECT 1 FROM … [LIMIT :cap]` bên trong; trả số dòng, chặn ở `COUNT_CAP`."""
     n = (await db.execute(text(f"SELECT count(*) FROM ({sql}) x"), {**params, "cap": COUNT_CAP})  # noqa: S608
          ).scalar_one()
+    return int(n or 0)
+
+
+async def channels_connected(db: AsyncSession, org_id: uuid.UUID) -> int:
+    """Số kênh NHẬN TIN (Zalo, WhatsApp…) đang có phiên đăng nhập hoạt động. KHÔNG tính Facebook/Telegram (không đưa
+    tin khách về Thông tin). 0 ⇒ "ngày đầu": Mặt tiền hiện một thẻ "Nối Zalo" thay các khối số. Dùng chung cho
+    brief / feed / insights."""
+    n = (await db.execute(text("""
+        SELECT count(DISTINCT c.id) FROM core.channels c JOIN core.channel_sessions s ON s.channel_id = c.id
+        WHERE c.org_id = :o AND s.state = 'active' AND s.ended_at IS NULL AND NOT (c.type = ANY(:skip))"""),
+                          {"o": org_id, "skip": list(NON_INTAKE_CHANNELS)})).scalar_one()
+    return int(n or 0)
+
+
+async def pending_drafts(db: AsyncSession, org_id: uuid.UUID) -> int:
+    """Số bản nháp chờ duyệt, KHÔNG giới hạn tuổi, bỏ nháp đã "Tắt tiếng" — khớp `feed.counts.approval` (cùng
+    `not_silenced_sql`) và màn Việc; chỉ mục (org_id, status, created_at DESC)."""
+    n = (await db.execute(text(f"""
+        SELECT count(*) FROM (SELECT 'draft' AS item_type, id AS item_id FROM biz.action_drafts
+                              WHERE org_id = :o AND status = 'pending') i
+        WHERE {not_silenced_sql("i")}"""), {"o": org_id})).scalar_one()  # noqa: S608
     return int(n or 0)
 
 
@@ -156,19 +189,26 @@ async def suggestions(db: AsyncSession, org_id: uuid.UUID) -> list[dict[str, str
 
 # ─── GET /owner/today ────────────────────────────────────────────────────────────────────────────────────────────
 
+async def proposal_messages(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, limit: int) -> list[Any]:
+    """Tin trả lời của Gen (role assistant) trong `PROPOSAL_WINDOW_H` giờ gần nhất, trong hội thoại của CHÍNH Owner này
+    (cid, created_at, content) — nơi chứa bước `proposal`. Dùng chung cho "Cần Sếp duyệt" (needs_review) và
+    `GET /owner/proposals` (proposals_view). Chỉ chỉ mục gen_conversations_user_idx + gen_messages_conv_idx."""
+    return list((await db.execute(text("""
+        SELECT c.id AS cid, m.created_at, m.content
+        FROM agent.gen_conversations c JOIN agent.gen_messages m ON m.conversation_id = c.id
+        WHERE c.org_id = :o AND c.user_id = :u AND c.last_at > now() - make_interval(hours => :h)
+          AND m.role = 'assistant' AND m.created_at > now() - make_interval(hours => :h)
+        ORDER BY m.created_at DESC LIMIT :n"""), {"o": org_id, "u": user_id, "h": PROPOSAL_WINDOW_H,
+                                                  "n": limit})).all())
+
+
 async def needs_review(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> list[dict[str, Any]]:
     """Việc chờ Sếp: đề xuất của Gen chưa xác nhận (hết hạn sau 24 giờ ⇒ xếp trước), bản nháp chờ duyệt, việc quá hạn.
     Tối đa `REVIEW_MAX`. Chỉ ĐỌC — duyệt/xác nhận làm ở luồng sẵn có (link `to`)."""
     items: list[dict[str, Any]] = []
 
     # Đề xuất Gen chưa xác nhận: nằm trong bước `proposal` của tin trả lời (status 'pending'), 24 giờ gần nhất.
-    # Chỉ đọc hội thoại của CHÍNH Owner này. Chỉ chỉ mục gen_conversations_user_idx + gen_messages_conv_idx.
-    rows = (await db.execute(text("""
-        SELECT c.id AS cid, m.created_at, m.content
-        FROM agent.gen_conversations c JOIN agent.gen_messages m ON m.conversation_id = c.id
-        WHERE c.org_id = :o AND c.user_id = :u AND c.last_at > now() - make_interval(hours => :h)
-          AND m.role = 'assistant' AND m.created_at > now() - make_interval(hours => :h)
-        ORDER BY m.created_at DESC LIMIT 40"""), {"o": org_id, "u": user_id, "h": PROPOSAL_WINDOW_H})).all()
+    rows = await proposal_messages(db, org_id, user_id, 40)
     seen: set[str] = set()
     kho = await load_kho_label(db, org_id)                     # v0.1.57: tên Kho Owner tự đặt (Nợ #30)
     for r in rows:
@@ -230,16 +270,24 @@ async def kpis(db: AsyncSession, org_id: uuid.UUID) -> dict[str, int]:
             "overdue_promises": promises}
 
 
+#: Bản tin Gen đã lưu của MỘT Owner: tin `kind='briefing'` mới nhất của MỖI hội thoại (không giới hạn "N hội thoại gần
+#: nhất" — Owner chat nhiều thì bản tin cũ vẫn tìm thấy; F-60-R11). Chỉ mục gen_conversations_user_idx (org_id,
+#: user_id, last_at) rồi gen_messages_conv_idx (conversation_id, created_at) cho từng hội thoại; `{only}` thêm điều
+#: kiện hội thoại.
+BRIEF_ROWS = """
+    SELECT c.id, c.title, m.created_at, m.content
+    FROM agent.gen_conversations c
+    JOIN LATERAL (SELECT created_at, content FROM agent.gen_messages
+                  WHERE conversation_id = c.id AND role = 'assistant' AND content->>'kind' = 'briefing'
+                  ORDER BY created_at DESC LIMIT 1) m ON true
+    WHERE c.org_id = :o AND c.user_id = :u {only}
+    ORDER BY m.created_at DESC LIMIT :n"""
+
+
 async def briefing_latest(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> dict[str, Any] | None:
-    """Bản tin Gen mới nhất của chính Owner này (hội thoại có tin `kind='briefing'`), xét 60 hội thoại gần nhất."""
-    r = (await db.execute(text("""
-        SELECT c.id, c.title, m.created_at, m.content
-        FROM (SELECT id, title FROM agent.gen_conversations
-              WHERE org_id = :o AND user_id = :u ORDER BY last_at DESC LIMIT 60) c
-        JOIN LATERAL (SELECT created_at, content FROM agent.gen_messages
-                      WHERE conversation_id = c.id AND role = 'assistant' AND content->>'kind' = 'briefing'
-                      ORDER BY created_at DESC LIMIT 1) m ON true
-        ORDER BY m.created_at DESC LIMIT 1"""), {"o": org_id, "u": user_id})).one_or_none()
+    """Bản tin Gen mới nhất của chính Owner này (hội thoại có tin `kind='briefing'`) — `BRIEF_ROWS`, không giới hạn
+    theo số hội thoại gần nhất."""
+    r = (await db.execute(text(BRIEF_ROWS.format(only="")), {"o": org_id, "u": user_id, "n": 1})).one_or_none()
     if r is None:
         return None
     summary = ""
@@ -272,23 +320,63 @@ def _days_text(days: int) -> str:
     return "Chưa tới 1 ngày" if days < 1 else f"{days} ngày chưa liên lạc"
 
 
+#: Lần liên lạc gần nhất của một người: 3 tin mới nhất họ gửi (mọi danh tính của họ) ⇒ `n` (≤ 3) và `last_at`.
+#: Chỉ mục (sender_identity_id, occurred_at DESC) — không quét hết tin của người đó. `{pid}` = biểu thức id người.
+_LAST_CONTACT = """
+    LEFT JOIN LATERAL (
+      SELECT count(*) AS n, max(t.occurred_at) AS last_at FROM (
+        SELECT e.occurred_at FROM core.person_identities pi JOIN raw.events e ON e.sender_identity_id = pi.id
+        WHERE pi.person_id = {pid} AND e.org_id = :o ORDER BY e.occurred_at DESC LIMIT 3) t) lc ON true"""
+_LAST_DAYS = "floor(extract(epoch FROM now() - lc.last_at) / 86400)::int"
+#: Giá trị cơ hội còn mở của một người (VND).
+_OPEN_VALUE = """(SELECT COALESCE(sum(o.value_vnd), 0) FROM biz.opportunities o
+                  WHERE o.org_id = :o AND o.person_id = p.id AND o.closed_at IS NULL
+                    AND o.stage = ANY(CAST(:open_st AS text[])))"""
+#: Người này đã có việc / nhắc hẹn ĐANG MỞ gắn vào hồ sơ (web "Gen đề xuất" không gợi ý tạo nhắc trùng).
+_OPEN_TASK = """EXISTS (SELECT 1 FROM biz.tasks tk WHERE tk.org_id = :o AND tk.subject_type = 'person'
+                          AND tk.subject_id = p.id AND tk.status NOT IN ('done', 'cancelled'))"""
+_SCORE_JOIN = """LEFT JOIN clean.current_scores {a} ON {a}.subject_type = 'person' AND {a}.subject_id = p.id
+                 AND {a}.dimension = '{dim}'"""
+
+
+def _num(v: Any) -> int | None:
+    return None if v is None else int(round(float(v)))
+
+
+def _person_extras(r: Any) -> dict[str, Any]:
+    """Trường tuỳ chọn của dòng có người (khách nóng / cần chăm): chỉ thêm khoá khi có giá trị."""
+    out: dict[str, Any] = {"person_id": str(r.id)}
+    for key, val in (("heat", _num(getattr(r, "heat", None))), ("churn_risk", _num(getattr(r, "churn_risk", None))),
+                     ("last_contact_days", getattr(r, "days", None)),
+                     ("open_value_vnd", _num(getattr(r, "open_value", None)))):
+        if val is not None:
+            out[key] = val
+    return out
+
+
 async def relations(db: AsyncSession, org_id: uuid.UUID, list_name: str, limit: int) -> dict[str, Any]:
-    """Một trong 4 danh sách của màn Quan hệ. Mỗi dòng {id, name, subtitle, metric_text, to}; `to` mở Hồ sơ sống."""
+    """Một trong 5 danh sách của màn Quan hệ. Mỗi dòng {id, name, subtitle, metric_text, to} (+ trường tuỳ chọn:
+    person_id, heat, churn_risk, last_contact_days, reason, open_value_vnd, match_id); `to` mở Hồ sơ sống."""
     n = clamp_limit(limit)
-    items: list[dict[str, str]] = []
+    items: list[dict[str, Any]] = []
     if list_name == "hot":
         # Chỉ mục khoá chính của clean.current_scores (subject_type, subject_id, dimension) + persons theo id.
-        for r in (await db.execute(text("""
+        for r in (await db.execute(text(f"""
                 SELECT p.id, p.display_name AS name, p.person_type AS type, p.organization_name AS org_name,
-                       cs.value, cs.trend
+                       cs.value AS heat, cs.trend, churn.value AS churn_risk, {_LAST_DAYS} AS days,
+                       {_OPEN_VALUE} AS open_value
                 FROM clean.current_scores cs JOIN core.persons p ON p.id = cs.subject_id
+                {_SCORE_JOIN.format(a="churn", dim="churn_risk")}
+                {_LAST_CONTACT.format(pid="p.id")}
                 WHERE cs.subject_type = 'person' AND cs.dimension = 'heat' AND cs.value >= :hot AND p.org_id = :o
                   AND p.deleted_at IS NULL AND p.merged_into_id IS NULL
-                ORDER BY cs.value DESC, cs.updated_at DESC LIMIT :n"""), {"o": org_id, "hot": HOT_MIN, "n": n})).all():
+                ORDER BY cs.value DESC, cs.updated_at DESC LIMIT :n"""),  # noqa: S608
+                {"o": org_id, "hot": HOT_MIN, "n": n, "open_st": list(OPEN_STAGES)})).all():
             trend = {"up": " · đang tăng", "down": " · đang giảm"}.get(r.trend or "", "")
             items.append({"id": str(r.id), "name": _text(r.name, 80) or "Chưa có tên",
                           "subtitle": _person_subtitle(r.type, r.org_name),
-                          "metric_text": f"Độ nóng {round(float(r.value))}{trend}", "to": profile_link(r.id)})
+                          "metric_text": f"Độ nóng {round(float(r.heat))}{trend}", "to": profile_link(r.id),
+                          **_person_extras(r)})
     elif list_name == "cooling":
         # Chỉ mục (org_id, kind, window_days); cạnh mạnh nhất đang nguội lên trước.
         for r in (await db.execute(text("""
@@ -303,7 +391,8 @@ async def relations(db: AsyncSession, org_id: uuid.UUID, list_name: str, limit: 
                                                                  "n": n})).all():
             items.append({"id": str(r.id), "name": f"{_text(r.a_name, 60)} và {_text(r.b_name, 60)}",
                           "subtitle": f"Hay trao đổi về {_text(r.topic, 60)}" if r.topic else "Hay trao đổi cùng nhóm",
-                          "metric_text": _days_text(int(r.days or 0)), "to": profile_link(r.a_id)})
+                          "metric_text": _days_text(int(r.days or 0)), "to": profile_link(r.a_id),
+                          "person_id": str(r.a_id), "last_contact_days": int(r.days or 0)})
     elif list_name == "bridges":
         # Người cầu nối: cạnh `bridges` Người→Nhóm (gh.biz.graph.jobs) — gộp theo người.
         for r in (await db.execute(text("""
@@ -319,7 +408,18 @@ async def relations(db: AsyncSession, org_id: uuid.UUID, list_name: str, limit: 
             items.append({"id": str(r.id), "name": _text(r.name, 80) or "Chưa có tên",
                           "subtitle": f"Có mặt ở {int(r.groups)} nhóm · {_person_subtitle(r.type, r.org_name)}",
                           "metric_text": f"Nối {pairs} cặp nhóm" if pairs > 0 else "Người nối các nhóm",
-                          "to": profile_link(r.id)})
+                          "to": profile_link(r.id), "person_id": str(r.id)})
+    elif list_name == "care":
+        # Savepoint + statement_timeout như Phân tích: quá giờ / lỗi ⇒ state "error" chứ không treo cả màn.
+        from gh.owner.insights import guarded  # tránh import vòng (insights nạp service)
+        try:
+            async with guarded(db):
+                items = await _care(db, org_id, n)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — danh sách này lỗi không được làm hỏng cả màn
+            log.warning("Quan hệ: danh sách care lỗi (%s)", type(exc).__name__)
+            return {"list": list_name, "items": [], "state": "error"}
     else:  # matches
         # Cung ↔ Cầu (biz.matches): còn hiệu lực = gợi ý mới hoặc đã giới thiệu; chỉ mục (org_id, status).
         for r in (await db.execute(text("""
@@ -333,11 +433,62 @@ async def relations(db: AsyncSession, org_id: uuid.UUID, list_name: str, limit: 
                 WHERE m.org_id = :o AND m.status IN ('suggested', 'introduced')
                 ORDER BY m.score DESC, m.created_at DESC LIMIT :n"""), {"o": org_id, "n": n})).all():
             who_id = r.d_person_id or r.s_person_id
-            items.append({"id": str(r.id), "name": f"{_text(r.d_item, 60)} ↔ {_text(r.s_item, 60)}",
-                          "subtitle": f"{_text(r.d_who, 50) or 'Bên cần'} cần · {_text(r.s_who, 50) or 'Bên có'} có",
-                          "metric_text": f"Khớp {round(float(r.score))}%",
-                          "to": profile_link(who_id) if who_id else "/supply"})
+            row: dict[str, Any] = {
+                "id": str(r.id), "name": f"{_text(r.d_item, 60)} ↔ {_text(r.s_item, 60)}",
+                "subtitle": f"{_text(r.d_who, 50) or 'Bên cần'} cần · {_text(r.s_who, 50) or 'Bên có'} có",
+                "metric_text": f"Khớp {round(float(r.score))}%",
+                "to": profile_link(who_id) if who_id else "/supply", "match_id": str(r.id)}
+            if who_id:
+                row["person_id"] = str(who_id)
+            items.append(row)
     return {"list": list_name, "items": items}
+
+
+async def _care(db: AsyncSession, org_id: uuid.UUID, n: int) -> list[dict[str, Any]]:
+    """"Khách cần chăm": người KHÔNG phải nhân viên/ứng viên/học viên (gồm `unknown`), chưa xoá/gộp, mà rủi ro rời bỏ
+    ≥ CARE_CHURN_MIN (lý do `churn`) HOẶC đã nhắn ≥ CARE_MIN_MSGS tin và ≥ CARE_SILENT_DAYS ngày không có tin mới (lý do
+    `silent`). Xếp rủi ro giảm dần rồi số ngày im lặng giảm dần.
+
+    Chặn chi phí (F-60-R3): tập ỨNG VIÊN lấy trước bằng MỘT lần quét `raw.events` trong CARE_WINDOW_DAYS (cắt phân
+    vùng, gom theo người) + các người có điểm rủi ro cao; chỉ ứng viên mới đi dò "lần liên lạc gần nhất". Người ở nhóm
+    Zalo `unknown` chưa từng nhắn không bị dò."""
+    rows = (await db.execute(text(f"""
+        WITH recent AS (
+          SELECT pi.person_id FROM raw.events e JOIN core.person_identities pi ON pi.id = e.sender_identity_id
+          WHERE e.org_id = :o AND e.received_at >= now() - make_interval(days => :win)
+          GROUP BY pi.person_id
+          HAVING count(*) >= :msgs AND max(e.occurred_at) < now() - make_interval(days => :silent)
+        ), cand AS (
+          SELECT person_id AS id FROM recent
+          UNION
+          SELECT subject_id FROM clean.current_scores
+          WHERE subject_type = 'person' AND dimension = 'churn_risk' AND value >= :churn
+        )
+        SELECT p.id, p.display_name AS name, p.person_type AS type, p.organization_name AS org_name,
+               heat.value AS heat, churn.value AS churn_risk, lc.n AS msgs, {_LAST_DAYS} AS days,
+               {_OPEN_VALUE} AS open_value, {_OPEN_TASK} AS open_task
+        FROM cand JOIN core.persons p ON p.id = cand.id
+        {_SCORE_JOIN.format(a="churn", dim="churn_risk")}
+        {_SCORE_JOIN.format(a="heat", dim="heat")}
+        {_LAST_CONTACT.format(pid="p.id")}
+        WHERE p.org_id = :o AND p.deleted_at IS NULL AND p.merged_into_id IS NULL
+          AND NOT (p.person_type = ANY(:skip))
+          AND (COALESCE(churn.value, 0) >= :churn
+               OR (lc.n >= :msgs AND lc.last_at < now() - make_interval(days => :silent)))
+        ORDER BY churn.value DESC NULLS LAST, {_LAST_DAYS} DESC NULLS LAST, p.display_name
+        LIMIT :n"""),  # noqa: S608
+        {"o": org_id, "skip": list(CARE_EXCLUDED_TYPES), "churn": CARE_CHURN_MIN, "msgs": CARE_MIN_MSGS,
+         "silent": CARE_SILENT_DAYS, "win": CARE_WINDOW_DAYS, "n": n, "open_st": list(OPEN_STAGES)})).all()
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        churn = r.churn_risk is not None and float(r.churn_risk) >= CARE_CHURN_MIN
+        quiet = _days_text(int(r.days)) if r.days is not None else "Chưa có tin nào"
+        out.append({"id": str(r.id), "name": _text(r.name, 80) or "Chưa có tên",
+                    "subtitle": _person_subtitle(r.type, r.org_name),
+                    "metric_text": f"Có thể sắp rời · {quiet}" if churn else quiet, "to": profile_link(r.id),
+                    "reason": "churn" if churn else "silent", **_person_extras(r),
+                    **({"has_open_task": True} if r.open_task else {})})
+    return out
 
 
 # ─── GET /owner/tasks ────────────────────────────────────────────────────────────────────────────────────────────

@@ -143,7 +143,7 @@ describe('v0.1.36 — dải "Cần Sếp xử lý" đầu Tổng quan', () => {
     const strip = await screen.findByTestId('needs-boss');
     const noModel = within(strip).getByTestId('no-model');
     expect(noModel).toHaveTextContent('Chưa có model');
-    expect(within(noModel).getByRole('link', { name: /Chọn model/ })).toHaveAttribute('href', '/guide/4');
+    expect(within(noModel).getByRole('link', { name: /Chọn model/ })).toHaveAttribute('href', '/setup?buoc=nguon-ai');
   });
 
   it('(d2) Auditor (system.read, không system.manage) ⇒ không gọi /system/health từ Tổng quan, không có dải/nút hành động', async () => {

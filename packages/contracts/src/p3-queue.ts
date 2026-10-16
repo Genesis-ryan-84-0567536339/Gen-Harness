@@ -317,6 +317,8 @@ export function queueEndpoints(r: ApiClient['request']) {
           status?: TaskStatus;
           priority?: TaskPriority;
           overdue?: boolean;
+          /** ISO — chỉ việc CÓ hạn và hạn < mốc này (lọc ở máy chủ, không phụ thuộc trang đầu). */
+          due_before?: string;
           assignee_user_id?: string;
           cursor?: string;
           limit?: number;

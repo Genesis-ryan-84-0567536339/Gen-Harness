@@ -305,7 +305,11 @@ export function createEndpoints(client: ApiClient) {
     diagnostics: diagnosticsEndpoints(r),
     /** v0.1.55 (G1): "Chế độ tiêu chuẩn" / "Về mặc định" — chỉ Owner. */
     defaults: defaultsEndpoints(r),
-    /** v0.1.55 (G5): Mặt tiền Owner `/owner/*` — chỉ đọc, chỉ Owner. */
+    /**
+     * v0.1.55 (G5) + v0.1.59 (G1): Mặt tiền Owner `/owner/*` — chỉ đọc, chỉ Owner, không gọi model:
+     * `api.owner.today() · brief(id?) · feed(q) · feedContext(id) · relations(list) · insights(range, only?) ·
+     * proposals() · tasks()`.
+     */
     owner: ownerEndpoints(r),
   };
 }

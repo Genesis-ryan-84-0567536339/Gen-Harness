@@ -483,6 +483,7 @@ LEFT JOIN core.channels gc ON gc.id = g.channel_id
 
 @router.get("/tasks")
 async def list_tasks(status: str | None = None, priority: str | None = None, overdue: bool | None = None,
+                     due_before: datetime | None = Query(None, description="Chỉ việc CÓ hạn và hạn < mốc này (ISO)"),
                      assignee_user_id: uuid.UUID | None = None, cursor: str | None = None,
                      limit: int = Query(50, ge=1, le=200), user: service.CurrentUser = Depends(current_user),
                      db: AsyncSession = DB) -> dict[str, Any]:
@@ -495,12 +496,16 @@ async def list_tasks(status: str | None = None, priority: str | None = None, ove
         conds.append("t.priority = :p")
     if overdue:
         conds.append("t.due_at IS NOT NULL AND t.due_at < now() AND t.status NOT IN ('done', 'cancelled')")
+    if due_before is not None:      # "Việc hôm nay" của Mặt tiền: lọc hạn ở máy chủ, không phụ thuộc trang đầu
+        conds.append("t.due_at IS NOT NULL AND t.due_at < :db")
     if assignee_user_id:
         conds.append("t.assignee_user_id = :a")
     if cursor:
         conds.append("t.created_at < :c")
     sql_where = " AND ".join(conds)
-    base = {"o": user.org_id, "s": status, "p": priority, "a": assignee_user_id, "c": qsvc.when(cursor), **params}
+    due_ts = due_before.replace(tzinfo=UTC) if due_before is not None and due_before.tzinfo is None else due_before
+    base = {"o": user.org_id, "s": status, "p": priority, "a": assignee_user_id, "c": qsvc.when(cursor), "db": due_ts,
+            **params}
     total = (await db.execute(text(f"SELECT count(*) FROM biz.tasks t WHERE {sql_where}"), base)).scalar_one()  # noqa: S608
     rows = (await db.execute(text(_TASK_SELECT + f" WHERE {sql_where} ORDER BY t.created_at DESC LIMIT :n"),  # noqa: S608
                              {**base, "n": limit + 1})).all()

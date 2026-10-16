@@ -18,6 +18,7 @@
 """
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -483,6 +484,24 @@ async def save(redis: Redis, p: dict[str, Any], ttl: int = PROPOSAL_TTL_S) -> No
 async def load(redis: Redis, pid: Any) -> dict[str, Any] | None:
     raw = await redis.get(key(pid))
     return orjson.loads(raw) if raw is not None else None
+
+
+async def load_many(redis: Redis, pids: Sequence[Any]) -> list[tuple[dict[str, Any] | None, int]]:
+    """Đọc NHIỀU đề xuất trong MỘT lượt Redis (pipeline GET + TTL, không giao dịch): [(đề xuất | None, TTL giây)] đúng
+    thứ tự `pids`. TTL ≤ 0 = không còn hạn / không có khoá. Dùng cho `GET /owner/today|proposals` (trước đây 2 lượt
+    tuần tự cho MỖI đề xuất)."""
+    if not pids:
+        return []
+    pipe = redis.pipeline(transaction=False)
+    for pid in pids:
+        pipe.get(key(pid))
+        pipe.ttl(key(pid))
+    got = await pipe.execute()
+    out: list[tuple[dict[str, Any] | None, int]] = []
+    for i in range(len(pids)):
+        raw, ttl = got[2 * i], got[2 * i + 1]
+        out.append((orjson.loads(raw) if raw is not None else None, int(ttl or 0)))
+    return out
 
 
 # ── Thực hiện sau khi người dùng xác nhận ──

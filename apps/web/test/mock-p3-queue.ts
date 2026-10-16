@@ -357,7 +357,7 @@ export function createMock(opts: P3Options) {
 
     if (p === '/refinery/triage/skipped' && m === 'GET') {
       if (!has(ctx, 'queue.read')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
-      const limit = Number(url.searchParams.get('limit') ?? 50);
+      const limit = Number(url.searchParams.get('limit') ?? Number.POSITIVE_INFINITY);
       return reply(200, {
         items: skipped.slice(0, limit).map((i) => ({ ...i, text: ctx.owner ? i.text : (maskText(i.text) ?? '') })),
         total: skipped.length, days: 30,
@@ -490,13 +490,17 @@ export function createMock(opts: P3Options) {
         const status = url.searchParams.get('status');
         const priority = url.searchParams.get('priority');
         const overdue = url.searchParams.get('overdue');
+        const dueBefore = url.searchParams.get('due_before');
+        const limit = Number(url.searchParams.get('limit') ?? Number.POSITIVE_INFINITY);
         const assignee = url.searchParams.get('assignee_user_id');
         let rows = tasks.map(taskVisible);
         if (status) rows = rows.filter((t) => t.status === status);
         if (priority) rows = rows.filter((t) => t.priority === priority);
         if (overdue === 'true') rows = rows.filter((t) => t.overdue);
+        if (dueBefore) rows = rows.filter((t) => !!t.due_at && Date.parse(t.due_at) < Date.parse(dueBefore)); // như máy chủ: chỉ việc CÓ hạn
         if (assignee) rows = rows.filter((t) => t.assignee?.id === assignee);
-        return reply(200, { items: rows, next_cursor: null, total: rows.length });
+        const total = rows.length;
+        return reply(200, { items: limit > 0 ? rows.slice(0, limit) : rows, next_cursor: null, total });
       }
       if (seg.length === 1 && m === 'POST') {
         if (!has(ctx, 'queue.act')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');

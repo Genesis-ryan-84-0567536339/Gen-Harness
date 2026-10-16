@@ -1264,6 +1264,11 @@ export function createPhase2(opts: Phase2Options) {
             }
           : { ok: false, latency_ms: null, models: [], error: /endpoint|127\.0\.0\.1|localhost/i.test(pv.endpoint ?? '') ? 'mạng: All connection attempts failed' : 'HTTP 401: API key not valid', at: iso(Date.now()) };
         pv.last_test = result;
+        // Như api thật (v0.1.58, mrouter.adopt_probed_model): nguồn CLI gọi thử xanh mà chưa có dòng model ⇒ lưu cặp vừa chạy được.
+        if (ok && (pv.kind === 'antigravity_cli' || pv.kind === 'claude_code_cli') && !pv.models.length) {
+          const probe = (result as { probe_model?: string }).probe_model ?? models[0];
+          if (probe) pv.models.push({ id: randomUUID(), model_name: probe, daily_quota: null, used_today: 0 });
+        }
         reply(200, result);
         return true;
       }
@@ -1409,11 +1414,12 @@ export function createPhase2(opts: Phase2Options) {
             id: randomUUID(), email: cliProfiles.length ? `genesis.ops${cliProfiles.length}@gmail.com` : 'a@example.test',
             plan_label: 'Google AI Pro · token 0 ₫', active: true, expires_at: iso(Date.now() + 24 * 3600_000), state: 'ok',
           };
-          // Như api thật (gh.providers.cli._finish): tài khoản vừa đăng nhập thành tài khoản đang dùng.
+          // Như api thật (gh.providers.cli._finish): tài khoản vừa đăng nhập thành tài khoản đang dùng; nguồn CLI mới tạo có 0 dòng model
+          // và chưa có last_test — dòng model chỉ xuất hiện sau lượt gọi thử xanh (POST /providers/{id}/test → adopt_probed_model).
           cliProfiles.forEach((x) => (x.active = false));
           cliProfiles.push(profile);
           if (!providers.some((x) => x.kind === 'antigravity_cli')) {
-            providers.unshift({ id: randomUUID(), kind: 'antigravity_cli', name: 'Antigravity Brain', endpoint: null, failover_rank: 0, enabled: true, auth_state: 'ok', keys: [], models: [{ id: randomUUID(), model_name: 'gemini-2.5-pro', daily_quota: 3200, used_today: 0 }] });
+            providers.unshift({ id: randomUUID(), kind: 'antigravity_cli', name: 'Antigravity Brain', endpoint: null, failover_rank: 0, enabled: true, auth_state: 'ok', keys: [], models: [] });
           }
           cliEmit({ login_id: lg.login_id, status: 'done', profile });
         });

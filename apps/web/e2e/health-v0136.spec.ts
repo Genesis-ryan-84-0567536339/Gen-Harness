@@ -68,7 +68,8 @@ test.describe('v0.1.36 — Cần Sếp xử lý & Sức khoẻ hệ thống', ()
     await expect(noModel).toContainText('Chưa có model');
     await expect(strip.getByTestId('needs-boss-row')).toHaveCount(0);
     await noModel.getByRole('link', { name: /Chọn model/ }).click();
-    await expect(page).toHaveURL(/\/guide\/4$/);
+    // v0.1.59: mọi nút "Chọn model" mở màn Thiết lập nguồn AI.
+    await expect(page).toHaveURL(/\/setup\?buoc=nguon-ai$/);
   });
 
   test('cập nhật lỗi chỉ hiện MỘT lần ở Tổng quan (trong dải); thẻ đầy đủ có "Thử lại" chỉ ở Cài đặt › Sao lưu & cập nhật', async ({ page }) => {

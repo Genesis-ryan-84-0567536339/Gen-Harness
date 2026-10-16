@@ -19,3 +19,14 @@ export { toneColor, toneTint, type Tone } from './tone';
 export { cx } from './cx';
 export { Dialog, type DialogProps } from './Dialog';
 export { FilterSelect, type FilterOption, type FilterSelectProps } from './FilterSelect';
+
+// v0.1.59 (G2) — bộ thành phần Mặt tiền (CSS: owner-kit.css, import một dòng ở apps/web/src/main.tsx).
+export { StatTile, type StatTileProps, type StatDelta } from './StatTile';
+export { DataTable, type DataTableProps, type DataColumn } from './DataTable';
+export { TrendChart, type TrendChartProps, type TrendSeries } from './TrendChart';
+export { Sparkline, type SparklineProps } from './Sparkline';
+export { HBar, type HBarProps, type HBarItem } from './HBar';
+export { Badge, type BadgeProps, type BadgeKind, type BadgeTone, type OwnerLevel } from './Badge';
+export { DetailSheet, type DetailSheetProps } from './DetailSheet';
+export { ListRow, KitLink, type ListRowProps, type KitLinkProps } from './ListRow';
+export { useMediaQuery, setKitNavigator, kitNavigate } from './useMediaQuery';

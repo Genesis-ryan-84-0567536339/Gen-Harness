@@ -217,6 +217,18 @@ test('Thẻ ghi Phiên mà Owner khác đã ghi: mở từ chuông thấy "Thẻ
   expect((await khoCalls(page.request)).calls).toBe(0);
 });
 
+test('Chuông không mất thông báo phát lúc ổ cắm realtime còn đang kết nối: ổ cắm mở muộn ⇒ chuông tự tải lại và có "Gen đề xuất ghi Kho · Phiên"', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.routeWebSocket(/\/api\/v1\/ws/, async (ws) => {
+    await new Promise((r) => setTimeout(r, 1500)); // máy chậm: ổ cắm mở sau khi thông báo đã phát
+    ws.connectToServer();
+  });
+  await page.goto('/overview');
+  await p3Hook(page.request, 'gen', 'khoRelease', { version: 'v0.1.50' });
+  await page.getByRole('button', { name: /^Thông báo/ }).click();
+  await expect(page.getByRole('dialog', { name: 'Thông báo' }).locator('.nt-item', { hasText: 'Gen đề xuất ghi Kho · Phiên v0.1.50' })).toBeVisible();
+});
+
 test('Kho từ chối (HUB_WRITE_REJECTED) ⇒ câu nêu ĐÚNG lý do Kho + "Bấm Sửa"; "Chi tiết kỹ thuật" có mã + lý do; thẻ còn chờ, không ghi', async ({ page }) => {
   test.setTimeout(90_000);
   await hubSim(page.request, { kho: 'rejected' });

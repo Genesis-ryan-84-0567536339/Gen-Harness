@@ -398,6 +398,15 @@ export function applyEvent(qc: QueryClient, e: RealtimeEvent): void {
 let client: RealtimeClient | null = null;
 let users = 0;
 
+/**
+ * Mỗi lần ổ cắm MỞ (lần đầu lẫn sau khi nối lại): tải lại chuông thông báo. Tin `notification.new` phát lúc ổ cắm còn
+ * đang kết nối / đang đứt không bao giờ tới trình duyệt, còn danh sách chuông chỉ tự làm mới mỗi 120 giây ⇒ không có
+ * bước này thì chuông thiếu thông báo (vd bản mới vừa lên, Gen đề xuất ghi Phiên) cho tới lần tải kế.
+ */
+export function onSocketStatus(qc: QueryClient, s: RealtimeStatus): void {
+  if (s === 'open') void qc.invalidateQueries({ queryKey: qk.notifications });
+}
+
 const PUBLIC_PREFIXES = ['/login', '/setup'];
 
 export const WS_ORIGIN_TEXT = 'Không nhận được cập nhật trực tiếp — mở Console đúng địa chỉ cài đặt (tên miền/cổng lúc cài) rồi tải lại trang.';
@@ -419,6 +428,7 @@ function sharedClient(): RealtimeClient {
     client = new RealtimeClient({
       url: () => wsUrl(),
       onEvent: (e) => applyEvent(queryClient, e),
+      onStatus: (s) => onSocketStatus(queryClient, s),
       onUnauthenticated: () => {
         if (PUBLIC_PREFIXES.some((p) => window.location.pathname.startsWith(p))) return;
         queryClient.clear();

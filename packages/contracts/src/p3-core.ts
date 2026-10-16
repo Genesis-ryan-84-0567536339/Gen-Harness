@@ -205,6 +205,8 @@ export function coreEndpoints(r: ApiClient['request']) {
         q: {
           status?: 'pending' | 'decided' | 'all';
           kind?: string;
+          /** Bỏ nháp đã "Tắt tiếng" (Mặt tiền Owner: số khớp `today.nav.decide`). */
+          hide_silenced?: boolean;
           cursor?: string;
           limit?: number;
         } = {},

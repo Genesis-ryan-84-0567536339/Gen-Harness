@@ -1,12 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
-import { MANAGER, OWNER, SETUP_TOKEN, apiCall, loginAs, loginAsOwner, resetMock } from './support';
+import { MANAGER, OWNER, SETUP_TOKEN, apiCall, expectOwnerFront, loginAs, loginAsOwner, resetMock } from './support';
 
 /**
  * v0.1.29 — mock, tất định (không có Facebook thật, không có trình duyệt từ xa thật):
  * - Tài khoản mạng xã hội: chỉ Owner; thêm tài khoản phải tích đủ 2 ô chấp nhận rủi ro + PIN; cửa sổ đăng nhập từ xa
  *   nhận khung hình, gửi phím, "Tôi đã đăng nhập xong" → Đang kết nối; Đọc ngay → mục đọc được (có mục đáng ngờ);
  *   Dừng tất cả → dải đỏ, Bật lại (PIN); Gỡ tài khoản.
- * - Bước 4 "Để sau": hộp cảnh báo → Hoàn tất được → Tổng quan hiện "Chưa có model" → Chọn model mở /guide/4.
+ * - Nguồn AI "Làm sau" (v0.1.59: link nhỏ ở màn Nguồn AI) → Hoàn tất được → Tổng quan hiện "Chưa có model" → Chọn model mở /setup?buoc=nguon-ai.
  */
 
 async function enterPinIfAsked(page: Page) {
@@ -89,8 +89,8 @@ test.describe('Tài khoản mạng xã hội (v0.1.29)', () => {
   });
 });
 
-test.describe('Bước 4 "Để sau" (v0.1.29)', () => {
-  test('cảnh báo → Hoàn tất → Tổng quan "Chưa có model" → Chọn model mở /guide/4', async ({ page }) => {
+test.describe('Bước Nguồn AI "Làm sau" (v0.1.29, v0.1.59)', () => {
+  test('Làm sau → Hoàn tất → Tổng quan "Chưa có model" → Chọn model mở /setup?buoc=nguon-ai', async ({ page }) => {
     test.setTimeout(120_000);
     await page.setViewportSize({ width: 1440, height: 900 });
     await resetMock(page.request, 'fresh');
@@ -100,23 +100,24 @@ test.describe('Bước 4 "Để sau" (v0.1.29)', () => {
     });
     await apiCall(page, 'PUT', '/setup/steps/3', { org_name: 'Genesis Trading', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND', self_name: 'Anh', bot_calls_me: 'Sếp' });
     await page.goto('/setup');
-    await expect(page.getByRole('heading', { name: 'Bộ não AI' })).toBeVisible();
-    await page.getByRole('button', { name: 'Để sau' }).click();
-    const dlg = page.getByRole('dialog', { name: 'Để sau bước Bộ não AI?' });
-    await expect(dlg).toContainText('Gen (trợ lý) sẽ không trả lời');
-    await dlg.getByRole('button', { name: 'Vẫn để sau' }).click();
-    await expect(page.getByRole('heading', { name: 'Kết nối kênh' })).toBeVisible();
-    for (const n of [5, 6, 7, 8, 9, 10, 11]) await apiCall(page, 'POST', `/setup/steps/${n}/skip`);
-    await page.goto('/setup');
-    await expect(page.getByTestId('no-model')).toBeVisible();
-    await page.getByRole('button', { name: /Vào Console/ }).click();
-    // v0.1.55 (G5): Owner "/" ⇒ Mặt tiền /owner; thẻ "Chưa có model" nằm ở Tổng quan (Console).
-    await expect(page).toHaveURL(/\/owner$/);
+    await expect(page.getByRole('heading', { name: 'Nối nguồn AI cho Gen' })).toBeVisible();
+    // v0.1.59: "Làm sau" là link nhỏ kèm câu nói rõ hậu quả (không còn hộp cảnh báo).
+    await expect(page.getByText('Gen sẽ chưa tóm tắt được bản tin.')).toBeVisible();
+    await page.getByRole('button', { name: 'Làm sau' }).click();
+    await expect(page.getByRole('heading', { name: 'Xong rồi, thưa Sếp' })).toBeVisible();
+    await expect(page.getByTestId('setup-done-ai')).toContainText('Làm sau — Gen sẽ chưa tóm tắt được bản tin');
+    await page.getByRole('button', { name: /Vào Mặt tiền/ }).click();
+    // Owner "/" ⇒ Mặt tiền /owner (Tình báo là trang đầu); thẻ "Chưa có model" nằm ở Tổng quan (Console).
+    await expectOwnerFront(page);
     await page.goto('/overview');
     const banner = page.getByTestId('no-model');
     await expect(banner).toContainText('Chưa có model');
     await banner.getByRole('link', { name: /Chọn model/ }).click();
-    await expect(page).toHaveURL(/\/guide\/4$/);
+    await expect(page).toHaveURL(/\/setup\?buoc=nguon-ai$/);
+    await expect(page.getByRole('heading', { name: 'Đổi nguồn AI' })).toBeVisible();
+    // Form Bộ não AI đầy đủ vẫn ở /guide/4 (nhiều màn dựa vào).
+    await page.goto('/guide/4');
     await expect(page.getByRole('heading', { name: 'Bộ não AI' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Cách nhanh: Thiết lập nguồn AI 2 phút' })).toHaveAttribute('href', '/setup?buoc=nguon-ai');
   });
 });

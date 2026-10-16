@@ -705,6 +705,15 @@ describe('hợp đồng gen.ts ↔ mock-gen-coach', () => {
     expect(keys()).toEqual(['model.missing', 'boss.hub', 'boss.remote']);
   });
 
+  it('v0.1.59: model.missing có link /setup?buoc=nguon-ai và không có target ⇒ "Chỉ cho em" đi thẳng tới màn Thiết lập nguồn AI', () => {
+    const mock = createCoachMock();
+    mock.hooks.scenario({ extras: ['model.missing'] } as never);
+    const t = (call(mock, 'GET', '/gen/coach/today').body as CoachToday).todos.find((x) => x.key === 'model.missing')!;
+    expect(t.link).toBe('/setup?buoc=nguon-ai');
+    expect(t.target ?? null).toBeNull();
+    expect(showMe(t)).toEqual([{ type: 'go', to: '/setup?buoc=nguon-ai' }]);
+  });
+
   it('mark_shown tắt unseen; vai trò khác Owner ⇒ 403 FORBIDDEN', () => {
     const mock = createCoachMock();
     expect((call(mock, 'GET', '/gen/coach/today').body as CoachToday).unseen).toBe(true);
