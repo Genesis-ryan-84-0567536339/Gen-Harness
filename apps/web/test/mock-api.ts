@@ -16,7 +16,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { randomUUID } from 'node:crypto';
-import type { AccessInfo, AgentIdentity, BossCheck, HealthIssue, HubLink, SocialAccount, SystemHealth, SystemUpdate } from '@gen-harness/contracts';
+import type { AccessInfo, AgentIdentity, BossCheck, DraftDetail, HealthIssue, HubLink, Match, SocialAccount, SystemHealth, SystemUpdate } from '@gen-harness/contracts';
 import { createPhase2, maskText, seedRows, type P2Ctx } from './mock-phase2';
 import { createMock as createP3Core } from './mock-p3-core';
 import { createMock as createP3Queue } from './mock-p3-queue';
@@ -38,7 +38,7 @@ import { createMock as createGen } from './mock-gen';
 import { createMock as createGenV0150, type KhoWriteReq } from './mock-gen-v0150';
 import { createMock as createGenCoach, type GenCoachOptions } from './mock-gen-coach';
 import { createMock as createDefaults } from './mock-defaults';
-import { createMock as createOwner } from './mock-owner';
+import { createMock as createOwner, type OwnerDataMode } from './mock-owner';
 import { acceptWebSocket, type MockSocket } from './mock-ws';
 import { buildScreenTree, SCREEN_BY_KEY } from '../../../packages/contracts/src/screens';
 import type { NavDomain, NavItem, SetupState } from '../../../packages/contracts/src/schema';
@@ -100,6 +100,12 @@ export interface MockOptions {
   mustChangePassword?: boolean;
   /** v0.1.42: đã có ít nhất 1 nhân viên (mặc định true) — false thì Đánh giá/Chăm sóc ẩn trên thanh bên. */
   staff?: boolean;
+  /**
+   * v0.1.59 (G1): chế độ dữ liệu Mặt tiền `/owner/*` — 'full' (mặc định) · 'empty' (chưa có tin, insights.state='empty') ·
+   * 'collecting' (insights.state='collecting', còn 5 ngày) · 'nochannel' (channels_connected=0). `vite.config.ts` đọc
+   * `MOCK_OWNER_DATA`; `__mock/reset` dựng lại theo giá trị này; đổi lúc chạy bằng `__mock/p3/owner/data {mode}`.
+   */
+  ownerData?: OwnerDataMode;
 }
 
 // RBAC as apps/api gh/auth/rbac.py seeds it: Owner, Manager, Operator, Agent NV, Auditor.
@@ -487,7 +493,21 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
   recordKhoWrite = bossChecks.hooks.recordKhoWrite as () => void;
   recordTelegram = bossChecks.hooks.recordTelegram as (o: TelegramOutcome) => BossCheck;
   forgetTelegram = bossChecks.hooks.forgetTelegram as () => void;
+  // v0.1.59: tạo trước `phase3` để mock Mặt tiền đọc được gợi ý ghép (match-1…) — cùng một đối tượng với `phase3.market`.
+  const p3Market = createP3Market({ fresh: opts.setup === 'fresh', emit: broadcast, pushDraft: p3Core.hooks.push as (d: unknown) => unknown, findUser });
   const phase3 = {
+    // v0.1.55 (G5) + v0.1.59 (G1): Mặt tiền Owner (/owner/*, chỉ đọc, chỉ Owner) — tiến độ lấy từ "Việc Sếp cần làm"; nháp chờ
+    // duyệt lấy từ mock core (duyệt xong thì biến khỏi bản tin / dòng tin / số đếm); gợi ý ghép lấy từ mock market. Đứng TRƯỚC `gen`
+    // vì còn trả lời `POST /gen/proposals/{prop-…}/confirm|cancel` của chính nó (mock-gen trả 404 cho mọi đường `/gen/*` lạ).
+    owner: createOwner({
+      fresh: opts.setup === 'fresh',
+      emit: broadcast,
+      boss: bossChecks.hooks.overview as never,
+      ownerData: opts.ownerData,
+      drafts: () => (p3Core.hooks.drafts as () => DraftDetail[])(),
+      pushDraft: (d) => (p3Core.hooks.push as (d: DraftDetail) => unknown)(d),
+      matches: () => (p3Market.hooks.matches as () => Match[])(),
+    }),
     // v0.1.50: `/gen/memory*` TRƯỚC `gen` — mock-gen trả 404 cho mọi đường `/gen/*` lạ.
     genMemory: genV0150,
     // v0.1.54: Gen hướng dẫn (/gen/coach/*) TRƯỚC `gen` — mock-gen trả 404 cho mọi đường `/gen/*` lạ. Trạng thái ở bộ nhớ module (mock-gen-coach.ts).
@@ -502,8 +522,6 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     diagnostics: createDiagnostics({ fresh: opts.setup === 'fresh', emit: broadcast }),
     // v0.1.55 (G1): "Chế độ tiêu chuẩn" / "Về mặc định" (/defaults*, chỉ Owner).
     defaults: createDefaults({ fresh: opts.setup === 'fresh', emit: broadcast }),
-    // v0.1.55 (G5): Mặt tiền Owner (/owner/*, chỉ đọc, chỉ Owner) — tiến độ lấy từ "Việc Sếp cần làm".
-    owner: createOwner({ fresh: opts.setup === 'fresh', emit: broadcast, boss: bossChecks.hooks.overview as never }),
     // agents TRƯỚC core: `GET /agents/decisions` cần trả dữ liệu thật ("agent đã nói gì") — core.handle() có
     // một stub rỗng cho cùng đường (chưa màn nào dùng tới trước giai đoạn 4) nên phải chặn trước nó.
     agents: p4Agents,
@@ -528,7 +546,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     relations: p3Relations,
     graph: createP3Graph({ fresh: opts.setup === 'fresh', emit: broadcast }),
     // market "Giới thiệu hai bên" tạo bản nháp thật qua core.hooks.push — cùng cơ chế create_draft dùng chung ở backend.
-    market: createP3Market({ fresh: opts.setup === 'fresh', emit: broadcast, pushDraft: p3Core.hooks.push as (d: unknown) => unknown, findUser }),
+    market: p3Market,
     // api & model (PLAN 4.2): bindings cần biết danh sách agent (p4Agents) + model theo provider (phase2 dùng chung).
     api: createP4Api({
       fresh: opts.setup === 'fresh', emit: broadcast,
@@ -1463,6 +1481,10 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
  *   /api/v1/__mock/nightly {"update"?,"health"?} v0.1.53 (F-99): `update` trộn vào `GET /system/update` (state/stalled_reason/nightly/
  *                           nightly_candidates/auto_update_enabled/latest/published_at…), `health` đặt khối nightly của `GET /system/health`
  *   /api/v1/__mock/p3/{cụm}/{hook}  body → `phase3[cụm].hooks[hook](body)`; trả JSON kết quả (404 nếu không có)
+ *       v0.1.59 (G1) Mặt tiền Owner: `/__mock/p3/owner/data {"mode":"full"|"empty"|"collecting"|"nochannel"}` đổi chế độ dữ liệu
+ *       lúc chạy (gọi bằng `p3Hook(request, 'owner', 'data', { mode })`); `/__mock/p3/owner/scenario {"mode":"data"|"empty"|"error",
+ *       "only"?}` ép một đường rỗng/lỗi 500; `/__mock/p3/owner/state` đọc số lần gọi; `/__mock/p3/owner/reset`. Chế độ ban đầu theo
+ *       `createMockApi({ ownerData })` (`MOCK_OWNER_DATA=empty|collecting|nochannel` ở vite.config.ts); `__mock/reset` dựng lại theo đó.
  */
 export function createMockApi(opts: MockOptions = {}) {
   const clients = new Set<MockSocket>();
