@@ -672,7 +672,7 @@ export interface RealtimeEventMap {
   'channel.qr': ChannelQrEvent;
   'channel.status': ChannelStatusEvent;
   'group.discovered': GroupDiscoveredEvent;
-  /** v0.1.71: sự kiện kênh cho Nhật ký lắng nghe — chỉ tín hiệu (xem listenLog.ts). */
+  /** v0.1.68: sự kiện kênh cho Nhật ký lắng nghe — chỉ tín hiệu (xem listenLog.ts). */
   'listen.event': ListenEventSignal;
   'cli.login': CliLoginEvent;
   header: HeaderEvent;

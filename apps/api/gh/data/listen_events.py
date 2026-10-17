@@ -1,4 +1,4 @@
-"""Sự kiện trên kênh cho "Nhật ký lắng nghe" (v0.1.71): ghi nhẹ vào `ops.listen_events`, phát WebSocket `listen.event`.
+"""Sự kiện trên kênh cho "Nhật ký lắng nghe" (v0.1.68): ghi nhẹ vào `ops.listen_events`, phát WebSocket `listen.event`.
 
 Nơi ghi (ingest.py, system_api/routes.py) chỉ gọi `record(...)` TRONG transaction đang chạy; dòng chờ phát được cất ở
 `db.info["listen_pub"]`, sau commit người gọi `await publish_pending(redis, org_id, pending)` (cùng khuôn "ghi rồi mới

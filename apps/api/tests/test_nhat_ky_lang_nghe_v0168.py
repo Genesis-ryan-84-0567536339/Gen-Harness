@@ -1,4 +1,4 @@
-"""v0.1.71 — Nhật ký lắng nghe: dòng thời gian gộp tin + sự kiện kênh, "hệ thống đã làm gì", phân trang con trỏ,
+"""v0.1.68 — Nhật ký lắng nghe: dòng thời gian gộp tin + sự kiện kênh, "hệ thống đã làm gì", phân trang con trỏ,
 lọc, quyền (403, 1-1 chỉ Owner/người phụ trách, che số, tìm chữ không dò được số bị che), sự kiện WebSocket."""
 
 import uuid
@@ -299,7 +299,7 @@ async def test_old_messages_without_recorded_mode_fall_back_to_current_mode(owne
     org = await org_id(db)
     await listen(db, org, "g1", mode="proactive")
     [seed] = await put(sessionmaker(), org, msg("Tin mẫu"))
-    # Tin vào kho TRƯỚC v0.1.71 (không có `listen_mode`): bảng thô chỉ-INSERT nên dựng bằng một INSERT thẳng.
+    # Tin vào kho TRƯỚC v0.1.68 (không có `listen_mode`): bảng thô chỉ-INSERT nên dựng bằng một INSERT thẳng.
     raw = uuid.uuid4()
     await db.execute(text("""
         INSERT INTO raw.events (id, org_id, received_at, occurred_at, channel_id, group_id, sender_identity_id,

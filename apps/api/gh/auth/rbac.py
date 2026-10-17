@@ -107,7 +107,7 @@ SCREEN_PERMISSION: dict[str, tuple[str, ...]] = {
     "deals": ("opportunity.read",),
     "people": ("people_review.read",),
     "care": ("care.read",),
-    "listenlog": ("data.read",),         # v0.1.71: Nhật ký lắng nghe (cùng quyền với Kho thô)
+    "listenlog": ("data.read",),         # v0.1.68: Nhật ký lắng nghe (cùng quyền với Kho thô)
     "raw": ("data.read",),
     "rules": ("data.read",),
     "clean": ("data.read",),

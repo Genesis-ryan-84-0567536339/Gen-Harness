@@ -1,4 +1,4 @@
-"""Nhật ký lắng nghe (v0.1.71): MỘT dòng thời gian gộp tin nghe được (Kho thô) + sự kiện trên mọi kênh, kèm "hệ thống đã
+"""Nhật ký lắng nghe (v0.1.68): MỘT dòng thời gian gộp tin nghe được (Kho thô) + sự kiện trên mọi kênh, kèm "hệ thống đã
 làm gì" (sàng lọc, quyết định của agent trực, bản nháp ở Bàn làm việc). Chỉ ĐỌC — không ghi, không lách quyền:
 
 - Quyền vào màn = `data.read` (như Kho thô). Tin nhóm theo phạm vi `data.read` của vai (`Scope.group_id_sql`).

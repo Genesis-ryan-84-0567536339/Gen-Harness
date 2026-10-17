@@ -112,7 +112,7 @@ async def upsert_group(db: AsyncSession, org_id: uuid.UUID, channel: Any, extern
 
 async def upsert_group_ex(db: AsyncSession, org_id: uuid.UUID, channel: Any, external_id: str, name: str | None,
                           member_count: int | None = None, *, quiet: bool = False) -> tuple[Any, bool]:
-    """Như `upsert_group` nhưng trả thêm cờ "vừa tạo". v0.1.71 (Nhật ký lắng nghe): nhóm MỚI ghi sự kiện `group_new`
+    """Như `upsert_group` nhưng trả thêm cờ "vừa tạo". v0.1.68 (Nhật ký lắng nghe): nhóm MỚI ghi sự kiện `group_new`
     (kèm chế độ nghe nó tự vào), nhóm đổi tên ghi `group_renamed`; `quiet` tắt sự kiện (lần quét danh bạ đầu tiên)."""
     created = False
     row = (await db.execute(text("""SELECT id, code, name, listen_mode, left_at FROM core.groups
@@ -299,7 +299,7 @@ async def ingest_message(db: AsyncSession, org_id: uuid.UUID, p: dict[str, Any])
         {"id": event_id, "o": org_id, "r": received_at, "occ": _ts(p.get("occurred_at")), "c": channel.id,
          "g": group.id if group else None, "s": identity.id, "m": msg_id, "k": kind, "b": body,
          "pl": orjson.dumps(payload, default=str).decode(), "h": content_hash, "d": direction, "men": mentions,
-         # v0.1.71: chế độ nghe LÚC tin vào kho (nhóm: chế độ của nhóm; tin 1-1: silent | reply) cho Nhật ký lắng nghe.
+         # v0.1.68: chế độ nghe LÚC tin vào kho (nhóm: chế độ của nhóm; tin 1-1: silent | reply) cho Nhật ký lắng nghe.
          "lm": group.listen_mode if group is not None else dm})
     if new_direct:
         await lev.record(db, org_id, "direct_new", channel_id=channel.id, channel_type=channel.type,

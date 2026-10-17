@@ -262,7 +262,7 @@ async def channel_logout(type_: str, request: Request, user: service.CurrentUser
                            target_label=rows[0].account_label if rows else None,
                            detail={"sessions": [str(r.id) for r in rows]}, ip=user.ip)
     await health.clear(db, user.org_id, f"channel.down:{type_}")  # v0.1.36 (F-6a): Sếp chủ động đăng xuất
-    if rows:   # v0.1.71: dòng "Kênh … đã đăng xuất" cho Nhật ký lắng nghe
+    if rows:   # v0.1.68: dòng "Kênh … đã đăng xuất" cho Nhật ký lắng nghe
         await listen_events.record(db, user.org_id, "channel_ended", channel_id=ch.id, channel_type=type_,
                                    detail={"reason": "logged_out", "by": "owner"})
     await db.commit()

@@ -1,5 +1,5 @@
 /**
- * v0.1.71 — Nhật ký lắng nghe (màn): phần logic thuần, vẽ dòng tin + sự kiện + "hệ thống đã làm gì", ghi chú nhóm Không
+ * v0.1.68 — Nhật ký lắng nghe (màn): phần logic thuần, vẽ dòng tin + sự kiện + "hệ thống đã làm gì", ghi chú nhóm Không
  * nghe, "Xem thêm" theo con trỏ, lọc gửi đúng tham số cho máy chủ, 403 thân thiện, cập nhật trực tiếp qua WebSocket.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
