@@ -376,6 +376,18 @@ async def _reset_new_group_mode_if_account_changed(db: AsyncSession, redis: Redi
                                action="channel.new_group_mode_reset", target_type="channel", target_id=s.type,
                                detail={"from": before, "reason": "account_changed"})
         await sync_listen_sets(db, redis, org_id)   # cờ gh:bridge:new_group_mode:<kênh> của bridge theo mặc định mới
+        # Báo Sếp (chuông của Owner), không chỉ Nhật ký: nhóm mới của tài khoản này sẽ được LƯU tin chứ không còn
+        # «Hỏi Sếp» / «Không nghe» như Sếp đã chọn cho tài khoản cũ.
+        from gh import notifications
+
+        name = CHANNEL_NAME.get(s.type, s.type)
+        was = {"ask": "Hỏi Sếp", "off": "Không nghe"}.get(before, before)
+        await notifications.notify(
+            db, org_id, await notifications.owner_ids(db, org_id), kind="channel.new_group_mode_reset",
+            title=f"Kênh {name}: nhóm mới về Lắng nghe im lặng",
+            body=(f"Sếp vừa quét tài khoản {name} khác nên cách xử lý nhóm mới (trước: «{was}») về mặc định «Lắng nghe "
+                  "im lặng»: nhóm mới sẽ được lưu tin, không bao giờ trả lời. Muốn đổi, vào Kết nối › thẻ kênh."),
+            link="/connections", redis=redis)
 
 
 async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: uuid.UUID, type: str,

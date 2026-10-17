@@ -114,7 +114,7 @@ export const ACTION_LABEL: Record<string, string> = {
   'channel.session_reconnecting': 'Kênh chat bị ngắt, đang chờ nối lại',
   'channel.listen_direct_changed': 'Đổi chế độ tin nhắn riêng (1-1)',
   'channel.new_group_mode_changed': 'Đổi cách xử lý nhóm mới của kênh chat',
-  'channel.new_group_mode_reset': 'Nhóm mới của kênh chat về "Hỏi Sếp" (đổi tài khoản)',
+  'channel.new_group_mode_reset': 'Nhóm mới của kênh chat về "Lắng nghe im lặng" (đổi tài khoản)',
   'channel.groups_refresh': 'Làm mới danh sách nhóm của kênh chat',
   'notify.telegram.save': 'Lưu kết nối thông báo Telegram',
   'notify.telegram.test': 'Thử gửi thông báo Telegram',
