@@ -103,3 +103,56 @@ def test_resolution_is_not_called_inline(monkeypatch: pytest.MonkeyPatch) -> Non
     while not seen and time.monotonic() < end:
         time.sleep(0.02)
     assert seen and threading.get_ident() not in seen
+
+
+# ─── P3-4: X-Forwarded-Proto chỉ từ proxy tin cậy ──────────────────────────────────────────────────────────────
+# uvicorn `proxy_headers=False` (gói sửa review) bỏ luôn X-Forwarded-Proto ⇒ URL tuyệt đối api tự dựng (chuyển hướng
+# thêm dấu "/" của FastAPI) mang `http://` dù Sếp vào qua HTTPS. Nay middleware đặt scheme theo header — CHỈ khi kết
+# nối đến từ proxy tin cậy / loopback (cùng luật `client_ip`), không đụng `request.client`.
+
+def _mini_app() -> Any:
+    from fastapi import FastAPI, Request
+
+    from gh.middleware import TrustedForwardedProto
+
+    app = FastAPI()
+
+    @app.get("/muc/")
+    async def muc(request: Request) -> dict[str, Any]:
+        return {"scheme": request.url.scheme, "client": request.client.host if request.client else None}
+
+    app.add_middleware(TrustedForwardedProto)
+    return app
+
+
+async def _get(path: str, peer: str, proto: str | None) -> Any:
+    import httpx
+
+    t = httpx.ASGITransport(app=_mini_app(), client=(peer, 1234))
+    headers = {"X-Forwarded-Proto": proto} if proto else {}
+    async with httpx.AsyncClient(transport=t, base_url="http://gen.example") as c:
+        return await c.get(path, headers=headers, follow_redirects=False)
+
+
+async def test_forwarded_proto_from_trusted_proxy_sets_scheme(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(get_settings(), "trusted_proxies", "172.18.0.5")
+    r = await _get("/muc", "172.18.0.5", "https")
+    assert r.status_code == 307 and r.headers["location"] == "https://gen.example/muc/"
+    ok = await _get("/muc/", "172.18.0.5", "https")
+    assert ok.json() == {"scheme": "https", "client": "172.18.0.5"}           # IP kết nối giữ nguyên
+
+
+async def test_forwarded_proto_from_untrusted_peer_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(get_settings(), "trusted_proxies", "172.18.0.5")
+    r = await _get("/muc", "172.21.0.3", "https")                               # hộp agy trên agy-bus
+    assert r.headers["location"] == "http://gen.example/muc/"
+    bad = await _get("/muc/", "172.18.0.5", "javascript")                      # giá trị lạ: bỏ qua
+    assert bad.json()["scheme"] == "http"
+
+
+def test_api_app_installs_the_forwarded_proto_middleware() -> None:
+    from gh.app import create_app
+    from gh.middleware import TrustedForwardedProto
+
+    app = create_app(with_lifespan=False)
+    assert any(m.cls is TrustedForwardedProto for m in app.user_middleware)

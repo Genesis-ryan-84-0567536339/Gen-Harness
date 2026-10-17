@@ -36,6 +36,31 @@ REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 REQUEST_ID_HEADER = b"x-request-id"
 
 
+class TrustedForwardedProto:
+    """Review lần 2 v0.1.63 (P3-4): uvicorn chạy `proxy_headers=False` (không tin header chuyển tiếp của mọi kết nối)
+    nên mất X-Forwarded-Proto ⇒ URL tuyệt đối api tự dựng (vd chuyển hướng thêm "/" của FastAPI) mang `http://` dù
+    người dùng vào qua HTTPS. Middleware này đặt `scope["scheme"]` theo X-Forwarded-Proto (`http`/`https`; websocket
+    ⇒ `ws`/`wss`) CHỈ khi kết nối đến từ proxy tin cậy hoặc loopback (`gh.auth.deps._from_trusted_proxy` — cùng luật
+    với `client_ip`). Không đổi `scope["client"]` (IP kết nối thật)."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] in ("http", "websocket"):
+            proto = next((v for k, v in scope.get("headers") or () if k == b"x-forwarded-proto"), b"")
+            proto = proto.split(b",")[0].strip().lower()
+            if proto in (b"http", b"https"):
+                from gh.auth.deps import _from_trusted_proxy
+
+                client = scope.get("client")
+                if _from_trusted_proxy(client[0] if client else None):
+                    https = proto == b"https"
+                    scheme = ("wss" if https else "ws") if scope["type"] == "websocket" else proto.decode()
+                    scope = {**scope, "scheme": scheme}
+        await self.app(scope, receive, send)
+
+
 def new_request_id() -> str:
     return uuid.uuid4().hex[:16]
 

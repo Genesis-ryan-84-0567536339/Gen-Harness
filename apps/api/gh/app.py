@@ -51,7 +51,14 @@ from gh.gen.coach.routes import router as coach_router
 from gh.gen.routes import router as gen_router
 from gh.hub_link.routes import router as hub_router
 from gh.mcp_api.routes import router as mcp_router
-from gh.middleware import ActionLogGuard, RequestIdMiddleware, SameOriginFrame, SessionCookieRenewal, SetupGate
+from gh.middleware import (
+    ActionLogGuard,
+    RequestIdMiddleware,
+    SameOriginFrame,
+    SessionCookieRenewal,
+    SetupGate,
+    TrustedForwardedProto,
+)
 from gh.notifications import router as notifications_router
 from gh.owner.routes import router as owner_router
 from gh.plugins_api.routes import router as plugins_router
@@ -262,6 +269,7 @@ def create_app(*, with_lifespan: bool = True, expose_docs: bool | None = None) -
     app.add_middleware(SameOriginFrame)  # cả 428 của SetupGate cũng mang header khung cùng gốc
     # v0.1.44 (F-4b) NGOÀI CÙNG: Mã yêu cầu cho mọi phản hồi (kể cả 428/423/500) + lưới 500 problem+json.
     app.add_middleware(RequestIdMiddleware)
+    app.add_middleware(TrustedForwardedProto)  # ngoài cùng: mọi lớp trong thấy đúng scheme (P3-4, review lần 2)
     return app
 
 
