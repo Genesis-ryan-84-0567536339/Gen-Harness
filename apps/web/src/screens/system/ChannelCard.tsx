@@ -15,7 +15,7 @@ import { Bar, CardError, InlineError, SkeletonLines } from '../common';
 import { ConnectionStatusPill } from '../connections/ConnectionStatusPill';
 import { useSystemHealth } from './queries';
 import { channelConnStatus } from '../connections/connectionsModel';
-import { NewGroupModeSelect, NewGroupsBox, RefreshGroupsButton } from './NewGroupsBox';
+import { NewGroupModeSelect, NewGroupsBox, NewSilentGroupsNotice, RefreshGroupsButton } from './NewGroupsBox';
 import {
   BRIDGE_OFFLINE_TEXT,
   BRIDGE_OFFLINE_TITLE,
@@ -248,7 +248,10 @@ export function ChannelCard({ channel, canManage, large }: { channel: Channel; c
       {showQr ? <QrBlock channel={c} large={large} /> : null}
 
       {!showQr && isQrChannel(c) && c.installed && c.state === 'active' ? (
-        <NewGroupsBox channel={c} canManage={canManage} onOpenAll={() => setGroupsOpen(true)} />
+        <>
+          <NewSilentGroupsNotice channel={c} canManage={canManage} onOpenAll={() => setGroupsOpen(true)} />
+          <NewGroupsBox channel={c} canManage={canManage} onOpenAll={() => setGroupsOpen(true)} />
+        </>
       ) : null}
 
       {!showQr && (c.state === 'expired' || c.state === 'error') && c.error ? (
@@ -445,7 +448,7 @@ export function RiskWarningDialog({
         </div>
         <ul className="risk-list">
           <li>Dùng tài khoản Sếp sở hữu, không dùng tài khoản của nhân viên hay khách.</li>
-          <li>Gen chỉ lưu tin của nhóm Sếp đã chọn nghe — nhóm mới chờ Sếp chọn Im lặng hay Không nghe, chưa lưu tin nào.</li>
+          <li>Khi tài khoản được add vào một nhóm, Gen mặc định lắng nghe trong im lặng: lưu hết tin, không bao giờ trả lời (kể cả khi được tag). Sếp đổi từng nhóm hoặc chọn Không nghe được.</li>
           <li>Tin gửi đi phải qua duyệt và ranh giới tự trị, không gửi hàng loạt.</li>
           <li>Đăng xuất bất cứ lúc nào ở đây hoặc trong ứng dụng trên điện thoại.</li>
         </ul>
@@ -503,7 +506,7 @@ export function GroupsDialog({
       width={720}
       padded={false}
       title={`Nhóm ${channel.name}`}
-      kicker="Nhóm mới chờ Sếp chọn Im lặng hay Không nghe — chưa lưu tin nào cho tới khi Sếp chọn"
+      kicker="Nhóm mới mặc định vào Lắng nghe im lặng — lưu hết tin, không bao giờ trả lời (kể cả khi được tag)"
     >
       {showDirect ? (
         <div className="ch-direct">

@@ -14,26 +14,28 @@ import { BRIDGE_OFFLINE_TEXT, BRIDGE_OFFLINE_TITLE, NEW_GROUP_MODES, isQrChannel
 /** Tối đa bấy nhiêu nhóm hiện thẳng trong thẻ; còn lại mở bảng nhóm đầy đủ. */
 const SHOW_MAX = 4;
 
-/** Hai lựa chọn của nhóm mới (v0.1.65, quyết định Sếp): Im lặng = lưu tin, không trả lời · Không nghe = không lưu. */
+/** Hai lựa chọn của nhóm đang chờ (chỉ khi Sếp đặt «Nhóm mới: Hỏi Sếp»): Lắng nghe im lặng = lưu tin, không bao giờ trả lời · Không nghe = không lưu. */
 const CHOICES: Array<{ mode: SettableListenMode; label: string; icon: string }> = [
-  { mode: 'silent', label: 'Im lặng', icon: 'ph ph-eye' },
+  { mode: 'silent', label: 'Lắng nghe im lặng', icon: 'ph ph-eye' },
   { mode: 'off', label: 'Không nghe', icon: 'ph ph-bell-slash' },
 ];
 
 /**
- * Hộp "Nhóm mới — chọn Im lặng/Không nghe": hiện trên thẻ kênh khi có nhóm CHỜ chọn (`listen_mode = pending`) — ngay sau
- * khi nối kênh (bridge đồng bộ danh sách nhóm) và mỗi khi bridge phát hiện nhóm mới. Chưa chọn thì Gen không lưu tin nào
- * của nhóm đó; dù chọn gì, danh sách thành viên vẫn được ghi nhận (để hợp nhất danh tính, không lưu tin).
+ * Hộp "Nhóm mới — chọn Lắng nghe im lặng/Không nghe": CHỈ hiện khi Sếp đặt «Nhóm mới: Hỏi Sếp» (QD 17/10 — mặc định là tự
+ * vào Lắng nghe im lặng, không hỏi) và có nhóm CHỜ chọn (`listen_mode = pending`). Chưa chọn thì Gen không lưu tin nào của
+ * nhóm đó; dù chọn gì, danh sách thành viên vẫn được ghi nhận (để hợp nhất danh tính, không lưu tin). Máy chủ cũ (không có
+ * `new_group_mode`) vẫn hiện hộp khi có nhóm chờ.
  */
 export function NewGroupsBox({ channel, canManage, onOpenAll }: { channel: Channel; canManage: boolean; onOpenAll: () => void }) {
-  const enabled = isQrChannel(channel) && channel.installed && channel.state === 'active' && (channel.groups_pending ?? 1) > 0;
+  const asks = channel.new_group_mode === undefined || channel.new_group_mode === 'ask';
+  const enabled = isQrChannel(channel) && channel.installed && channel.state === 'active' && asks && (channel.groups_pending ?? 1) > 0;
   const pending = usePendingGroups(channel.type, enabled);
   const [failed, setFailed] = useState<unknown>(null);
-  // F1d — ô «Áp dụng cho các nhóm mới sau này»: chỉ hiện khi máy chủ có `new_group_mode`. Bật sẵn ở lần hỏi ĐẦU sau khi nối
-  // kênh (`new_group_asked` còn false); Sếp đã bấm tick/bỏ tick thì theo lựa chọn của Sếp.
+  // F1d — ô «Áp dụng cho các nhóm mới sau này»: chỉ hiện khi máy chủ có `new_group_mode`. QD 17/10: KHÔNG còn bật sẵn — Sếp
+  // đã chủ động chọn «Hỏi Sếp»; tick ô này mới đổi mặc định của nhóm sau (cần mã PIN).
   const canApply = channel.new_group_mode !== undefined;
-  const [applyPick, setApplyPick] = useState<boolean | null>(null);
-  const apply = canApply && (applyPick ?? channel.new_group_asked !== true);
+  const [applyPick, setApplyPick] = useState<boolean>(false);
+  const apply = canApply && applyPick;
 
   const choose = useMutation({
     mutationFn: async ({ ids, mode, applyToNew }: { ids: string[]; mode: SettableListenMode; applyToNew: boolean }) => {
@@ -45,8 +47,8 @@ export function NewGroupsBox({ channel, canManage, onOpenAll }: { channel: Chann
       setApplyPick(v.applyToNew); // giữ nguyên lựa chọn cho các nhóm còn lại (máy chủ đánh dấu «đã hỏi» sau lượt đầu)
     },
     onSuccess: (n, v) => {
-      const what = v.mode === 'silent' ? 'Im lặng — lưu tin, không tự trả lời' : 'Không nghe — không lưu tin';
-      const later = v.applyToNew ? `. Nhóm mới sau này cũng vào ${v.mode === 'silent' ? 'Im lặng' : 'Không nghe'}` : '';
+      const what = v.mode === 'silent' ? 'Lắng nghe im lặng — lưu tin, không bao giờ trả lời' : 'Không nghe — không lưu tin';
+      const later = v.applyToNew ? `. Nhóm mới sau này cũng vào ${v.mode === 'silent' ? 'Lắng nghe im lặng' : 'Không nghe'}` : '';
       toast(`${n === 1 ? 'Đã chọn' : `Đã chọn cho ${fmtInt(n)} nhóm`}: ${what}${later}`, 'neutral');
     },
     onError: (e) => setFailed(e),
@@ -69,10 +71,10 @@ export function NewGroupsBox({ channel, canManage, onOpenAll }: { channel: Chann
         <Icon name="ph ph-users-three" size={16} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="ch-alert__title">
-            Nhóm mới — chọn Im lặng hay Không nghe ({fmtInt(rows.length)})
+            Nhóm mới — chọn Lắng nghe im lặng hay Không nghe ({fmtInt(rows.length)})
           </div>
           <div className="ch-alert__text">
-            Gen chưa lưu tin nào của các nhóm này cho tới khi Sếp chọn. <b>Im lặng</b>: lưu tin, không tự trả lời. <b>Không nghe</b>: không lưu tin.
+            Gen chưa lưu tin nào của các nhóm này cho tới khi Sếp chọn. <b>Lắng nghe im lặng</b>: lưu hết tin, không bao giờ trả lời (kể cả khi được tag). <b>Không nghe</b>: không lưu tin.
             Dù chọn gì, danh sách thành viên vẫn được ghi nhận để hợp nhất danh tính.
           </div>
         </div>
@@ -111,7 +113,7 @@ export function NewGroupsBox({ channel, canManage, onOpenAll }: { channel: Chann
             Áp dụng cho các nhóm mới sau này
             <span className="ch-newgroups__count">
               {' '}
-              — nhóm phát hiện sau sẽ tự vào đúng chế độ Sếp chọn bây giờ (Im lặng hoặc Không nghe), không hỏi lại. Cần mã PIN.
+              — nhóm phát hiện sau sẽ tự vào đúng chế độ Sếp chọn bây giờ (Lắng nghe im lặng hoặc Không nghe), không hỏi lại. Cần mã PIN.
             </span>
           </span>
         </label>
@@ -148,8 +150,8 @@ export function NewGroupsBox({ channel, canManage, onOpenAll }: { channel: Chann
 }
 
 /**
- * Ô chỉnh «Nhóm mới» trên thẻ kênh (F1d): Hỏi Sếp (mặc định) / Im lặng / Không nghe — áp cho nhóm phát hiện SAU này, không đổi
- * nhóm đã có. Đổi cần mã PIN như đổi tin 1-1 (api client tự hỏi PIN rồi gửi lại). Máy chủ cũ không có `new_group_mode` ⇒ ẩn.
+ * Ô chỉnh «Nhóm mới» trên thẻ kênh (F1d): Lắng nghe im lặng (mặc định) / Hỏi Sếp / Không nghe — áp cho nhóm phát hiện SAU này,
+ * không đổi nhóm đã có. Đổi cần mã PIN như đổi tin 1-1 (api client tự hỏi PIN rồi gửi lại). Máy chủ cũ không có `new_group_mode` ⇒ ẩn.
  */
 export function NewGroupModeSelect({ channel, canManage }: { channel: Channel; canManage: boolean }) {
   const mode = newGroupModeOf(channel);
@@ -160,10 +162,10 @@ export function NewGroupModeSelect({ channel, canManage }: { channel: Channel; c
       const m = newGroupModeOf(next);
       toast(
         m === 'silent'
-          ? `${channel.name}: nhóm mới tự vào Im lặng — lưu tin, không tự trả lời`
+          ? `${channel.name}: nhóm mới tự vào Lắng nghe im lặng — lưu hết tin, không bao giờ trả lời`
           : m === 'off'
             ? `${channel.name}: nhóm mới tự vào Không nghe — không lưu tin`
-            : `${channel.name}: nhóm mới chờ Sếp chọn`,
+            : `${channel.name}: nhóm mới chờ Sếp chọn (Lắng nghe im lặng hay Không nghe)`,
         'neutral',
       );
     },
@@ -195,6 +197,41 @@ export function NewGroupModeSelect({ channel, canManage }: { channel: Channel; c
         ))}
       </select>
     </div>
+  );
+}
+
+/**
+ * Khối nhẹ trên thẻ kênh (QD 17/10): «N nhóm mới đã vào Lắng nghe im lặng» — để Sếp biết Gen đang nghe những nhóm nào vừa
+ * được add, dù không hỏi. «Đã biết» đặt lại bộ đếm (không cần PIN). Máy chủ cũ không gửi `new_groups_silent` ⇒ không hiện.
+ */
+export function NewSilentGroupsNotice({ channel, canManage, onOpenAll }: { channel: Channel; canManage: boolean; onOpenAll: () => void }) {
+  const n = channel.new_groups_silent ?? 0;
+  const seen = useMutation({
+    mutationFn: () => api.channels.groupsSeen(channel.type),
+    onSuccess: (next) => {
+      queryClient.setQueryData<Channel[]>(qk2.channels, (old) => old?.map((x) => (x.type === channel.type ? next : x)));
+    },
+    onError: (e) => toast(errorText(e), 'bad'),
+  });
+  if (!isQrChannel(channel) || !channel.installed || n <= 0) return null;
+  return (
+    <section className="ch-newsilent" role="status" aria-label={`Nhóm mới của ${channel.name} đã vào Lắng nghe im lặng`} data-testid={`newsilent-${channel.type}`}>
+      <Icon name="ph ph-bell-ringing" size={16} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="ch-alert__title">{fmtInt(n)} nhóm mới đã vào Lắng nghe im lặng</div>
+        <div className="ch-alert__text">Gen lưu hết tin của các nhóm này nhưng không bao giờ trả lời (kể cả khi được tag). Muốn đổi, chọn chế độ khác cho từng nhóm.</div>
+      </div>
+      <span className="ch-newgroups__btns">
+        <Button variant="ghost" size="sm" onClick={onOpenAll}>
+          Xem nhóm
+        </Button>
+        {canManage ? (
+          <Button variant="secondary" size="sm" loading={seen.isPending} onClick={() => seen.mutate()}>
+            Đã biết
+          </Button>
+        ) : null}
+      </span>
+    </section>
   );
 }
 

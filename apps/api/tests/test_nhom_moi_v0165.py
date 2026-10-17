@@ -1,6 +1,7 @@
 """v0.1.65 (F1d) — "Nhóm mới" có mặc định cho các nhóm SAU: `settings.new_group_mode.<kênh>` ∈ ask | silent | off
-(mặc định `ask` = nhóm mới vào `pending` + hộp hỏi). Ingest đọc thiết lập này; đổi thiết lập KHÔNG đổi nhóm đã có;
-đổi ở thẻ kênh cần mã PIN (như tin 1-1); ô «Áp dụng cho các nhóm mới sau này» ở hộp hỏi lưu cùng lúc với lựa chọn."""
+(mặc định `silent` từ QD 17/10 = nhóm mới vào Lắng nghe im lặng; `ask` = nhóm mới vào `pending` + hộp hỏi). Ingest đọc
+thiết lập này; đổi thiết lập KHÔNG đổi nhóm đã có; đổi ở thẻ kênh cần mã PIN (như tin 1-1); ô «Áp dụng cho các nhóm
+mới sau này» ở hộp hỏi (chỉ khi `ask`) lưu cùng lúc với lựa chọn."""
 
 from typing import Any
 
@@ -44,26 +45,26 @@ def _card(cards: list[dict[str, Any]], type_: str = "zalo") -> dict[str, Any]:
 
 # ─── hằng + đọc thiết lập ────────────────────────────────────────────────────────────────────────────────────────
 
-def test_new_group_mode_reader_defaults_to_ask_and_ignores_garbage() -> None:
-    assert NEW_GROUP_MODES == ("ask", "silent", "off") and DEFAULT_NEW_GROUP_MODE == "ask"
-    assert new_group_mode(None, "zalo") == "ask"
-    assert new_group_mode({}, "zalo") == "ask"                                       # bản cài cũ: không có khoá
-    assert new_group_mode({"new_group_mode": {"zalo": "silent"}}, "zalo") == "silent"
-    assert new_group_mode({"new_group_mode": {"zalo": "silent"}}, "whatsapp") == "ask"   # theo từng kênh
-    assert new_group_mode({"new_group_mode": {"zalo": "bậy"}}, "zalo") == "ask"
-    assert new_group_mode({"new_group_mode": "silent"}, "zalo") == "ask"             # sai kiểu ⇒ mặc định
+def test_new_group_mode_reader_defaults_to_silent_and_ignores_garbage() -> None:
+    assert NEW_GROUP_MODES == ("ask", "silent", "off") and DEFAULT_NEW_GROUP_MODE == "silent"
+    assert new_group_mode(None, "zalo") == "silent"
+    assert new_group_mode({}, "zalo") == "silent"                                    # bản cài cũ: không có khoá
+    assert new_group_mode({"new_group_mode": {"zalo": "ask"}}, "zalo") == "ask"
+    assert new_group_mode({"new_group_mode": {"zalo": "ask"}}, "whatsapp") == "silent"   # theo từng kênh
+    assert new_group_mode({"new_group_mode": {"zalo": "bậy"}}, "zalo") == "silent"
+    assert new_group_mode({"new_group_mode": "ask"}, "zalo") == "silent"             # sai kiểu ⇒ mặc định
 
 
 # ─── ingest đọc thiết lập ────────────────────────────────────────────────────────────────────────────────────────
 
-async def test_ingest_ask_is_pending_and_default_for_legacy_install(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+async def test_ingest_default_is_silent_for_legacy_install_and_ask_is_pending(app, db, redis) -> None:  # type: ignore[no-untyped-def]
     org = await org_id(db)
     assert "new_group_mode" not in (await db.execute(text("SELECT settings FROM core.organizations"))).scalar_one()
     [eid] = await put(sessionmaker(), org, msg("Còn hàng không chị?", group="gA"))
-    assert eid is None and await _mode_of(db, "gA") == "pending"           # không tự bật nghe ngầm
+    assert eid is not None and await _mode_of(db, "gA") == "silent"        # QD 17/10: mặc định lắng nghe im lặng
     await _set_mode(db, "zalo", "ask")
     [eid] = await put(sessionmaker(), org, msg("Alo", group="gB"))
-    assert eid is None and await _mode_of(db, "gB") == "pending"
+    assert eid is None and await _mode_of(db, "gB") == "pending"           # Sếp chọn Hỏi Sếp ⇒ chờ, chưa lưu tin
 
 
 async def test_ingest_silent_stores_the_first_message_without_pending(app, db, redis) -> None:  # type: ignore[no-untyped-def]
@@ -104,6 +105,7 @@ async def test_directory_and_discovered_follow_the_setting(app, db, redis, value
 
 async def test_setting_is_per_channel_and_never_changes_existing_groups(app, db, redis) -> None:  # type: ignore[no-untyped-def]
     org = await org_id(db)
+    await _set_mode(db, "zalo", "ask")
     await handle_directory(db, redis, org, {"channel": "zalo", "groups": [_grp("gOld")]})
     await db.commit()
     assert await _mode_of(db, "gOld") == "pending"
@@ -114,9 +116,9 @@ async def test_setting_is_per_channel_and_never_changes_existing_groups(app, db,
     await _set_mode(db, "zalo", "off")
     await put(sessionmaker(), org, msg("x", group="gOld"))
     assert await _mode_of(db, "gOld") == "pending"
-    await handle_directory(db, redis, org, {"channel": "whatsapp", "groups": [_grp("wa1")]})    # kênh khác: vẫn ask
+    await handle_directory(db, redis, org, {"channel": "whatsapp", "groups": [_grp("wa1")]})    # kênh khác: silent
     await db.commit()
-    assert await _mode_of(db, "wa1") == "pending"
+    assert await _mode_of(db, "wa1") == "silent"
 
 
 # ─── PATCH /channels/{type}: new_group_mode (cần PIN như tin 1-1) ──────────────────────────────────────────────────
@@ -124,16 +126,20 @@ async def test_setting_is_per_channel_and_never_changes_existing_groups(app, db,
 async def test_patch_new_group_mode_needs_pin_and_roundtrips(owner_api: Api, db, redis) -> None:  # type: ignore[no-untyped-def]
     org = await org_id(db)
     card = _card((await owner_api.get("/channels")).json())
-    assert card["new_group_mode"] == "ask" and card["new_group_asked"] is False        # mặc định
-    r = await owner_api.send("PATCH", "/channels/zalo", {"new_group_mode": "silent"})
+    assert card["new_group_mode"] == "silent" and card["new_group_asked"] is False     # mặc định (QD 17/10)
+    r = await owner_api.send("PATCH", "/channels/zalo", {"new_group_mode": "ask"})
     assert r.status_code == 423 and r.json()["code"] == "PIN_REQUIRED"
-    assert _card((await owner_api.get("/channels")).json())["new_group_mode"] == "ask"      # chưa đổi
+    assert _card((await owner_api.get("/channels")).json())["new_group_mode"] == "silent"   # chưa đổi
     await verify_pin(owner_api)
-    r = await owner_api.send("PATCH", "/channels/zalo", {"new_group_mode": "silent"})
+    r = await owner_api.send("PATCH", "/channels/zalo", {"new_group_mode": "ask"})
     assert r.status_code == 200, r.text
-    assert r.json()["new_group_mode"] == "silent" and r.json()["new_group_asked"] is True
+    assert r.json()["new_group_mode"] == "ask" and r.json()["new_group_asked"] is True
     assert r.json()["direct_mode"] == "silent"                                          # không đụng tin 1-1
-    assert _card((await owner_api.get("/channels")).json(), "whatsapp")["new_group_mode"] == "ask"
+    assert _card((await owner_api.get("/channels")).json(), "whatsapp")["new_group_mode"] == "silent"
+    [eid] = await put(sessionmaker(), org, msg("Chào cả nhà", group="gAsk"))
+    assert eid is None and await _mode_of(db, "gAsk") == "pending"
+    r = await owner_api.send("PATCH", "/channels/zalo", {"new_group_mode": "silent"})
+    assert r.json()["new_group_mode"] == "silent"
     [eid] = await put(sessionmaker(), org, msg("Chào cả nhà", group="gNew"))
     assert eid is not None and await _mode_of(db, "gNew") == "silent"
     r = await owner_api.send("PATCH", "/channels/zalo", {"new_group_mode": "off", "direct_mode": "reply"})
@@ -146,11 +152,12 @@ async def test_patch_new_group_mode_needs_pin_and_roundtrips(owner_api: Api, db,
     log = (await db.execute(text("""SELECT detail FROM ops.action_log WHERE action = 'channel.new_group_mode_changed'
                                     ORDER BY at"""))).all()
     assert [(d.detail["new_group_mode"], d.detail["from"]) for d in log] == [
-        ("silent", "ask"), ("off", "silent"), ("ask", "off")]
+        ("ask", "silent"), ("silent", "ask"), ("off", "silent"), ("ask", "off")]
 
 
 async def test_patch_new_group_mode_does_not_touch_existing_groups(owner_api: Api, db, redis) -> None:  # type: ignore[no-untyped-def]
     org = await org_id(db)
+    await _set_mode(db, "zalo", "ask")
     await handle_directory(db, redis, org, {"channel": "zalo", "groups": [_grp("g1"), _grp("g2")]})
     await db.execute(text("UPDATE core.groups SET listen_mode = 'tagged_only' WHERE external_id = 'g2'"))
     await db.commit()
@@ -168,6 +175,7 @@ async def test_patch_new_group_mode_viewer_forbidden(owner_api: Api, db, client)
 
 async def _pending(db: Any, redis: Any, *exts: str) -> dict[str, str]:
     org = await org_id(db)
+    await _set_mode(db, "zalo", "ask")                                         # hộp hỏi chỉ có khi Sếp chọn «Hỏi Sếp»
     await handle_directory(db, redis, org, {"channel": "zalo", "groups": [_grp(e, "u1") for e in exts]})
     await db.commit()
     return {r.external_id: str(r.id) for r in (await db.execute(text("SELECT external_id, id FROM core.groups"))).all()}
@@ -208,7 +216,7 @@ async def test_box_choice_without_apply_needs_no_pin_and_keeps_ask(owner_api: Ap
     r = await owner_api.send("PATCH", f"/channels/zalo/groups/{ids['g1']}/mode", {"mode": "off", "apply_to_new": False})
     assert r.status_code == 200
     card = _card((await owner_api.get("/channels")).json())
-    assert card["new_group_mode"] == "ask" and card["new_group_asked"] is True      # đã hỏi rồi, không bật sẵn lại
+    assert card["new_group_mode"] == "ask" and card["new_group_asked"] is True      # đã chọn ở hộp hỏi; vẫn «Hỏi Sếp»
 
 
 async def test_box_apply_only_for_silent_or_off(owner_api: Api, db, redis) -> None:  # type: ignore[no-untyped-def]

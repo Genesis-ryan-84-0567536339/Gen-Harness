@@ -239,7 +239,8 @@ async def test_lower_levels_downgrade(w, db, redis) -> None:  # type: ignore[no-
     assert await agent_drafts(db) == []
 
 
-async def test_silent_listening_group_drafts_only_when_tagged(w, db, redis) -> None:  # type: ignore[no-untyped-def]
+async def test_silent_listening_group_never_drafts_even_when_tagged(w, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """QD 17/10: nhóm «Lắng nghe im lặng» không bao giờ trả lời, tin tag cũng vậy (xem test_qd_17_10_nghe_im_lang)."""
     a = await make_agent(db, w)
     await db.execute(text("UPDATE core.groups SET listen_mode = 'silent' WHERE id = :g"), {"g": w["g1"]})
     await db.commit()
@@ -247,10 +248,13 @@ async def test_silent_listening_group_drafts_only_when_tagged(w, db, redis) -> N
     router = decide("draft")
     await hook(w, redis, router, [plain, tagged])
     got = {d.trigger_unit_id: d for d in await decisions(db, a)}
-    assert got[plain].decision == "suggest" and "nghe im lặng" in got[plain].rationale
-    assert got[tagged].decision == "draft" and got[tagged].draft_id is not None
-    # Tin tag được ưu tiên xử lý trước và model được báo là đang được tag.
-    assert "được TAG" in router.calls[0][-1].content and "được TAG" not in router.calls[1][-1].content
+    for u in (plain, tagged):
+        d = got[u]
+        assert (d.decision, d.requested, d.outcome, d.draft_id) == ("silent", "draft", "blocked", None)
+        assert "không bao giờ trả lời" in d.rationale
+    assert await agent_drafts(db) == []
+    # Tin tag vẫn được xử lý trước, nhưng model không bị giục trả lời.
+    assert all("được TAG" not in c[-1].content for c in router.calls)
 
 
 async def test_one_pending_draft_per_place(w, db, redis) -> None:  # type: ignore[no-untyped-def]

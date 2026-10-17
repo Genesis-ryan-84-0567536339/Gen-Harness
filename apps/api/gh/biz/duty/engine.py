@@ -66,8 +66,14 @@ def identity_block(agent: Any) -> str:
     return _identity(agent)
 
 
-def allowed_decisions(level: int) -> list[str]:
-    if level <= 2:
+def replies_allowed(c: Candidate) -> bool:
+    """QD 17/10/2026: nhóm «Lắng nghe im lặng» (`silent`) KHÔNG BAO GIỜ trả lời — kể cả khi được tag, kể cả khi agent
+    được gán BOT cho nhóm/người. Mọi chế độ khác giữ như cũ (tagged_only: được tag thì trả lời)."""
+    return not (c.group_id and c.listen_mode == "silent")
+
+
+def allowed_decisions(level: int, *, replies: bool = True) -> list[str]:
+    if level <= 2 or not replies:
         return ["silent", "note"]
     if level == 3:
         return ["silent", "note", "suggest"]
@@ -77,6 +83,7 @@ def allowed_decisions(level: int) -> list[str]:
 def messages(ctx: Context) -> list[Message]:
     c = ctx.candidate
     guard = "\n".join(f"  - {g}" for g in ctx.guardrails) or "  (không có)"
+    allowed = allowed_decisions(ctx.level, replies=replies_allowed(c))
     system = f"""{_identity(ctx.agent)}
 
 Bạn đang trực kênh cho doanh nghiệp. Với MỘT sự kiện mới, quyết định một trong:
@@ -85,7 +92,7 @@ Bạn đang trực kênh cho doanh nghiệp. Với MỘT sự kiện mới, quy�
 - "suggest": gợi ý hành động cho nhân viên (không gửi gì ra ngoài).
 - "draft": soạn sẵn một tin trả lời để người duyệt.
 - "send": muốn gửi tin ngay — hệ thống VẪN đưa vào Bàn làm việc chờ người duyệt.
-Mức tự trị hiện tại: {ctx.level} ({policy.LEVELS[ctx.level]}). Được chọn: {", ".join(allowed_decisions(ctx.level))}.
+Mức tự trị hiện tại: {ctx.level} ({policy.LEVELS[ctx.level]}). Được chọn: {", ".join(allowed)}.
 Giới hạn cho agent (từ sổ tay, bắt buộc tuân thủ):
 {guard}
 
@@ -101,12 +108,13 @@ Trả về DUY NHẤT một đối tượng JSON:
     where = (f"nhóm \"{ctx.group_name}\" (chế độ nghe: {c.listen_mode})" if c.group_id
              else f"tin 1-1 trên {c.channel_type}")
     head = [f"Sự kiện mới: C1 trong {where}."]
-    if c.tagged:
+    if c.tagged and replies_allowed(c):
         head.append("Bạn được TAG trực tiếp trong tin này — người gửi đang chờ bạn phản hồi, hãy ưu tiên.")
     if c.from_us:
         head.append("Tin này do phía mình (nhân viên/Sếp) nói ra, không phải khách.")
-    if c.group_id and c.listen_mode == "silent" and not c.tagged:
-        head.append("Nhóm đang ở chế độ nghe im lặng: không soạn tin trả lời trừ khi được tag.")
+    if not replies_allowed(c):
+        head.append("Nhóm đang ở chế độ Lắng nghe im lặng: không bao giờ soạn tin trả lời, kể cả khi được tag"
+                    + (" (tin này có tag bạn, vẫn KHÔNG trả lời — chỉ ghi chú nếu cần)." if c.tagged else "."))
     body = "\n".join(i.line() for i in ctx.items)
     user = "\n".join(head) + f"\n\nNgữ cảnh (mỗi dòng: mã rồi JSON):\n{body}"
     return [Message("system", system), Message("user", user)]
@@ -224,6 +232,9 @@ async def apply(db: AsyncSession, org_id: uuid.UUID, ctx: Context, parsed: Parse
         return Result("note", NOTED, proposal={"note_entry_id": str(entry), "section": parsed.note_section,
                                                  "text": parsed.text})
     proposal = {"text": parsed.text}
+    if not replies_allowed(c):             # QD 17/10: nhóm Lắng nghe im lặng — không gợi ý, không soạn, không gửi
+        return Result("silent", BLOCKED, "nhóm Lắng nghe im lặng: không bao giờ trả lời, kể cả khi được tag",
+                      proposal=proposal)
     gate = policy.evaluate("message.send", level)
     if gate.outcome == policy.BLOCKED:
         return Result("silent", BLOCKED, f"mức {level} ({policy.LEVELS[level]}) không gợi ý hay soạn tin",
@@ -235,8 +246,6 @@ async def apply(db: AsyncSession, org_id: uuid.UUID, ctx: Context, parsed: Parse
     why: str | None = None
     if c.from_us:
         why = "tin do phía mình nói ra, không soạn trả lời"
-    elif c.group_id and c.listen_mode == "silent" and not c.tagged:
-        why = "nhóm nghe im lặng: chỉ soạn tin khi được tag"
     elif not c.tagged and (code := await _pending_draft(db, agent.id, c)):
         why = f"đã có bản nháp {code} chờ duyệt cho cùng nơi nhận"
     elif await _drafts_last_hour(db, agent.id) >= limits_of(agent)["drafts_per_hour"]:
