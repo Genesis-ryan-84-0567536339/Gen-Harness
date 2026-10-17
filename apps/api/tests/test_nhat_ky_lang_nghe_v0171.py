@@ -137,7 +137,8 @@ async def test_why_nothing_happened_notes(owner_api: Api, db) -> None:  # type: 
                              WHERE event_id = :e"""), {"e": c})
     await db.commit()
     by_id = {i["id"]: i for i in (await _log(owner_api, "?kind=message"))["items"]}
-    assert by_id[str(a)]["note"] == "Nhóm ở chế độ Lắng nghe im lặng — chỉ lưu, không bao giờ trả lời (kể cả khi được tag)"
+    assert by_id[str(a)]["note"] == ("Nhóm ở chế độ Lắng nghe im lặng — chỉ lưu, không bao giờ trả lời "
+                                     "(kể cả khi được tag)")
     assert by_id[str(b)]["note"] == "Tin riêng ở chế độ lưu im lặng — không đưa cho agent trực"
     assert by_id[str(c)]["screening"]["note"] == "Đã loại khi sàng lọc: Trùng hẳn một tin đã có"
     assert by_id[str(c)]["note"] == "Đã loại ở sàng lọc nên không đưa cho agent"
