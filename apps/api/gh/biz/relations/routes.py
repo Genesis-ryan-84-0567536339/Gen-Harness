@@ -461,7 +461,7 @@ async def _profile_payload(person_id: uuid.UUID, user: service.CurrentUser, db: 
         "bot": rsvc.agent_ref(uuid.UUID(r.attrs["agent_id"]), None) if r.attrs and r.attrs.get("agent_id") else None,
         "owner_note": r.attrs.get("owner_note") if r.attrs else None,
         "identities": [{"id": str(i.id), "channel": {"type": i.channel_type, "name": i.channel_name},
-                        "external_id": i.external_id, "handle": i.handle,
+                        "external_id": mask_text(i.external_id, owner), "handle": i.handle,
                         "phone_e164": mask_text(i.phone_e164, owner), "first_seen_at": iso(i.first_seen_at)}
                        for i in identities],
         "scores": [{"dimension": s.dimension, "label": explain.DIMENSION_LABELS.get(s.dimension, s.dimension),
