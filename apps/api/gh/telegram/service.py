@@ -224,15 +224,16 @@ async def forget_tests(db: AsyncSession, org_id: uuid.UUID) -> None:
                      {"o": org_id, "k": CHECK_KEY})
 
 
-async def delete_config(db: AsyncSession, org_id: uuid.UUID) -> bool:
+async def delete_config(db: AsyncSession, org_id: uuid.UUID, *, redis: Any = None) -> bool:
     """Xoá cấu hình + tin đang chờ gửi + kết quả Gửi thử cũ của tổ chức, đóng sự cố telegram.failed (Sếp tắt Telegram
-    là đã xử lý xong cảnh báo — không còn đường nào gửi được để tự đóng). Không commit."""
+    là đã xử lý xong cảnh báo — không còn đường nào gửi được để tự đóng). Có `redis` thì chuông đang mở đổi ngay. Không
+    commit."""
     from gh import health
 
     res = await db.execute(text("DELETE FROM ops.notify_channels WHERE org_id = :o"), {"o": org_id})
     await db.execute(text("""DELETE FROM ops.telegram_outbox WHERE org_id = :o AND sent_at IS NULL"""), {"o": org_id})
     await forget_tests(db, org_id)
-    await health.clear(db, org_id, ALERT_KEY)
+    await health.clear(db, org_id, ALERT_KEY, redis=redis)
     return bool(getattr(res, "rowcount", 0))
 
 
@@ -324,7 +325,7 @@ def _transient(code: str, detail: dict[str, Any]) -> dict[str, Any]:
 
 
 async def run_test(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID | None, *,
-                   client: tg.TelegramClient) -> tuple[dict[str, Any], dict[str, Any]]:
+                   client: tg.TelegramClient, redis: Any = None) -> tuple[dict[str, Any], dict[str, Any]]:
     """Gửi tin thử bằng cấu hình đã lưu; ghi boss_checks 'telegram' (pass/fail — 429 là lỗi TẠM, không ghi).
     Trả (kết quả khuôn BossCheck, chi tiết cho Action Log — không bí mật). Không commit."""
     from gh import health
@@ -348,7 +349,7 @@ async def run_test(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID | Non
         assert code is not None
         return _transient(code, detail), log_detail
     if code is None:
-        await health.clear(db, org_id, ALERT_KEY)
+        await health.clear(db, org_id, ALERT_KEY, redis=redis)
         rec = await boss.record(db, org_id, CHECK_KEY, "pass", detail=detail, user_id=user_id)
     else:
         rec = await boss.record(db, org_id, CHECK_KEY, "fail", error_code=code, message=MESSAGES.get(code),
@@ -619,7 +620,8 @@ async def flush_outbox(sm: Any, *, transport: Any = None, redis: Any = None) -> 
             delivered.add(r.org_id)
             stats["sent"] += 1
         for org in delivered:
-            await side_effect("đóng sự cố telegram.failed", lambda org=org: health.clear(db, org, ALERT_KEY))
+            await side_effect("đóng sự cố telegram.failed",
+                              lambda org=org: health.clear(db, org, ALERT_KEY, redis=redis))
         await db.execute(text("""DELETE FROM ops.telegram_outbox
                                  WHERE (sent_at IS NOT NULL AND sent_at < now() - make_interval(secs => :k))
                                     OR created_at < now() - make_interval(secs => :k)"""),

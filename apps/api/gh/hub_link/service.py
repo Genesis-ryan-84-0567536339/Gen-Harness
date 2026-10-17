@@ -530,7 +530,7 @@ async def _breaker_ok(db: AsyncSession, redis: Any, org_id: uuid.UUID) -> None:
     if redis is None:
         return
     await redis.delete(_bk("fails", org_id), _bk("open_until", org_id), _bk("down_since", org_id), _bk("half", org_id))
-    await health.clear(db, org_id, BREAKER_KEY)  # no-op khi không có sự cố đang mở
+    await health.clear(db, org_id, BREAKER_KEY, redis=redis)  # no-op khi không có sự cố đang mở
 
 
 async def breaker_state(redis: Any, org_id: uuid.UUID) -> dict[str, Any]:
@@ -550,7 +550,7 @@ async def _watch_org(db: AsyncSession, redis: Any, org_id: uuid.UUID, now: float
     "bắt đầu im" ⇒ đóng. Trả True khi vừa gửi chuông. Bên gọi commit."""
     down = _epoch(await redis.get(_bk("down_since", org_id)))
     if down is None:
-        await health.clear(db, org_id, BREAKER_KEY)
+        await health.clear(db, org_id, BREAKER_KEY, redis=redis)
         return False
     if now - down >= BREAKER_ALERT_AFTER_S and await redis.exists(_bk("half", org_id)):
         return await health.raise_once(
