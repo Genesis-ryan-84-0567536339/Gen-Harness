@@ -68,8 +68,10 @@ R_PAIR_LOCKED = "pair_locked"
 R_PAIR_EXPIRED = "pair_expired"
 R_RATE = "rate_limited"
 R_DISABLED = "disabled"  # đã ghép nhưng công tắc "Nhận tin từ Sếp" đang tắt
-#: Không tính vào bộ đếm "5 lần/giờ ⇒ chuông": trùng update_id là bình thường, vượt tần suất là chính Sếp.
-NO_BELL = frozenset({R_DUPLICATE, R_RATE, R_DISABLED})
+#: Không tính vào bộ đếm "5 lần/giờ ⇒ chuông": trùng update_id là bình thường, vượt tần suất là chính Sếp; tin cũ
+#: (`stale` — tin tồn của Sếp khi vừa ghép/bật) và tin khi chưa ghép (`unpaired` — chưa biết ai là chủ) không chứng tỏ
+#: có người lạ. Tin do CHÍNH tài khoản đã ghép gửi cũng không tính, bất kể lý do (xem `record_reject`).
+NO_BELL = frozenset({R_DUPLICATE, R_RATE, R_DISABLED, R_STALE, R_UNPAIRED})
 
 _FORWARD_KEYS = (
     "forward_origin",
@@ -224,9 +226,31 @@ async def advance_offset(db: AsyncSession, org_id: uuid.UUID, update_id: int) ->
     )
 
 
-async def record_reject(db: AsyncSession, redis: Any, org_id: uuid.UUID, reason: str, update: Any) -> None:
+def _sent_by(update: Any, tg_user_id: str | None) -> bool:
+    """Tin `message` do người (không phải bot) có `from.id` == `tg_user_id` gửi."""
+    if tg_user_id is None or not isinstance(update, dict):
+        return False
+    m = update.get("message")
+    sender = m.get("from") if isinstance(m, dict) else None
+    return (
+        isinstance(sender, dict)
+        and sender.get("is_bot") is False
+        and _is_int(sender.get("id"))
+        and str(sender["id"]) == tg_user_id
+    )
+
+
+async def record_reject(
+    db: AsyncSession,
+    redis: Any,
+    org_id: uuid.UUID,
+    reason: str,
+    update: Any,
+    *,
+    owner_tg_user_id: str | None = None,
+) -> None:
     """Action Log `telegram.rejected` — CHỈ lý do + update_id + loại chat; KHÔNG nội dung, tên, id người gửi. 5 lần/giờ
-    (không tính `NO_BELL`) ⇒ một chuông cho Owner. Không commit."""
+    (không tính `NO_BELL`, không tính tin của chính `owner_tg_user_id`) ⇒ một chuông cho Owner. Không commit."""
     chat_type = None
     if isinstance(update, dict):
         for k in ("message", "channel_post", "edited_message"):
@@ -247,7 +271,7 @@ async def record_reject(db: AsyncSession, redis: Any, org_id: uuid.UUID, reason:
         result="blocked",
         detail={"reason": reason, "update_id": uid, "chat_type": chat_type},
     )
-    if reason in NO_BELL or redis is None:
+    if reason in NO_BELL or redis is None or _sent_by(update, owner_tg_user_id):
         return
     key = f"gh:tg:rej:{org_id}"
     n = int(await redis.incr(key))

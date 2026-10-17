@@ -348,13 +348,47 @@ async def test_rejections_are_silent_logged_without_content_and_bell(owner_api: 
         ).decode()
     assert SECRET_WORDS not in dump  # không nội dung tin trong log/chuông
     assert TOKEN not in dump
-    # 6 lần bị bỏ trong 1 giờ ⇒ ĐÚNG một chuông "người lạ nhắn bot" (ở lần thứ 5)
+    # P3 review v0.1.64: tin bị bỏ nhưng CHÍNH Sếp gửi (nhóm, chuyển tiếp, cũ) không tính vào chuông "người lạ";
+    # chỉ đếm stranger_chat + channel + bot = 3 ⇒ chưa chuông.
+    assert int(await redis.get(f"gh:tg:rej:{org}")) == 3
+    async with admin_sessionmaker()() as s:
+        assert not (await s.execute(text("SELECT 1 FROM core.notifications WHERE kind = 'telegram.rejected'"))).all()
+    assert (await _row()).inbound_offset == 15  # offset đã tiến qua cả tin bị bỏ
+    # thêm 2 người lạ ⇒ đủ 5 lần/giờ ⇒ ĐÚNG một chuông "người lạ nhắn bot"
+    bot.updates = [msg(16, "a", chat_id=998, user_id=998, date=now), msg(17, "b", chat_id=997, user_id=997, date=now)]
+    await poller.poll_org(sm, redis, None, org, transport=t)
     async with admin_sessionmaker()() as s:
         bells = (
             await s.execute(text("SELECT title, link FROM core.notifications WHERE kind = 'telegram.rejected'"))
         ).all()
     assert len(bells) == 1 and bells[0].link == "/connections#telegram"
-    assert (await _row()).inbound_offset == 15  # offset đã tiến qua cả tin bị bỏ
+    assert (await _row()).inbound_offset == 17
+
+
+async def test_owner_stale_backlog_and_unpaired_chatter_do_not_ring_stranger_bell(
+    owner_api: Api, bot: FakeBot, redis: Any
+) -> None:
+    """P3 review v0.1.64: tin tồn cũ của chính Sếp (stale) / tin khi chưa ghép không được báo nhầm "người lạ"."""
+    await _configure(owner_api)
+    org = await _org()
+    sm = sessionmaker()
+    t = httpx.MockTransport(bot.handle)
+    r = await owner_api.send("POST", "/notify/telegram/pair/start", {})
+    code = r.json()["pair"]["code"]
+    now = datetime.now(UTC)
+    # đang chờ ghép: 6 tin thường (chưa ghép ⇒ unpaired) rồi mới tới /start <mã>
+    bot.updates = [msg(i, "xin chào", date=now) for i in range(1, 7)] + [msg(7, f"/start {code}", date=now)]
+    out = await poller.poll_org(sm, redis, None, org, transport=t)
+    assert out["results"] == ["rejected:unpaired"] * 6 + ["paired"], out
+    assert await redis.get(f"gh:tg:rej:{org}") is None
+    # sau ghép: 6 tin cũ (hơn 5 phút) của chính Sếp
+    old = now - timedelta(minutes=30)
+    bot.updates = [msg(i, "tin cũ", date=old) for i in range(8, 14)]
+    out = await poller.poll_org(sm, redis, None, org, transport=t)
+    assert out["results"] == ["rejected:stale"] * 6, out
+    assert await redis.get(f"gh:tg:rej:{org}") is None
+    async with admin_sessionmaker()() as s:
+        assert not (await s.execute(text("SELECT 1 FROM core.notifications WHERE kind = 'telegram.rejected'"))).all()
 
 
 async def test_duplicate_update_id_is_rejected_and_not_counted_for_bell(

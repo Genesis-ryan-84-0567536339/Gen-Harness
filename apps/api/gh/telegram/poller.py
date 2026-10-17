@@ -113,7 +113,7 @@ async def _process(
         if uid > cfg.last_update_id:
             await inbound.advance_offset(db, org_id, uid)  # TRƯỚC khi chạy lệnh: tối đa một lần mỗi tin
         if isinstance(verdict, str):
-            await inbound.record_reject(db, redis, org_id, verdict, update)
+            await inbound.record_reject(db, redis, org_id, verdict, update, owner_tg_user_id=cfg.owner_tg_user_id)
             await db.commit()
             return f"rejected:{verdict}"
         if not row.inbound_enabled:
