@@ -7,6 +7,11 @@ Ngày = ngày Release trên GitHub theo giờ Việt Nam; tiêu đề trong `doc
 (v0.1.32–v0.1.34, v0.1.40, v0.1.46) hoặc vài ngày (v0.1.47, v0.1.48: làm 03/10, phát hành 09/10).
 Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) ghi ở [ROADMAP › Bản phản ứng](docs/ROADMAP.md).
 
+## v0.1.66 — Bản vá phát hành của v0.1.65: sửa bước kiểm E2E nâng cấp lỗi thời; nội dung sản phẩm như v0.1.65 (18/10/2026)
+- v0.1.65 đã có bản thử nhưng E2E «cài đặt thật» chế độ release đỏ ở hai job nâng cấp (từ v0.1.60 và v0.1.62) vì bước F-22 còn đòi api tự chuyển phiên Claude từ đường dẫn cũ — việc v0.1.63 đã cố ý bỏ. Sửa bước kiểm + thêm test giữ hợp đồng (`.github/workflows/e2e-install.yml`, `test_e2e_upgrade_steps.py`).
+- **Mã sản phẩm KHÔNG đổi**, nội dung như v0.1.65 (gộp v0.1.63 + v0.1.64 + v0.1.65). Ai đang ở v0.1.62 chạy `genh update` sẽ lên thẳng v0.1.66; không có bản chính thức v0.1.65 riêng.
+- Chi tiết: [docs/releases/v0.1.66.md](docs/releases/v0.1.66.md)
+
 ## v0.1.65 — Chế độ nghe & danh bạ: nhóm mới tự vào Lắng nghe im lặng, thu thành viên mọi nhóm, tin 1-1 lưu im lặng; quyền xem tin 1-1 chặt hơn (17/10/2026)
 - **Nhóm mới mặc định Lắng nghe im lặng** (Sếp chốt 17/10): lưu hết tin, KHÔNG BAO GIỜ trả lời kể cả khi được tag (`tagged_only` mới trả lời khi tag); tin ĐẦU TIÊN của nhóm lạ cũng được lưu; nhóm cũ đang Không nghe giữ nguyên; đổi mặc định ở thẻ kênh (cần mã PIN). **Danh bạ** quét 2 giờ/lượt, thu thành viên MỌI nhóm (kể cả Không nghe), đánh dấu người/nhóm đã rời; nút «Cập nhật danh sách nhóm».
 - **Tin 1-1 lưu im lặng** (bản cài cũ đang tắt ⇒ nay lưu im lặng, đang bật giữ trả lời): ba mức Lưu im lặng / Lưu và cho trợ lý trả lời / Không lưu; «Gán BOT» cho một người có tác dụng với tin 1-1 của người đó. **THAY ĐỔI QUYỀN**: tin 1-1 chỉ Owner (hoặc người phụ trách/được giao đúng người đó) xem nguyên văn; gán/bỏ BOT cho một người chỉ Owner + mã PIN; SĐT/JID che với vai dưới Owner. Migration 0038 (sau 0037).
