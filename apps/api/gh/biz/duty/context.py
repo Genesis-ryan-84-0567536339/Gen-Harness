@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.biz.core.explain import DIMENSION_LABELS
+from gh.data.common import DIRECT_MODE_SQL
 from gh.memory.notebook import SECTIONS
 
 RELATED_DAYS = 30
@@ -99,6 +100,7 @@ SELECT a.id AS agent_id, u.id AS unit_id, u.observed_at, u.group_id, u.person_id
 FROM u
 JOIN agent.identities a ON a.org_id = :o AND a.is_enabled
 JOIN core.channels c ON c.id = u.channel_id
+JOIN core.organizations o ON o.id = :o
 WHERE (EXISTS (SELECT 1 FROM agent.channel_scopes s
                WHERE s.agent_id = a.id AND s.channel_id = u.channel_id
                  AND (s.group_id IS NULL OR s.group_id = u.group_id)
@@ -106,8 +108,10 @@ WHERE (EXISTS (SELECT 1 FROM agent.channel_scopes s
                       OR EXISTS (SELECT 1 FROM unnest(s.hours) h WHERE h @> u.observed_at)))
        OR (u.group_id IS NOT NULL
            AND EXISTS (SELECT 1 FROM core.groups ag WHERE ag.id = u.group_id AND ag.assigned_agent_id = a.id)))
-  AND (u.group_id IS NULL OR u.listen_mode IN ('silent', 'proactive')
-       OR (u.listen_mode = 'tagged_only' AND u.tagged))
+  AND (CASE WHEN u.group_id IS NULL
+            -- v0.1.65: tin 1-1 mặc định IM LẶNG (`silent`: lưu, không đưa cho agent trực); chỉ kênh đặt `reply` mới có
+            THEN {direct_mode} = 'reply'
+            ELSE u.listen_mode IN ('silent', 'proactive') OR (u.listen_mode = 'tagged_only' AND u.tagged) END)
   AND NOT EXISTS (SELECT 1 FROM agent.decisions d WHERE d.agent_id = a.id AND d.trigger_unit_id = u.id)
 ORDER BY u.tagged DESC, u.observed_at, a.id
 LIMIT :n
@@ -127,7 +131,8 @@ async def candidates(db: AsyncSession, org_id: uuid.UUID, *, unit_ids: list[uuid
         flt = ("mu.created_at > now() - make_interval(secs => :since) "
                "AND mu.created_at < now() - make_interval(secs => :age)")
         params = {"since": float((since_hours or 24) * 3600), "age": float(min_age_s)}
-    rows = (await db.execute(text(_CANDIDATES.format(filter=flt)), {"o": org_id, "n": limit, **params})).all()
+    sql = _CANDIDATES.format(filter=flt, direct_mode=DIRECT_MODE_SQL)
+    rows = (await db.execute(text(sql), {"o": org_id, "n": limit, **params})).all()
     return [Candidate(r.agent_id, r.unit_id, r.observed_at, r.group_id, r.person_id, r.channel_id, r.channel_type,
                       r.listen_mode, bool(r.tagged), bool(r.from_us)) for r in rows]
 

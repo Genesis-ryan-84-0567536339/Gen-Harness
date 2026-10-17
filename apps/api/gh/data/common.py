@@ -10,7 +10,38 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 CHANNEL_PREFIX = {"zalo": "ZL", "whatsapp": "WA", "telegram": "TG", "linkedin": "LI"}
 CHANNEL_NAME = {"zalo": "Zalo", "whatsapp": "WhatsApp", "telegram": "Telegram", "linkedin": "LinkedIn"}
+# v0.1.65 (F1): MỘT nguồn cho chế độ nghe của nhóm — API, bridge và web (`ListenMode`, contracts/phase2.ts) theo đây.
+#   · ĐANG nghe (lưu tin vào Kho thô): tagged_only ("Nghe hết, chỉ trả lời khi được tag"), silent, proactive.
+#   · KHÔNG nghe: off ("Không nghe"), paused (Sếp tạm dừng), pending (nhóm mới phát hiện, CHỜ Sếp chọn — không lưu tin,
+#     vẫn thu danh sách thành viên).
 LISTENING_MODES = ("tagged_only", "silent", "proactive")
+NOT_LISTENING_MODES = ("off", "paused", "pending")
+ALL_LISTEN_MODES = ("pending", "off", "tagged_only", "silent", "proactive", "paused")
+#: Chế độ Sếp được CHỌN (không ai tự đặt lại về "pending").
+SETTABLE_LISTEN_MODES = ("off", "tagged_only", "silent", "proactive", "paused")
+NEW_GROUP_MODE = "pending"
+
+# Tin riêng 1-1 (theo kênh, lưu ở `core.organizations.settings.direct_mode.<kênh>`): off = không lưu; silent = lưu nhưng
+# không tự trả lời và không đưa cho agent trực (MẶC ĐỊNH); reply = lưu + agent trực được phép trả lời (= `listen_direct`
+# bật của bản ≤ 0.1.64).
+DIRECT_MODES = ("off", "silent", "reply")
+DEFAULT_DIRECT_MODE = "silent"
+
+
+def direct_mode(settings: dict[str, Any] | None, channel_type: str) -> str:
+    """Chế độ tin 1-1 của một kênh. Khoá mới `direct_mode` thắng; chưa có thì đọc khoá cũ `listen_direct`
+    (true ⇒ reply); còn lại ⇒ mặc định silent."""
+    s = settings or {}
+    v = (s.get("direct_mode") or {}).get(channel_type)
+    if v in DIRECT_MODES:
+        return str(v)
+    return "reply" if (s.get("listen_direct") or {}).get(channel_type) is True else DEFAULT_DIRECT_MODE
+
+
+#: Cùng quy tắc `direct_mode` nhưng cho SQL (bí danh `o` = core.organizations, `c` = core.channels).
+DIRECT_MODE_SQL = ("COALESCE(NULLIF(o.settings #>> ARRAY['direct_mode', c.type], ''), "
+                   "CASE WHEN o.settings #>> ARRAY['listen_direct', c.type] = 'true' THEN 'reply' "
+                   f"ELSE '{DEFAULT_DIRECT_MODE}' END)")
 SINCE = {"24h": timedelta(hours=24), "7d": timedelta(days=7), "30d": timedelta(days=30)}
 RAW_CODE_RE = re.compile(r"^RAW-(\d+)$")
 

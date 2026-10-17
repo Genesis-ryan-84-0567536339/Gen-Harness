@@ -7,6 +7,12 @@ import { errorCode } from './util.js';
 
 export const QR_MAX = 5;
 export const CREDENTIAL_COALESCE_MS = 5000;
+// Quét danh bạ + thành viên của MỌI nhóm là việc nặng với tài khoản cá nhân ⇒ chu kỳ dài (2 giờ). Nhóm mới không phải chờ
+// chu kỳ: tin đầu tiên từ nhóm lạ phát `group.discovered` ngay, rồi quét lại sau DISCOVER_DELAY_MS (cách lần quét trước
+// ít nhất DISCOVER_MIN_GAP_MS); Sếp cũng có nút "Cập nhật danh sách nhóm" (lệnh `directory.sync`).
+export const DIRECTORY_MS = 2 * 60 * 60 * 1000;
+export const DISCOVER_DELAY_MS = 5000;
+export const DISCOVER_MIN_GAP_MS = 10 * 60 * 1000;
 
 const keyOf = (channel, sessionId) => `${channel}:${sessionId}`;
 
@@ -19,10 +25,14 @@ export class SessionManager {
    */
   constructor({
     bus, keyring, createAdapter, channels = ['zalo', 'whatsapp'], logger = silentLogger, orgId = '',
-    heartbeatMs = 15000, directoryMs = 30 * 60 * 1000, qrMax = QR_MAX,
+    heartbeatMs = 15000, directoryMs = DIRECTORY_MS, qrMax = QR_MAX,
     credentialCoalesceMs = CREDENTIAL_COALESCE_MS, now = Date.now,
+    discoverDelayMs = DISCOVER_DELAY_MS, discoverMinGapMs = DISCOVER_MIN_GAP_MS,
   }) {
-    Object.assign(this, { bus, keyring, createAdapter, channels, log: logger, orgId, heartbeatMs, directoryMs, qrMax, credentialCoalesceMs, now });
+    Object.assign(this, {
+      bus, keyring, createAdapter, channels, log: logger, orgId, heartbeatMs, directoryMs, qrMax, credentialCoalesceMs, now,
+      discoverDelayMs, discoverMinGapMs,
+    });
     this.sessions = new Map();
     this.controlChains = new Map();
     this.sendChains = new Map();
@@ -61,8 +71,10 @@ export class SessionManager {
   #teardown(s) {
     clearInterval(s.dirTimer);
     clearTimeout(s.credTimer);
+    clearTimeout(s.discoverTimer);
     s.dirTimer = null;
     s.credTimer = null;
+    s.discoverTimer = null;
     s.adapter.removeAllListeners();
     if (this.sessions.get(s.key) === s) this.sessions.delete(s.key);
   }
@@ -129,6 +141,7 @@ export class SessionManager {
     const s = {
       key, channel, sessionId, adapter, state: 'starting', orgId: ctx.orgId, correlationId: ctx.correlationId,
       queued: 0, lastCredAt: 0, credTimer: null, dirTimer: null, inbound: 0, dropped: 0,
+      knownGroups: new Set(), discoverTimer: null, syncing: null, lastSyncAt: 0,
     };
     this.sessions.set(key, s);
     this.#wire(s);
@@ -184,8 +197,10 @@ export class SessionManager {
       s.state = 'retrying';
       clearInterval(s.dirTimer);
       clearTimeout(s.credTimer);
+      clearTimeout(s.discoverTimer);
       s.dirTimer = null;
       s.credTimer = null;
+      s.discoverTimer = null;
       this.log.warn('phiên mất kết nối, đang thử nối lại', base);
       this.#publish(STREAMS.status, 'session.reconnecting', { ...base, error: error || 'NETWORK_UNAVAILABLE' }, s);
     });
@@ -215,7 +230,11 @@ export class SessionManager {
     s.credTimer.unref?.();
   }
 
-  /** Khoá cứng: chỉ XADD tin của nhóm trong gh:bridge:listen:<channel>, tin 1-1 khi listen_direct = "1". */
+  /**
+   * Khoá cứng: chỉ XADD tin của nhóm trong gh:bridge:listen:<channel>, tin 1-1 trừ khi Sếp chọn "không lưu"
+   * (gh:bridge:listen_direct = "0"). Tin của nhóm LẠ (chưa từng thấy trong danh bạ) không được lưu nhưng báo
+   * `group.discovered` để Console hỏi Sếp Im lặng/Không nghe.
+   */
   async #inbound(s, payload) {
     try {
       const allowed = payload.external_group_id
@@ -223,6 +242,7 @@ export class SessionManager {
         : await this.bus.listenDirect(s.channel);
       if (!allowed) {
         s.dropped += 1;
+        if (payload.external_group_id) this.#discovered(s, payload);
         return;
       }
       s.inbound += 1;
@@ -230,6 +250,24 @@ export class SessionManager {
     } catch (err) {
       this.log.error('không đẩy được tin vào', { channel: s.channel, session_id: s.sessionId, error: err.message });
     }
+  }
+
+  /** Nhóm chưa có trong danh bạ của phiên: báo lõi một lần, rồi hẹn quét lại để lấy thành viên. Không gửi nội dung tin. */
+  #discovered(s, payload) {
+    const gid = String(payload.external_group_id);
+    if (s.knownGroups.has(gid)) return;
+    s.knownGroups.add(gid);
+    this.#publish(STREAMS.directory, 'group.discovered', {
+      channel: s.channel, session_id: s.sessionId, group_id: gid, name: payload.group_name || '', member_count: null,
+    }, s);
+    this.log.info('phát hiện nhóm mới', { channel: s.channel, session_id: s.sessionId });
+    if (s.state !== 'active' || s.discoverTimer) return;
+    const wait = Math.max(this.discoverDelayMs, s.lastSyncAt + this.discoverMinGapMs - this.now());
+    s.discoverTimer = setTimeout(() => {
+      s.discoverTimer = null;
+      this.syncDirectory(s);
+    }, wait);
+    s.discoverTimer.unref?.();
   }
 
   async #logout(channel, sessionId, ctx) {
@@ -256,12 +294,24 @@ export class SessionManager {
     }
   }
 
-  async syncDirectory(s) {
-    if (s.state !== 'active') return;
+  /** Quét danh bạ đầy đủ. Hai lệnh gần nhau (chu kỳ + nút làm mới) dùng chung MỘT lượt quét. */
+  syncDirectory(s) {
+    if (s.state !== 'active') return Promise.resolve();
+    if (s.syncing) return s.syncing;
+    s.syncing = this.#syncDirectory(s).finally(() => { s.syncing = null; });
+    return s.syncing;
+  }
+
+  async #syncDirectory(s) {
     try {
       const groups = await s.adapter.syncGroups();
       if (s.state !== 'active') return;
-      await this.#publish(STREAMS.directory, 'groups', { channel: s.channel, session_id: s.sessionId, groups }, s);
+      s.lastSyncAt = this.now();
+      s.knownGroups = new Set(groups.map((g) => String(g.external_id)));
+      // `groups_complete`: lượt quét không lỗi và có nhóm ⇒ lõi mới được coi nhóm vắng là "đã rời".
+      const groupsComplete = groups.length > 0 && s.adapter.lastSyncComplete !== false;
+      await this.#publish(STREAMS.directory, 'groups',
+        { channel: s.channel, session_id: s.sessionId, groups, groups_complete: groupsComplete }, s);
       this.log.info('đồng bộ danh bạ', { channel: s.channel, session_id: s.sessionId, groups: groups.length });
     } catch (err) {
       this.log.warn('đồng bộ danh bạ lỗi', { channel: s.channel, session_id: s.sessionId, error: errorCode(err) });

@@ -20,7 +20,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gh import crypto, realtime
 from gh.chassis import actionlog
 from gh.chassis.bus import BRIDGE_CONTROL, EventBus, uuid7
-from gh.data.common import CHANNEL_NAME, CHANNEL_PREFIX, LISTENING_MODES, fetch_raw, iso, org_settings, raw_item
+from gh.data.common import (
+    CHANNEL_NAME,
+    CHANNEL_PREFIX,
+    LISTENING_MODES,
+    NEW_GROUP_MODE,
+    direct_mode,
+    fetch_raw,
+    iso,
+    org_settings,
+    raw_item,
+)
 
 log = logging.getLogger("gh.ingest")
 
@@ -94,16 +104,17 @@ async def upsert_group(db: AsyncSession, org_id: uuid.UUID, channel: Any, extern
                                     WHERE channel_id = :c AND external_id = :x"""),
                             {"c": channel.id, "x": external_id})).one_or_none()
     if row is None:
-        # Nhóm mới luôn "Không nghe" (khoá cứng) — Owner tự bật.
+        # v0.1.65: nhóm mới vào trạng thái CHỜ (`pending`) — chưa lưu tin nào cho tới khi Sếp chọn "Im lặng" hay
+        # "Không nghe" (Console hỏi ngay khi có nhóm mới); danh sách thành viên vẫn được thu (Q5=2).
         code = (await db.execute(text("SELECT core.next_code(:p)"),
                                  {"p": f"GRP-{CHANNEL_PREFIX.get(channel.type, 'XX')}"})).scalar_one()
         row = (await db.execute(text("""
             INSERT INTO core.groups (org_id, code, channel_id, external_id, name, listen_mode, member_count)
-            VALUES (:o, :code, :c, :x, :n, 'off', :m)
+            VALUES (:o, :code, :c, :x, :n, :pending, :m)
             ON CONFLICT (channel_id, external_id) DO UPDATE SET name = core.groups.name
             RETURNING id, code, name, listen_mode"""),
             {"o": org_id, "code": code, "c": channel.id, "x": external_id, "n": name or external_id,
-             "m": member_count})).one()
+             "m": member_count, "pending": NEW_GROUP_MODE})).one()
     elif (name and name != row.name) or member_count is not None:
         await db.execute(text("""UPDATE core.groups SET name = COALESCE(:n, name),
                                  member_count = COALESCE(:m, member_count) WHERE id = :i"""),
@@ -194,10 +205,17 @@ def _e164(phone: str | None) -> str | None:
     return "+" + digits
 
 
-async def _member(db: AsyncSession, group_id: uuid.UUID, person_id: uuid.UUID) -> None:
-    await db.execute(text("""INSERT INTO core.group_members (group_id, person_id, joined_at) VALUES (:g, :p, now())
-                             ON CONFLICT (group_id, person_id) DO UPDATE SET left_at = NULL
-                             WHERE core.group_members.left_at IS NOT NULL"""), {"g": group_id, "p": person_id})
+async def _member(db: AsyncSession, group_id: uuid.UUID, person_id: uuid.UUID, role: str | None = None) -> None:
+    """Ghi thành viên nhóm. `role` ('admin'/'member') chỉ có khi nền tảng cho biết; None ⇒ giữ vai trò cũ.
+    Người từng rời mà xuất hiện lại ⇒ xoá `left_at`."""
+    await db.execute(text("""INSERT INTO core.group_members (group_id, person_id, role, joined_at)
+                             VALUES (:g, :p, :r, now())
+                             ON CONFLICT (group_id, person_id) DO UPDATE
+                               SET left_at = NULL, role = COALESCE(EXCLUDED.role, core.group_members.role)
+                             WHERE core.group_members.left_at IS NOT NULL
+                                OR (EXCLUDED.role IS NOT NULL
+                                    AND core.group_members.role IS DISTINCT FROM EXCLUDED.role)"""),
+                     {"g": group_id, "p": person_id, "r": role})
 
 
 async def ingest_message(db: AsyncSession, org_id: uuid.UUID, p: dict[str, Any]) -> uuid.UUID | None:
@@ -208,12 +226,16 @@ async def ingest_message(db: AsyncSession, org_id: uuid.UUID, p: dict[str, Any])
     if channel is None or not msg_id or not sender:
         return None
     group = None
+    dm = "off"
     if p.get("external_group_id"):
         group = await upsert_group(db, org_id, channel, str(p["external_group_id"]), p.get("group_name"))
         if group.listen_mode not in LISTENING_MODES:
             return None
-    elif not (await org_settings(db, org_id)).get("listen_direct", {}).get(channel.type, False):
-        return None
+    else:
+        # v0.1.65: tin 1-1 mặc định LƯU IM LẶNG (silent); chỉ "off" mới bỏ.
+        dm = direct_mode(await org_settings(db, org_id), channel.type)
+        if dm == "off":
+            return None
     identity = await upsert_identity(db, org_id, channel, sender, p.get("sender_name"), p.get("sender_phone"))
     if group is not None:
         await _member(db, group.id, identity.person_id)
@@ -239,7 +261,8 @@ async def ingest_message(db: AsyncSession, org_id: uuid.UUID, p: dict[str, Any])
          "g": group.id if group else None, "s": identity.id, "m": msg_id, "k": kind, "b": body,
          "pl": orjson.dumps(payload, default=str).decode(), "h": content_hash, "d": direction, "men": mentions})
     # Đường nhanh: tin tag agent và tin 1-1 (ARCHITECTURE §4.3, quyết định Q3). Tin của chính mình không cần.
-    fast = direction == "inbound" and (mentions or group is None)
+    #   v0.1.65: tin 1-1 im lặng (silent) không cần nhanh — chỉ "reply" mới đi đường nhanh cho agent trực.
+    fast = direction == "inbound" and (mentions or (group is None and dm == "reply"))
     await db.execute(text("""
         INSERT INTO refinery.event_state (event_id, event_received_at, org_id, state, fast)
         VALUES (:e, :r, :o, 'pending', :f)"""), {"e": event_id, "r": received_at, "o": org_id, "f": fast})
@@ -259,14 +282,14 @@ async def sync_listen_sets(db: AsyncSession, redis: Redis, org_id: uuid.UUID) ->
         sets.setdefault(r.type, [])
         if r.external_id and r.listen_mode in LISTENING_MODES:
             sets[r.type].append(r.external_id)
-    direct = (await org_settings(db, org_id)).get("listen_direct", {})
+    settings = await org_settings(db, org_id)
     pipe = redis.pipeline(transaction=True)
     for ch, ids in sets.items():
         key = f"gh:bridge:listen:{ch}"
         pipe.delete(key)
         if ids:
             pipe.sadd(key, *ids)
-        pipe.set(f"gh:bridge:listen_direct:{ch}", "1" if direct.get(ch) else "0")
+        pipe.set(f"gh:bridge:listen_direct:{ch}", "0" if direct_mode(settings, ch) == "off" else "1")
     await pipe.execute()
 
 
@@ -476,22 +499,59 @@ def _reencrypt(transport: Any, s: Any) -> bytes | None:
 # ─── Danh bạ nhóm ───────────────────────────────────────────────────────────
 
 async def handle_directory(db: AsyncSession, redis: Redis, org_id: uuid.UUID, p: dict[str, Any]) -> int:
+    """Danh bạ đầy đủ từ bridge. Thu thành viên của MỌI nhóm kể cả "Không nghe" (Sếp chốt Q5=2).
+    v0.1.65 (F058): khi bridge báo danh sách ĐỦ (`members_complete` / `groups_complete`) thì người vắng đặt `left_at`
+    và nhóm vắng đặt cờ đã rời; xuất hiện lại thì xoá. Vai trò admin (`members[].role`) ghi nếu nền tảng cho biết."""
     channel = await channel_row(db, org_id, str(p.get("channel", "")))
     if channel is None:
         return 0
     n = 0
+    seen: list[str] = []
     for g in p.get("groups") or []:
         if not g.get("external_id"):
             continue
         row = await upsert_group(db, org_id, channel, str(g["external_id"]), g.get("name"), g.get("member_count"))
         n += 1
-        for m in (g.get("members") or [])[:5000]:
+        seen.append(str(g["external_id"]))
+        members = (g.get("members") or [])[:5000]
+        person_ids: list[uuid.UUID] = []
+        for m in members:
             if not m.get("external_id"):
                 continue
             ident = await upsert_identity(db, org_id, channel, str(m["external_id"]), m.get("name"), m.get("phone"))
-            await _member(db, row.id, ident.person_id)
+            role = m.get("role") if m.get("role") in ("admin", "member") else None
+            await _member(db, row.id, ident.person_id, role)
+            person_ids.append(ident.person_id)
+        if g.get("members_complete") is True and person_ids and len(g.get("members") or []) <= 5000:
+            await db.execute(text("""UPDATE core.group_members SET left_at = now()
+                                     WHERE group_id = :g AND left_at IS NULL AND person_id <> ALL(:keep)"""),
+                             {"g": row.id, "keep": person_ids})
+    if seen:
+        await db.execute(text("UPDATE core.groups SET left_at = NULL WHERE channel_id = :c AND external_id = ANY(:s) "
+                              "AND left_at IS NOT NULL"), {"c": channel.id, "s": seen})
+        if p.get("groups_complete") is True:
+            await db.execute(text("""UPDATE core.groups SET left_at = now()
+                                     WHERE channel_id = :c AND left_at IS NULL AND external_id <> ALL(:s)"""),
+                             {"c": channel.id, "s": seen})
     await sync_listen_sets(db, redis, org_id)
     return n
+
+
+async def handle_group_discovered(db: AsyncSession, redis: Redis, org_id: uuid.UUID, p: dict[str, Any]) -> Any:
+    """`group.discovered{group_id, name, member_count}`: bridge vừa thấy tin từ một nhóm chưa có trong danh bạ.
+    Tạo nhóm ở trạng thái `pending` (không lưu tin) để Console hỏi Sếp; nhóm đã có thì không đổi chế độ.
+    Trả `(nhóm, mới?)` hoặc None nếu kênh/nhóm không hợp lệ."""
+    channel = await channel_row(db, org_id, str(p.get("channel", "")))
+    gid = str(p.get("group_id") or "")
+    if channel is None or not gid:
+        return None
+    existed = (await db.execute(text("SELECT 1 FROM core.groups WHERE channel_id = :c AND external_id = :x"),
+                                {"c": channel.id, "x": gid})).first() is not None
+    count = p.get("member_count")
+    row = await upsert_group(db, org_id, channel, gid, p.get("name"), count if isinstance(count, int) else None)
+    await db.execute(text("UPDATE core.groups SET left_at = NULL WHERE id = :i AND left_at IS NOT NULL"), {"i": row.id})
+    await sync_listen_sets(db, redis, org_id)
+    return row, not existed
 
 
 # ─── Consumer ──────────────────────────────────────────────────────────────
@@ -529,6 +589,17 @@ class Ingest:
                 await publish_header(db, self.redis, self.org_id)
 
     async def on_directory(self, event: Any) -> None:
+        if event.type == "group.discovered":
+            async with self.sm() as db:
+                found = await handle_group_discovered(db, self.redis, self.org_id, event.payload)
+                await db.commit()
+            if found is not None and found[1]:   # nhóm MỚI ⇒ báo Console mở hộp "Nhóm mới — chọn Im lặng/Không nghe"
+                row = found[0]
+                await realtime.publish(self.redis, "group.discovered",
+                                       {"id": str(row.id), "code": row.code, "name": row.name,
+                                        "channel": event.payload.get("channel"), "listen_mode": row.listen_mode},
+                                       org_id=self.org_id)
+            return
         if event.type != "groups":
             return
         async with self.sm() as db:
@@ -560,5 +631,5 @@ async def uptime_pct(redis: Redis, type: str, since: datetime | None) -> float |
     return round(min(100.0, hits * 100 / total), 1)
 
 
-__all__ = ["Ingest", "handle_directory", "handle_status", "ingest_message", "iso", "sync_listen_sets",
-           "uptime_pct"]
+__all__ = ["Ingest", "handle_directory", "handle_group_discovered", "handle_status", "ingest_message", "iso",
+           "sync_listen_sets", "uptime_pct"]
