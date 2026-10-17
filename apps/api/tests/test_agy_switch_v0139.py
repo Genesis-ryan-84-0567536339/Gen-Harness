@@ -168,7 +168,7 @@ async def test_switch_without_id_token_uses_userinfo_not_mismatch(owner_api: Api
     ov = (await api.get("/boss-checks")).json()
     # v0.1.68 (F040): bộ đếm không còn — web không đọc, mỗi lần overview thừa truy vấn
     assert "switch_passes" not in ov
-    assert ov["results"]["agy_switch"]["runs"] == 4
+    assert ov["results"]["agy_switch"]["runs"] == 2
 
 
 async def test_switch_to_active_account_keeps_refreshed_session(owner_api: Api, clis: Any) -> None:  # noqa: F811

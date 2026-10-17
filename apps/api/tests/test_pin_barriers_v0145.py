@@ -147,9 +147,9 @@ async def test_setup_9_10_after_finish_need_pin(owner_api: Api, db) -> None:  # 
     assert r.json()["code"] == PIN
     n = (await db.execute(text("SELECT count(*) FROM core.users WHERE email = 'lan@example.vn'"))).scalar_one()
     assert n == 0
-    # Danh sách rỗng sau Hoàn tất: không đòi PIN.
+    # Danh sách rỗng sau Hoàn tất: không đòi PIN (v0.1.68, F038: và cũng không phải "đã mời" ⇒ 409, không phải 423).
     r = await owner_api.send("PUT", "/setup/steps/10", {"invites": []})
-    assert r.status_code == 200, r.text
+    assert r.status_code == 409 and r.json()["code"] == "STEP_INCOMPLETE", r.text
 
     await verify_pin(owner_api)
     r = await owner_api.send("PUT", "/setup/steps/9", {"autonomy_level": 3, "ack_boundaries": True})

@@ -351,9 +351,13 @@ async def test_care_requires_permission(world, client, db) -> None:  # type: ign
 # ═══ Trình thiết lập bước 8–9 ══════════════════════════════════════════════════
 
 async def test_step8_and_step9_require_prior_steps_then_create_agent(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    # v0.1.68 (F026): bước 8 KHÔNG còn đòi bước 4 'done' ("Để sau" bước 4 vẫn tạo được agent) — chỉ đòi bước 1–3.
+    # Bước 9 vẫn đòi agent của bước 8 (kiểm bên dưới); tạo agent ở lượt đầu rồi xoá để bước 9 còn "chưa có agent".
     r = await owner_api.send("PUT", "/setup/steps/8", {"name": "Trợ lý Mai", "role_desc": "Chăm sóc khách hàng",
                                                         "try_message": "Chào bạn"})
-    assert r.status_code == 409 and r.json()["code"] == "STEP_INCOMPLETE"   # chưa xong bước 4 (bộ não AI)
+    assert r.status_code == 200, r.text
+    await db.execute(text("DELETE FROM agent.identities"))
+    await db.commit()
 
     org = (await db.execute(text("SELECT id FROM core.organizations"))).scalar_one()
     done = {"steps": {"1": "done", "2": "done", "3": "done", "4": "done", "5": "done", "6": "done", "7": "done"}}
