@@ -103,6 +103,18 @@ def public_url() -> str:
     return get_settings().public_url.rstrip("/")
 
 
+#: Chưa bật Truy cập từ xa (public_url còn là localhost) thì link trong tin trên điện thoại không mở được (F092).
+LOCAL_CONSOLE_LINE = "Mở Console từ máy chủ Gen-Harness (chưa bật Truy cập từ xa nên điện thoại chưa mở được link)."
+
+
+def console_line(path: str) -> str:
+    """Dòng "Mở Console" cuối tin: chỉ chèn link khi `public_url` đã là địa chỉ mở được từ ngoài máy chủ."""
+    from gh.system_api.access import is_local_url  # nhập muộn: chỉ cần khi dựng tin
+
+    url = public_url()
+    return LOCAL_CONSOLE_LINE if is_local_url(url) else f"Mở Console: {url}{path}"
+
+
 # ─── cấu hình ───────────────────────────────────────────────────────────────
 
 async def get_config(db: AsyncSession, org_id: uuid.UUID) -> Any:
@@ -270,7 +282,7 @@ async def sync_host_file(sm: Any) -> bool:
 def test_text() -> str:
     at = datetime.now(UTC).astimezone(VN_TZ).strftime("%H:%M %d/%m")
     return (f"Gen-Harness · Tin thử từ Console lúc {at}. Sếp nhận được tin này nghĩa là kênh Báo động & bản tin "
-            f"đã thông.\nMở Console: {public_url()}/connections#telegram\n{ONE_WAY}")
+            f"đã thông.\n{console_line('/connections#telegram')}\n{ONE_WAY}")
 
 
 def request_host_test() -> bool:
@@ -491,13 +503,13 @@ def briefing_text(slot_label: str, summary: str | None, sections: list[dict[str,
     # Mục chưa đọc được (lỗi / Gen-hub tạm không trả lời) luôn có dòng ⇒ không có dòng nào = mọi mục đã đọc và đều 0.
     items = _briefing_items(sections)
     lines += ["", *items] if items else ["", NOTHING]
-    lines += ["", f"Mở Console: {public_url()}/overview", ONE_WAY]
+    lines += ["", console_line("/overview"), ONE_WAY]
     return "\n".join(lines)
 
 
 def reminder_text(title: str, code: str, priority: str, due: str | None) -> str:
     meta = f"{code} · {priority}" + (f" · hạn {due}" if due else "")
-    return f"Nhắc việc: {defang(_line(title, 300))}\n{meta}\nMở Console: {public_url()}/tasks\n{ONE_WAY}"
+    return f"Nhắc việc: {defang(_line(title, 300))}\n{meta}\n{console_line('/tasks')}\n{ONE_WAY}"
 
 
 async def _org_token(db: AsyncSession, org_id: uuid.UUID) -> tuple[str, str] | None:

@@ -89,6 +89,7 @@ function setup(w: Partial<World> = {}) {
           method === 'PUT'
             ? {
                 ...SAVED,
+                enabled: typeof body.enabled === 'boolean' ? body.enabled : world.config.enabled,
                 briefing: typeof body.briefing === 'boolean' ? body.briefing : world.config.briefing,
                 reminders: typeof body.reminders === 'boolean' ? body.reminders : world.config.reminders,
                 // chat_id bỏ trống ⇒ máy chủ giữ chat cũ.
@@ -412,6 +413,22 @@ describe('Kết nối › Telegram (thẻ)', () => {
     expect(host).toHaveTextContent('systemd');
     expect(host).toHaveTextContent(/Lần chạy gần nhất: 03\/10 08:00/);
     expect(host).toHaveTextContent('Sự cố đang mở: Ổ đĩa sắp đầy');
+  });
+
+  it('v0.1.70 (F092): "Tạm dừng" chỉ tắt gửi tin (PUT {enabled:false}, PIN), KHÔNG xoá token; "Bật lại" bật lại — không DELETE, không về form nối từ đầu', async () => {
+    const { calls } = go({ config: SAVED });
+    renderCard();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Tạm dừng' }));
+    await waitFor(() => expect(screen.getByTestId('telegram-target')).toHaveTextContent('đang tắt'));
+    expect(screen.queryByTestId('botfather-steps')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Tạm dừng' })).toBeNull();
+    // PIN: lần đầu 423 rồi gửi lại cùng thân ⇒ chỉ có PUT {enabled:false}, không DELETE.
+    expect(new Set(writes(calls).map((c) => `${c.method} ${JSON.stringify(c.body)}`))).toEqual(new Set(['PUT {"enabled":false}']));
+    await user.click(screen.getByRole('button', { name: 'Bật lại' }));
+    await waitFor(() => expect(screen.getByTestId('telegram-target')).toHaveTextContent('đang bật'));
+    expect(writes(calls).at(-1)).toMatchObject({ method: 'PUT', body: { enabled: true } });
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(false);
   });
 
   it('Tắt Telegram cần xác nhận: bấm Giữ lại không gọi DELETE; xác nhận → DELETE (PIN) → về trạng thái chưa cấu hình', async () => {

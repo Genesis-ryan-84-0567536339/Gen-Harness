@@ -280,6 +280,14 @@ function ConfiguredView({ t, onEdit, onHostRequested }: { t: TelegramConfig; onE
       void queryClient.invalidateQueries({ queryKey: BOSS_CHECKS_KEY });
     },
   });
+  // v0.1.70 (F092): tạm dừng / bật lại KHÔNG xoá token (PUT {enabled}, cần PIN) — "Tắt Telegram" bên dưới mới là gỡ hẳn.
+  const pause = useMutation({
+    mutationFn: (enabled: boolean) => api.notify.saveTelegram({ enabled }),
+    onSuccess: (c) => {
+      applyConfig(c);
+      toast(c.enabled ? 'Đã bật lại Telegram.' : 'Đã tạm dừng Telegram — token vẫn giữ, bấm Bật lại khi cần.', 'ok');
+    },
+  });
   const bot = str(t.bot_username);
   const chat = str(t.chat_id_masked);
   const last = t.last_test;
@@ -296,6 +304,9 @@ function ConfiguredView({ t, onEdit, onHostRequested }: { t: TelegramConfig; onE
         </Button>
         <Button variant="secondary" className="btn-27" icon="ph ph-pencil-simple" onClick={onEdit}>
           Đổi token/chat_id
+        </Button>
+        <Button variant="secondary" className="btn-27" icon={t.enabled ? 'ph ph-pause' : 'ph ph-play'} loading={pause.isPending} onClick={() => pause.mutate(!t.enabled)}>
+          {t.enabled ? 'Tạm dừng' : 'Bật lại'}
         </Button>
         <Button variant="ghost" className="btn-27" icon="ph ph-power" onClick={() => setConfirmOff(true)}>
           Tắt Telegram
@@ -321,6 +332,7 @@ function ConfiguredView({ t, onEdit, onHostRequested }: { t: TelegramConfig; onE
         <p className="muted-note">Chưa Gửi thử lần nào — bấm Gửi thử để chắc tin tới được điện thoại.</p>
       )}
       {test.isError ? <InlineError detail={errorDetail(test.error)}>{errorText(test.error)}</InlineError> : null}
+      {pause.isError ? <InlineError detail={errorDetail(pause.error)}>{errorText(pause.error)}</InlineError> : null}
       {confirmOff ? <DisableDialog onClose={() => setConfirmOff(false)} /> : null}
     </>
   );
