@@ -398,11 +398,11 @@ test.describe('cụm Cơ hội & Thị trường', () => {
     await expect(page.getByText('Trần Văn Hậu')).toBeVisible();
     await expect(page.getByText('Trịnh Mỹ Duyên')).toBeVisible();
 
-    await page.getByRole('button', { name: /Đã im lặng/ }).click();
+    await page.getByRole('button', { name: /^Im lặng/ }).click();
     await expect(page).toHaveURL(/et=WentSilent/);
     await expect(page.getByText('Trịnh Mỹ Duyên')).toBeVisible();
     await expect(page.getByText('Trần Văn Hậu')).toHaveCount(0);
-    await page.getByRole('button', { name: /Đã im lặng/ }).click(); // bỏ lọc lại
+    await page.getByRole('button', { name: /^Im lặng/ }).click(); // bỏ lọc lại
 
     await page.getByLabel('Chọn Trần Văn Hậu').check();
     await page.getByLabel('Chọn Đặng Hữu Trí').check();
