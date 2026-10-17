@@ -8,6 +8,7 @@ import { useProviders } from '../../lib/dataQueries';
 import { errorDetail, errorReasons, errorText } from '../../lib/errorText';
 import { useCan } from '../../lib/permissions';
 import { toast } from '../../lib/toast';
+import { AI_SOURCE_PATH } from '../../setup/steps';
 import { CardError, FriendlyErrorText, InlineError, Panel, PinHint, PIN_ROUTE_CHANGE_TITLE, ScreenHead, SkeletonLines, StateChip } from '../common';
 import { DefaultBadge } from '../../defaults/DefaultBadge';
 import { ModelPicker } from './ModelPicker';
@@ -134,7 +135,20 @@ export function ApiScreen() {
           </div>
         ) : providers.data.length === 0 ? (
           <div className="gh-card">
-            <EmptyState icon="ph ph-plugs" title="Chưa có nhà cung cấp nào" description={canManage ? 'Thêm nhà cung cấp đầu tiên để agent có model để gọi.' : 'Owner chưa thêm nhà cung cấp nào.'} />
+            <EmptyState
+              icon="ph ph-plugs"
+              title="Chưa có nhà cung cấp nào"
+              description={canManage ? 'Thêm nguồn AI đầu tiên để agent có model để gọi.' : 'Owner chưa thêm nhà cung cấp nào.'}
+              // v0.1.70 (F029): MỘT đường tới "thêm nguồn AI" (cùng `readiness.FIX_AI`): màn Thiết lập nguồn AI.
+              action={
+                canManage ? (
+                  <Link to={AI_SOURCE_PATH} className="gh-btn gh-btn--secondary btn-27" data-testid="api-add-source">
+                    <Icon name="ph ph-plus-circle" size={13} />
+                    Thêm / kiểm tra nguồn AI
+                  </Link>
+                ) : undefined
+              }
+            />
           </div>
         ) : (
           providers.data.map((p) => <ProviderCard key={p.id} provider={p} canManage={canManage} onAddKey={() => setAddingKeyFor(p)} />)

@@ -1,4 +1,5 @@
 import { KHO_LABEL } from '@gen-harness/contracts';
+import { AI_SOURCE_PATH } from '../setup/steps';
 
 /**
  * Hướng dẫn thiết lập: các việc tuỳ chọn 5–11 của trình thiết lập + (v0.1.39) 13 Kết nối Facebook, 14 Nối Gen-hub. Chữ viết cho Owner không rành kỹ
@@ -79,7 +80,8 @@ export const GUIDE: GuideItem[] = [
     n: 8,
     title: 'Tạo agent đầu tiên',
     why: 'Agent là "nhân viên AI" làm việc thay Sếp trên các kênh — có tên, vai trò và giọng nói riêng.',
-    prepare: ['Bộ não AI đã chạy (bước 4 của trình thiết lập — đã xong nếu Sếp đang ở Console).'],
+    // v0.1.70 (F029): Console mở sau bước 1–3 — bước 4 có thể đang "Để sau", nên KHÔNG nói "đã xong nếu Sếp ở Console".
+    prepare: ['Có ít nhất một nguồn AI chạy được (bước 4 của trình thiết lập — nếu Sếp đã để sau thì làm ở Thiết lập nguồn AI trước).'],
     steps: [
       'Bấm "Làm bước này".',
       'Chọn một "Mẫu" (ví dụ Trợ lý thương mại, CSKH, Thư ký cá nhân) — tên và vai trò được điền sẵn, chọn mẫu là xong.',
@@ -185,7 +187,8 @@ export const MODEL_GUIDE: GuideItem = {
     'Bấm "Tiếp tục".',
   ],
   doneWhen: 'Gen hoặc Sàng lọc đã được gán một model.',
-  console: { label: 'API & Model', to: '/api' },
+  // v0.1.70 (F029): cùng đích với mọi nút "Chọn model" / `readiness.FIX_AI` — màn Thiết lập nguồn AI.
+  console: { label: 'Thiết lập nguồn AI', to: AI_SOURCE_PATH },
 };
 
 export const GUIDE_BY_N: Record<number, GuideItem> = Object.fromEntries([MODEL_GUIDE, ...GUIDE].map((g) => [g.n, g]));

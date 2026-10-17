@@ -50,6 +50,8 @@ export interface P4ApiOptions {
 const FAILOVER_RULES: FailoverRule[] = [
   { key: 'hết hạn mức', value: 'chuyển xuống nhà cung cấp kế tiếp trong chuỗi (hạn mức Sếp đặt ở từng model)' },
   { key: 'ngắt mạch', value: 'giữ nguyên hội thoại, thử lại sau 60 giây' },
+  { key: 'hộp Antigravity', value: 'vai chạy Antigravity qua hộp riêng (soạn lại / dịch nháp tin khách, sàng lọc tin, agent ngoại giao, Gen của nhân viên) mà hộp chưa chạy thì bỏ qua Antigravity và chuyển nguồn kế tiếp — không bao giờ chạy thay trong tiến trình; Gen của Sếp và Bản tin Gen không cần hộp' },
+  { key: 'việc nền', value: 'việc nền (sàng lọc tin, trực việc, Bản tin Gen) bỏ qua Claude Code CLI trừ khi Sếp đã cho phép ở Bộ não AI; Antigravity không cần cho phép này. Chỉ còn Claude Code CLI chưa được phép thì hết chuỗi và báo Sếp' },
   { key: 'hết chuỗi', value: 'xếp hàng và báo Sếp qua hàng đợi cần xử lý' },
   { key: 'ngưỡng cảnh báo', value: 'còn dưới 20% hạn mức ngày trên model nào Sếp đã đặt hạn mức' },
 ];

@@ -55,7 +55,7 @@ async def test_failover_rules_static(owner_api) -> None:  # type: ignore[no-unty
     r = await owner_api.get("/failover-rules")
     assert r.status_code == 200
     keys = {i["key"] for i in r.json()}
-    assert keys == {"hết hạn mức", "ngắt mạch", "hết chuỗi", "ngưỡng cảnh báo"}
+    assert keys == {"hết hạn mức", "ngắt mạch", "hộp Antigravity", "việc nền", "hết chuỗi", "ngưỡng cảnh báo"}
 
 
 async def test_provider_chain_reorder(owner_api) -> None:  # type: ignore[no-untyped-def]
