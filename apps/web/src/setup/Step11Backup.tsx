@@ -13,7 +13,7 @@ const FREQUENCY_OPTIONS: Array<{ value: Frequency; label: string }> = [
 ];
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-/** Bước 11 — Sao lưu. v0.1.55 (Thiết lập gọn): sao lưu TỰ BẬT hằng ngày 02:00, giữ 7 bản — đi tiếp hay "Để sau" đều ghi lịch mặc
+/** Bước 11 — Sao lưu. v0.1.55 (Thiết lập gọn): sao lưu TỰ BẬT hằng ngày 02:00, giữ theo vòng đời GFS (7 bản theo ngày, 4 theo tuần, 12 theo tháng) — đi tiếp hay "Để sau" đều ghi lịch mặc
  * định; đổi giờ / tần suất nằm trong mục "Đổi lịch" (đóng sẵn). (PLAN 4.6) Chỉ lưu LỊCH (`frequency`/`time_of_day`) — đích LUÔN trong máy và
  * vòng đời GIỮ LUÔN CỐ ĐỊNH theo GFS 7 ngày/4 tuần/12 tháng (`gh/backup.py`, v0.1.1 mục 5.6), không cấu hình
  * được ở đây (nên KHÔNG có ô "giữ bao nhiêu bản" hay đích MinIO — MinIO đã gỡ khỏi hệ thống ở v0.1.1). Vẫn gửi
@@ -66,8 +66,8 @@ export function Step11Backup({ meta, status, description, onBack, onSaved, formR
         <div className="setup-section__title">{scheduled ? 'Sao lưu đã tự bật' : 'Sao lưu sẽ tự bật khi Sếp đi tiếp'}</div>
         <p className="muted-note">
           {scheduled
-            ? 'Hằng ngày lúc 02:00, giữ 7 bản gần nhất, lưu mã hoá ngay trong máy chủ. Đi tiếp hay bấm Để sau thì lịch này vẫn chạy; muốn đổi giờ hay tần suất thì mở “Đổi lịch” bên dưới.'
-            : 'Hằng ngày lúc 02:00, giữ 7 bản gần nhất, lưu mã hoá ngay trong máy chủ. Lịch này chỉ được ghi khi Sếp bấm Tiếp tục hoặc Để sau ở bước này; rời đi trước đó thì máy chưa tự sao lưu. Muốn đổi giờ hay tần suất thì mở “Đổi lịch” bên dưới.'}
+            ? 'Hằng ngày lúc 02:00, giữ 7 bản theo ngày, 4 theo tuần, 12 theo tháng, lưu mã hoá ngay trong máy chủ. Đi tiếp hay bấm Để sau thì lịch này vẫn chạy; muốn đổi giờ hay tần suất thì mở “Đổi lịch” bên dưới.'
+            : 'Hằng ngày lúc 02:00, giữ 7 bản theo ngày, 4 theo tuần, 12 theo tháng, lưu mã hoá ngay trong máy chủ. Lịch này chỉ được ghi khi Sếp bấm Tiếp tục hoặc Để sau ở bước này; rời đi trước đó thì máy chưa tự sao lưu. Muốn đổi giờ hay tần suất thì mở “Đổi lịch” bên dưới.'}
         </p>
       </div>
       <details className="setup-section brain-advanced">

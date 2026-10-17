@@ -351,7 +351,7 @@ describe('bước 11 — sao lưu tự bật hằng ngày 02:00, giữ 7 bản',
     // v0.1.69 (F103): chưa bấm Tiếp tục/Để sau thì lịch CHƯA được ghi ⇒ không nói "đã tự bật".
     expect(note).toHaveTextContent('Sao lưu sẽ tự bật khi Sếp đi tiếp');
     expect(note).not.toHaveTextContent('Sao lưu đã tự bật');
-    expect(note).toHaveTextContent('Hằng ngày lúc 02:00, giữ 7 bản gần nhất');
+    expect(note).toHaveTextContent('Hằng ngày lúc 02:00, giữ 7 bản theo ngày, 4 theo tuần, 12 theo tháng');
     expect(screen.getByText('Đổi lịch (không bắt buộc)').closest('details')).not.toHaveAttribute('open');
     expect(screen.getByLabelText('Giờ chạy (HH:MM)')).toHaveValue('02:00');
     expect(screen.getByRole('button', { name: 'Để sau' })).toBeInTheDocument(); // "Để sau" vẫn ghi lịch mặc định (máy chủ)

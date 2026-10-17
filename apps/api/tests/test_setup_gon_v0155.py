@@ -22,6 +22,21 @@ from tests.conftest import OWNER, Api
 from tests.phase2 import org_id
 from tests.test_ux_v0128 import _provider
 
+
+def test_step11_note_states_the_real_gfs_retention() -> None:
+    """Review P2-3: bước 11 từng nói "giữ 7 bản gần nhất" — thật ra vòng đời GFS giữ 7 ngày/4 tuần/12 tháng
+    (`gh.backup`). Câu ở web phải khớp các hằng của máy chủ, không tự bịa số."""
+    from pathlib import Path
+
+    from gh import backup
+
+    step11 = Path(__file__).resolve().parents[3] / "apps" / "web" / "src" / "setup" / "Step11Backup.tsx"
+    src = step11.read_text(encoding="utf-8")
+    want = f"giữ {backup.DAILY_KEEP} bản theo ngày, {backup.WEEKLY_KEEP} theo tuần, {backup.MONTHLY_KEEP} theo tháng"
+    assert src.count(want) == 2  # hai câu: lịch đã ghi / chưa ghi
+    assert "giữ 7 bản gần nhất" not in src
+
+
 DEFAULT_BACKUP = {"frequency": "daily", "time_of_day": "02:00", "retention_count": 7, "destination": "local"}
 
 
