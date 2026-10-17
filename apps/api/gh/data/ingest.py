@@ -592,11 +592,21 @@ async def handle_directory(db: AsyncSession, redis: Redis, org_id: uuid.UUID, p:
     # Nhật ký lắng nghe — chỉ một dòng tóm tắt `groups_synced`.
     first_sync = (await db.execute(text("SELECT 1 FROM core.groups WHERE channel_id = :c LIMIT 1"),
                                    {"c": channel.id})).first() is None
+    # Lần quét KHÔNG phải đầu tiên cũng có thể thấy hàng trăm nhóm mới cùng lúc (đăng nhập tài khoản khác, bridge
+    # vừa báo một nhóm lạ trước lần quét đầu): chỉ ghi tối đa MAX_GROUP_NEW_EVENTS dòng «nhóm mới» (và phát
+    # WebSocket tương ứng), phần còn lại gom vào MỘT dòng tóm tắt `groups_synced` — như left/rejoined (≤ 50).
+    new_events = suppressed = 0
     for g in p.get("groups") or []:
         if not g.get("external_id"):
             continue
+        quiet = first_sync or new_events >= lev.MAX_GROUP_NEW_EVENTS
         row, created = await upsert_group_ex(db, org_id, channel, str(g["external_id"]), g.get("name"),
-                                             g.get("member_count"), quiet=first_sync)
+                                             g.get("member_count"), quiet=quiet)
+        if created and not first_sync:
+            if quiet:
+                suppressed += 1
+            else:
+                new_events += 1
         n += 1
         seen.append(str(g["external_id"]))
         members = (g.get("members") or [])[:5000]
@@ -641,6 +651,9 @@ async def handle_directory(db: AsyncSession, redis: Redis, org_id: uuid.UUID, p:
     if first_sync and n:
         await lev.record(db, org_id, "groups_synced", channel_id=channel.id, channel_type=channel.type,
                          detail={"groups": n})
+    elif suppressed:
+        await lev.record(db, org_id, "groups_synced", channel_id=channel.id, channel_type=channel.type,
+                         detail={"groups": suppressed, "extra": True})
     await sync_listen_sets(db, redis, org_id)
     return n
 

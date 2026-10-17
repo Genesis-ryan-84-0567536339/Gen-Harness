@@ -296,6 +296,29 @@ async def test_directory_events_first_sync_is_summary_then_changes_are_events(ow
     assert "group_rejoined" in {i["event_type"] for i in (await _log(owner_api, "?kind=event"))["items"]}
 
 
+async def test_many_new_groups_after_first_sync_are_capped_with_a_summary_line(owner_api: Api, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """Review Opus P3: quét danh bạ KHÔNG phải lần đầu thấy hàng trăm nhóm mới (đổi tài khoản) ⇒ chỉ ghi ≤ 50 dòng
+    «nhóm mới» (kèm WebSocket), phần dư gom một dòng tóm tắt; nhóm vẫn được tạo đủ."""
+    org = await org_id(db)
+    await handle_directory(db, redis, org, {"channel": "zalo", "groups_complete": False,
+                                            "groups": [{"external_id": "g0", "name": "Nhóm đầu"}]})
+    await db.commit()
+    total = listen_events.MAX_GROUP_NEW_EVENTS + 20
+    await handle_directory(db, redis, org, {"channel": "zalo", "groups_complete": False,
+                                            "groups": [{"external_id": f"gn{i}", "name": f"Nhóm mới {i}"}
+                                                       for i in range(total)]})
+    n_groups = (await db.execute(text("SELECT count(*) FROM core.groups WHERE external_id LIKE 'gn%'"))).scalar_one()
+    assert n_groups == total
+    counts = {r.kind: r.n for r in (await db.execute(text(
+        "SELECT kind, count(*) AS n FROM ops.listen_events GROUP BY kind"))).all()}
+    assert counts.get("group_new", 0) == listen_events.MAX_GROUP_NEW_EVENTS
+    assert counts.get("groups_synced", 0) == 2        # lần quét đầu + dòng tóm tắt phần dư
+    assert len(listen_events.take_pending(db)) == listen_events.MAX_GROUP_NEW_EVENTS + 2   # + 2 dòng tóm tắt
+    await db.commit()
+    texts = [i["text"] for i in (await _log(owner_api, "?kind=event"))["items"] if i["event_type"] == "groups_synced"]
+    assert any("còn 20 nhóm mới nữa" in t for t in texts)
+
+
 async def test_new_group_follows_new_group_mode_setting(owner_api: Api, db, redis) -> None:  # type: ignore[no-untyped-def]
     org = await org_id(db)
     await db.execute(text("""UPDATE core.organizations
