@@ -9,7 +9,7 @@ Cấu hình: `deploy/compose.yaml` (dịch vụ `agy-box`, mạng `agy-bus` nộ
 ```python
 from gh.agybox.client import AgyBoxClient, box_status, BoxUnavailable, BoxUnauthorized
 
-client = AgyBoxClient.from_env(timeout=240)   # None nếu hộp chưa cài (thiếu GH_AGYBOX_URL / tệp khoá)
+client = AgyBoxClient.from_env(timeout=240, cli_home=settings.cli_home)   # None nếu hộp chưa cài (thiếu URL / tệp khoá)
 # hoặc AgyBoxClient("http://agy-box:8090", "/run/secrets/gh_agy_key", 240)
 await client.generate(model, messages, json_mode=..., temperature=..., effort=None)  # -> Completion
 await client.discover_models()   # -> list[dict]; client.last_models_raw (đã che)
@@ -18,7 +18,8 @@ await client.diagnose(model, effort, prompt)   # chỉ trạng thái hộp + `ag
 client.kind == "antigravity_cli"; client.embed(...) -> BadRequest
 
 st = await box_status()          # cache 10 giây; không tham số = đọc GH_AGYBOX_URL / GH_AGYBOX_KEY_FILE
-# {"state": "ok"|"down"|"not_installed", "checked_at": "…Z", "agy_version": "1.2.9"|None, "cli_logged_in": bool|None}
+# {"state": "ok"|"down"|"not_installed", "checked_at": "…Z", "agy_version": "1.2.9"|None, "cli_logged_in": None}
+# (hộp không giữ phiên từ gói sửa review — `cli_logged_in` luôn None; có phiên hay không do api tự biết)
 ```
 
 - `not_installed`: chưa cấu hình URL/khoá (dev, bản cài cũ trước `genh update`). `down`: đã cấu hình mà `/healthz` không trả lời.
@@ -48,10 +49,14 @@ st = await box_status()          # cache 10 giây; không tham số = đọc GH_
 
 | Đường | Ký | Yêu cầu | Trả lời 200 |
 |---|---|---|---|
-| `GET /healthz` | không | — | `{ok, service:"agy-box", protocol:1, agy_version, cli_logged_in}` |
-| `POST /v1/generate` | có | `{request_id, model, effort\|null, prompt, json_mode, timeout_s}` | `{request_id, text, tokens_in, tokens_out, raw}` |
-| `POST /v1/models` | có | `{request_id, timeout_s?}` | `{request_id, models:[{id,…}], raw_text}` |
+| `GET /healthz` | không | — | `{ok, service:"agy-box", protocol:2, agy_version, cli_logged_in:null}` |
+| `POST /v1/generate` | có | `{request_id, model, effort\|null, prompt, json_mode, timeout_s, session}` | `{request_id, text, tokens_in, tokens_out, raw}` |
+| `POST /v1/models` | có | `{request_id, timeout_s?, session}` | `{request_id, models:[{id,…}], raw_text}` |
 
+- `session` (protocol 2, gói sửa review v0.1.63 P1-1): nội dung tệp token agy (`antigravity-oauth-token`) của hồ sơ đang hoạt động — chuỗi JSON
+  đối tượng ≤ 64 KiB. Client đọc từ kho phiên của api/worker (`GH_CLI_HOME`, mở `O_NOFOLLOW`, tệp thường, đã kiểm khuôn); không có ⇒ `AuthFailed`
+  ngay ở client (không gọi hộp), đang gửi tạm khi thêm tài khoản ⇒ `ProviderError`. Hộp thiếu / sai khuôn ⇒ `400 bad_request`. Hộp đặt nó vào HOME
+  tạm 0700 của đúng lượt đó (tmpfs, xoá sau lượt), KHÔNG lưu và KHÔNG trả lại — token agy làm mới trong hộp bị bỏ cùng HOME tạm.
 - `request_id`: `[A-Za-z0-9_-]{1,64}`. `timeout_s`: 1–600 (mặc định 300; models 60). Prompt ghép như `AgyClient` (`[role]\n…`).
 - **Ký**: header `X-GH-Ts` (giây UNIX) và `X-GH-Sig` = hex HMAC-SHA256 bằng subkey `sha256(gh_agy_key ‖ "gh-agybox:" ‖ "request")`
   trên `"gh-agybox-v1\n" + METHOD + "\n" + PATH + "\n" + TS + "\n" + thân`. Lệch giờ > 60 giây, thiếu/sai chữ ký, hoặc dùng lại đúng
@@ -65,12 +70,13 @@ st = await box_status()          # cache 10 giây; không tham số = đọc GH_
 
 ## Cô lập (tóm tắt) và cách kiểm
 
-- Hộp chỉ có: secret `gh_agy_key`, volume `agy_state` (token OAuth agy), env `GH_AGYBOX_KEY_FILE`, `GH_CLI_HOME`, `GH_CLI_BINARY`,
-  `AGY_CLI_DISABLE_AUTO_UPDATE`, `GH_AGYBOX_MAX_JOBS`. `read_only`, `cap_drop: [ALL]`, `no-new-privileges`, uid `gh`, không `default`/`browser-bus`.
+- Hộp chỉ có: secret `gh_agy_key`, env `GH_AGYBOX_KEY_FILE`, `GH_CLI_BINARY`, `AGY_CLI_DISABLE_AUTO_UPDATE`, `GH_AGYBOX_MAX_JOBS`
+  (cộng biến proxy lối ra khi có). **Không mount volume nào** (từ gói sửa review, P1-1 — trước đó mount `agy_state` ghi được, dùng chung với agy
+  trong tiến trình api/worker: agy trong hộp bị lừa có thể sửa `settings.json`, `mcp/`, `customizations/`, lịch sử mà agy của Gen Sếp đọc lại).
+  Thứ duy nhất ghi được là tmpfs `/tmp` (HOME tạm mỗi lượt). `read_only`, `cap_drop: [ALL]`, `no-new-privileges`, uid `gh`, không `default`/`browser-bus`.
   Tiến trình hộp tự xoá mọi biến `GH_*` ngoài danh sách và không import `gh.config`/DB/Redis/crypto.
 - Test: `apps/api/tests/test_agybox_v0163.py` (giao thức, server, client, sức khoẻ), `test_agybox_compose_v0163.py` (YAML cô lập).
-- Kiểm thật (project riêng, không đụng bản cài): dựng `docker compose -p <tên riêng> -f deploy/compose.yaml up -d --no-deps agy-box`
-  sau khi mồi volume `agy_state` bằng một container tạm mount thường (giống api chép ảnh trước); trong hộp `ls /run/secrets` chỉ
+- Kiểm thật (project riêng, không đụng bản cài): dựng `docker compose -p <tên riêng> -f deploy/compose.yaml up -d --no-deps agy-box`; trong hộp `ls /run/secrets` chỉ
   thấy `gh_agy_key`, `env` không có biến DB/Redis/khoá, ghi `/app` bị từ chối, `CapEff=0`, `NoNewPrivs=1`, không phân giải `db`/`redis`/`api`,
   không nối được IP của container ở mạng khác; một container tạm ở `agy-bus` gọi được hộp với HMAC đúng và nhận `401` khi sai khoá, lệch giờ, phát lại.
 
@@ -79,7 +85,14 @@ st = await box_status()          # cache 10 giây; không tham số = đọc GH_
 - Lối ra `agy-out` hiện KHÔNG có allowlist tên miền. Đã đo (agy 1.2.9, token giả, mạng chỉ có proxy ghi CONNECT): agy **có** theo
   `HTTPS_PROXY` — thấy CONNECT tới `antigravity-unleash.goog:443` và `play.googleapis.com:443` (hai tên miền chưa có trong danh sách đoán ban đầu). Chưa
   đo được đường gọi model/OAuth thật (cần đăng nhập thật nên chưa làm), vì vậy chưa dựng proxy allowlist: làm khi có phiên đăng nhập để ghi đủ tên miền.
-- Làm mới token đồng thời giữa agy trong api (đăng nhập, lượt inproc của core) và agy trong hộp dùng chung volume `agy_state`: khoá `flock`
-  quanh làm mới/ghi tệp token đã có từ v0.1.62 (`AgyClient.generate` → `token_flock_async`, hộp dùng chính `AgyClient`) nên cùng tệp khoá trong volume; đăng nhập chạy ở api chứ không trong hộp.
+- **HOME tạm mỗi lượt (gói sửa review, P1-1)**: mọi lượt agy — trong hộp lẫn trong tiến trình api/worker — chạy với HOME là thư mục mới 0700
+  (`clients.make_turn_home`, xoá sau lượt) chỉ chứa tệp token; không chép `settings.json`/`mcp`/`customizations`/lịch sử. Cấu hình agy là mặc
+  định của bản cài (chưa sinh `settings.json` an toàn từ mã: tên/giá trị khoá chưa kiểm được trên phiên thật — Nợ). Trong tiến trình, token agy
+  làm mới được chép ngược về kho phiên bởi `clients.sync_token_back`: chỉ đúng tệp token, đối tượng JSON ≤ 64 KiB, cùng email (id_token) với bản
+  đã đưa vào, dưới `flock`, so-và-đổi (tệp trong kho phải còn đúng bản đã đưa vào), tệp tạm `O_EXCL|O_NOFOLLOW` + `rename`. Lượt trong cửa sổ làm
+  mới vẫn giữ khoá độc quyền cả lượt như v0.1.62. Hộp không chép ngược gì.
+- Rủi ro chấp nhận: hộp và api có thể cùng làm mới access token từ một refresh token. Google OAuth không xoay vòng refresh token khi làm mới
+  (theo trí nhớ, chưa kiểm tra trên phiên agy thật); nếu agy thật có xoay vòng, lượt hộp làm mới sẽ làm phiên của api hỏng ⇒ thẻ báo hết hạn —
+  ghi vào Nợ #46 để kiểm khi Sếp đăng nhập.
   Định dạng trường hạn của tệp token agy thật chưa xác minh (ROADMAP Nợ #46).
 - Cổng nội bộ 8090 không publish ra máy chủ; `agy-bus` là mạng `internal`.

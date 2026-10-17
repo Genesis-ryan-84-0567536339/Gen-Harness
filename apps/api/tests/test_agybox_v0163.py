@@ -41,9 +41,13 @@ class Clock:
         return self.t
 
 
+SESSION = json.dumps({"access_token": "tok", "expiry": 4102444800})
+
+
 def _signin(home: Path) -> None:
+    """Kho phiên agy của api/worker (hộp không có kho phiên — client gửi tệp token theo từng yêu cầu, protocol 2)."""
     home.mkdir(parents=True, exist_ok=True)
-    (home / "antigravity-oauth-token").write_text(json.dumps({"access_token": "tok", "expiry": 4102444800}))
+    (home / "antigravity-oauth-token").write_text(SESSION)
 
 
 @pytest.fixture
@@ -54,13 +58,14 @@ def box(tmp_path: Path):  # type: ignore[no-untyped-def]
     home = tmp_path / "agy" / ".gemini" / "antigravity-cli"
     _signin(home)
     clock = Clock()
-    cfg = server.Config(key_file=str(keyfile), cli_home=str(home),
-                        cli_binary=_wrapper(tmp_path, "agy", FIX / "fake_agy_box_probe.py"), max_jobs=2)
+    cfg = server.Config(key_file=str(keyfile), cli_binary=_wrapper(tmp_path, "agy", FIX / "fake_agy_box_probe.py"),
+                        max_jobs=2)
     app = server.create_app(cfg, clock=clock)
     transport = httpx.ASGITransport(app=app)
 
     def make(timeout: float = 30.0, key_file: str | None = None) -> AgyBoxClient:
-        return AgyBoxClient(URL, key_file or str(keyfile), timeout, transport=transport, clock=clock)
+        return AgyBoxClient(URL, key_file or str(keyfile), timeout, cli_home=str(home), transport=transport,
+                            clock=clock)
 
     class Box:
         pass
@@ -82,7 +87,7 @@ async def _raw(box: Any, method: str, path: str, body: bytes, *, key: bytes = KE
 
 def _body(**kw: Any) -> bytes:
     base = {"request_id": "r-1", "model": "gemini-3.8-flash", "effort": None, "prompt": "xin chào", "json_mode": False,
-            "timeout_s": 20}
+            "timeout_s": 20, "session": SESSION}
     base.update(kw)
     return json.dumps(base).encode()
 
@@ -116,8 +121,8 @@ async def test_healthz_open_and_minimal(box) -> None:  # type: ignore[no-untyped
     r = await _raw(box, "GET", "/healthz", b"", sign=False)
     assert r.status_code == 200
     j = r.json()
-    assert j["ok"] is True and j["service"] == "agy-box" and j["protocol"] == 1
-    assert j["agy_version"] == "1.2.9" and j["cli_logged_in"] is True
+    assert j["ok"] is True and j["service"] == "agy-box" and j["protocol"] == 2
+    assert j["agy_version"] == "1.2.9" and j["cli_logged_in"] is None      # hộp không giữ phiên
     assert set(j) == {"ok", "service", "protocol", "agy_version", "cli_logged_in"}
 
 
@@ -136,7 +141,7 @@ async def test_bad_signature_expired_missing_replayed_all_401(box) -> None:  # t
     assert good.status_code == 200                                        # đúng khoá, đúng giờ ⇒ qua
     assert protocol.SIG_HEADER in good.headers                            # trả lời đã xác thực thì có ký
     # Phát lại đúng bản ký đó trong cửa sổ 60 giây ⇒ 401
-    mbody = b'{"request_id": "r-2"}'
+    mbody = json.dumps({"request_id": "r-2", "session": SESSION}).encode()
     hdr = protocol.sign_request(KEY, "POST", "/v1/models", mbody, box.clock())
     async with httpx.AsyncClient(transport=box.transport, base_url=URL) as c:
         first = await c.post("/v1/models", content=mbody, headers=hdr)
@@ -169,6 +174,50 @@ async def test_bad_json_and_fields_400(box) -> None:  # type: ignore[no-untyped-
                 _body(model="--dangerously-skip-permissions")):
         r = await _raw(box, "POST", "/v1/generate", raw)
         assert r.status_code == 400 and r.json()["error"]["code"] == "bad_request", raw
+
+
+async def test_session_is_required_and_checked(box) -> None:  # type: ignore[no-untyped-def]
+    """Review v0.1.63 (P1-1): hộp không có kho phiên — thiếu / sai khuôn `session` ⇒ 400, agy không được chạy."""
+    for sess in (None, "", "khong-phai-json", "[]", json.dumps({"a": "x" * 70_000}), 5):
+        body = json.loads(_body())
+        if sess is None:
+            body.pop("session")
+        else:
+            body["session"] = sess
+        r = await _raw(box, "POST", "/v1/generate", json.dumps(body).encode())
+        assert r.status_code == 400 and r.json()["error"]["code"] == "bad_request", sess
+    m = await _raw(box, "POST", "/v1/models", b'{"request_id": "r-9"}')
+    assert m.status_code == 400
+
+
+async def test_box_turn_home_is_fresh_and_never_persisted(box, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Mỗi lượt trong hộp: HOME tạm chỉ có tệp token gửi kèm; agy ghi cấu hình độc / làm mới token cũng không còn gì ở
+    lượt sau, và kho phiên của api không bị đụng tới."""
+    app = server.create_app(server.Config(key_file=str(box.keyfile),
+                                          cli_binary=_wrapper(tmp_path, "agy2", FIX / "fake_agy_home.py")),
+                            clock=box.clock)
+    c = AgyBoxClient(URL, str(box.keyfile), 20, cli_home=str(box.home), transport=httpx.ASGITransport(app=app),
+                     clock=box.clock)
+    before = sorted(p.name for p in box.home.iterdir())
+    for head in ("POISON", "REFRESH"):
+        assert (await c.generate("gemini-3.8-flash", [Message("user", head)], json_mode=False,
+                                 temperature=0)).text == "echo:" + head
+    out = json.loads((await c.generate("gemini-3.8-flash", [Message("user", "LIST")], json_mode=False,
+                                       temperature=0)).text)
+    assert out["files"] == [".gemini/antigravity-cli/antigravity-oauth-token"]
+    assert sorted(p.name for p in box.home.iterdir()) == before
+    assert (box.home / "antigravity-oauth-token").read_text() == SESSION            # không chép ngược từ hộp
+
+
+async def test_client_without_session_fails_before_network(box) -> None:  # type: ignore[no-untyped-def]
+    (box.home / "antigravity-oauth-token").write_text("khong-phai-json")
+    with pytest.raises(AuthFailed):
+        await box.make().generate("gemini-3.8-flash", [Message("user", "x")], json_mode=False, temperature=0)
+    (box.home / "antigravity-oauth-token").unlink()
+    (box.home / "antigravity-oauth-token.before-login").write_text(SESSION)
+    with pytest.raises(ProviderError) as e:
+        await box.make().discover_models()
+    assert not isinstance(e.value, AuthFailed)
 
 
 # ─── server + client: luồng thật với agy giả ─────────────────────────────────────────────────────────────────
@@ -244,9 +293,9 @@ async def test_model_rejected_keeps_details(tmp_path) -> None:  # type: ignore[n
     home.mkdir(parents=True)
     (home / "antigravity-oauth-token").write_text(json.dumps({"access_token": "t", "id_token": f"h.{claims}.s"}))
     clock = Clock()
-    app = server.create_app(server.Config(key_file=str(keyfile), cli_home=str(home),
+    app = server.create_app(server.Config(key_file=str(keyfile),
                                           cli_binary=_wrapper(tmp_path, "agy", FIX / "fake_agy_multi.py")), clock=clock)
-    c = AgyBoxClient(URL, str(keyfile), 20, transport=httpx.ASGITransport(app=app), clock=clock)
+    c = AgyBoxClient(URL, str(keyfile), 20, cli_home=str(home), transport=httpx.ASGITransport(app=app), clock=clock)
     with pytest.raises(ModelRejected) as e:
         await c.generate("khong-co-model", [Message("user", "x")], json_mode=False, temperature=0)
     assert e.value.what == "model" and "gemini-3.8-flash" in e.value.available
@@ -258,7 +307,8 @@ async def test_busy_when_max_jobs_reached(box, tmp_path) -> None:  # type: ignor
     box.cfg.max_jobs = 1
     app = server.create_app(box.cfg, clock=box.clock)
     t = httpx.ASGITransport(app=app)
-    mk = lambda: AgyBoxClient(URL, str(box.keyfile), 30, transport=t, clock=box.clock)  # noqa: E731
+    mk = lambda: AgyBoxClient(URL, str(box.keyfile), 30, cli_home=str(box.home), transport=t,  # noqa: E731
+                              clock=box.clock)
     slow = asyncio.create_task(mk().generate("gemini-3.8-flash", [Message("user", "SLEEP")], json_mode=False,
                                              temperature=0))
     await asyncio.sleep(0.5)
@@ -279,7 +329,7 @@ async def test_tampered_response_signature_rejected(box) -> None:  # type: ignor
             headers = {k: v for k, v in r.headers.items() if k.lower() != "content-length"}
             return httpx.Response(r.status_code, headers=headers, content=body)
 
-    c = AgyBoxClient(URL, str(box.keyfile), 20, transport=Evil(), clock=box.clock)
+    c = AgyBoxClient(URL, str(box.keyfile), 20, cli_home=str(box.home), transport=Evil(), clock=box.clock)
     with pytest.raises(ProviderError, match="chữ ký"):
         await c.generate("gemini-3.8-flash", [Message("user", "x")], json_mode=False, temperature=0)
 
@@ -292,11 +342,12 @@ def test_config_reads_only_allowlisted_env(tmp_path: Path) -> None:
            "GH_DATABASE_URL": "postgresql://x", "GH_ADMIN_DATABASE_URL": "y", "GH_REDIS_URL": "redis://r",
            "GH_MASTER_KEY_FILE": "/run/secrets/gh_master_key", "GH_BRIDGE_KEY_FILE": "b", "GH_BROWSER_KEY_FILE": "c"}
     cfg = server.load_config(env)
-    assert (cfg.key_file, cfg.cli_home, cfg.cli_binary, cfg.max_jobs) == (str(keyfile), "/h", "agy", 3)
+    assert (cfg.key_file, cfg.cli_binary, cfg.max_jobs) == (str(keyfile), "agy", 3)
     assert not any("postgres" in str(v) or "redis" in str(v) or "master" in str(v) for v in vars(cfg).values())
     scrubbed = dict(env)
     server.scrub_environ(scrubbed)
-    assert sorted(scrubbed) == sorted(["GH_AGYBOX_KEY_FILE", "GH_CLI_HOME", "GH_CLI_BINARY", "GH_AGYBOX_MAX_JOBS"])
+    # GH_CLI_HOME của ảnh api cũng bị xoá: hộp không có kho phiên (review v0.1.63, P1-1).
+    assert sorted(scrubbed) == sorted(["GH_AGYBOX_KEY_FILE", "GH_CLI_BINARY", "GH_AGYBOX_MAX_JOBS"])
     with pytest.raises(RuntimeError):
         server.load_config({})                                           # thiếu GH_AGYBOX_KEY_FILE
 

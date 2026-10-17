@@ -25,6 +25,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 import struct
 import termios
 import time
@@ -46,10 +47,15 @@ from gh.config import get_settings
 from gh.providers.clients import (
     CLAUDE_CRED_FILE,
     CLAUDE_STATE_FILE,
+    SESSION_FILE_MAX_BYTES,
     TOKEN_FILE,
+    atomic_write_nofollow,
     claude_env,
     cli_env,
     cli_home_dir,
+    is_regular_file,
+    read_regular_nofollow,
+    read_token_file,
     token_flock,
 )
 
@@ -144,19 +150,33 @@ def _guard(kind: str) -> contextlib.AbstractContextManager[bool]:
     return contextlib.nullcontext(True)
 
 
+def _drop_link(path: Path) -> bool:
+    """Review v0.1.63 (P1-1): `path` có mà KHÔNG phải tệp thường (liên kết tượng trưng, thư mục…) ⇒ gỡ nó (chỉ gỡ đúng
+    tên, không đi theo liên kết) và trả True. Tệp phiên chỉ được là tệp thường."""
+    if not os.path.lexists(path) or is_regular_file(path):
+        return False
+    log.warning("Tệp phiên CLI %s không phải tệp thường — gỡ bỏ, không dùng", path.name)
+    with contextlib.suppress(OSError):
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+    return True
+
+
 def park_token(kind: str = AGY) -> None:
     """Gửi tạm tệp phiên đang dùng để CLI khởi động ở trạng thái CHƯA đăng nhập (mới hiện link đăng nhập)."""
     path = token_path(kind)
     with _guard(kind):
-        if path.exists():
-            path.replace(backup_path(kind))
+        if not _drop_link(path) and is_regular_file(path):
+            path.replace(backup_path(kind))      # rename: không đi theo liên kết
 
 
 def unpark_token(kind: str = AGY) -> bool:
     """Trả tệp phiên đã gửi tạm về chỗ cũ (đăng nhập lỗi/huỷ, hoặc api chết giữa chừng). True nếu có trả."""
     bak = backup_path(kind)
     with _guard(kind):
-        if not bak.exists():
+        if _drop_link(bak) or not is_regular_file(bak):
             return False
         bak.replace(token_path(kind))
         return True
@@ -173,7 +193,7 @@ async def unpark_token_async(kind: str = AGY) -> bool:
 
 
 def drop_parked_token(kind: str = AGY) -> None:
-    with contextlib.suppress(FileNotFoundError):
+    with contextlib.suppress(FileNotFoundError, IsADirectoryError):
         backup_path(kind).unlink()
 
 
@@ -189,17 +209,33 @@ def _json(raw: bytes | str | None) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _read_json_file(path: Path) -> dict[str, Any] | None:
+    """Đối tượng JSON trong tệp THƯỜNG `path` (O_NOFOLLOW, ≤ 4 MiB); không có / liên kết / không phải đối tượng
+    ⇒ None."""
+    raw = read_regular_nofollow(path, SESSION_FILE_MAX_BYTES)
+    if raw is None:
+        return None
+    try:
+        data = orjson.loads(raw)
+    except orjson.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def read_session(kind: str = AGY) -> bytes | None:
     """Phiên đang dùng trong thư mục CLI dưới dạng bytes để mã hoá vào hồ sơ (agy: chính tệp token; Claude: gói
-    {credentials, oauthAccount})."""
+    {credentials, oauthAccount}).
+
+    Review v0.1.63 (P1-1): chỉ tệp THƯỜNG (không đi theo liên kết tượng trưng, kể cả thư mục chứa), có giới hạn kích
+    thước, và là đối tượng JSON — không đạt ⇒ None (không bao giờ lưu vào hồ sơ)."""
     path = token_path(kind)
-    if not path.exists():
-        return None
-    raw = path.read_bytes()
     if kind != CLAUDE:
-        return raw
-    state = _json((path.parent / CLAUDE_STATE_FILE).read_bytes()) if (path.parent / CLAUDE_STATE_FILE).exists() else {}
-    return orjson.dumps({"credentials": _json(raw), "oauthAccount": state.get("oauthAccount")})
+        return read_token_file(path)
+    creds = _read_json_file(path)
+    if creds is None:
+        return None
+    state = _read_json_file(path.parent / CLAUDE_STATE_FILE) or {}
+    return orjson.dumps({"credentials": creds, "oauthAccount": state.get("oauthAccount")})
 
 
 async def write_session_async(kind: str, raw: bytes) -> None:
@@ -215,7 +251,7 @@ def write_session(kind: str, raw: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     _atomic_write(path, orjson.dumps(bundle.get("credentials") or {}))
     state_path = path.parent / CLAUDE_STATE_FILE
-    state = _json(state_path.read_bytes()) if state_path.exists() else {}
+    state = _read_json_file(state_path) or {}
     if bundle.get("oauthAccount"):
         state["oauthAccount"] = bundle["oauthAccount"]
     else:
@@ -401,10 +437,9 @@ async def profiles(db: AsyncSession, org_id: uuid.UUID, kind: str = AGY) -> list
 
 
 def _atomic_write(path: Path, raw: bytes) -> None:
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_bytes(raw)
-    os.chmod(tmp, 0o600)
-    tmp.replace(path)
+    """Review v0.1.63 (P1-1): tệp tạm tên ngẫu nhiên O_CREAT|O_EXCL|O_NOFOLLOW trong thư mục mở O_NOFOLLOW, rồi rename
+    (thay — không đi theo — liên kết tượng trưng ở đích)."""
+    atomic_write_nofollow(path, raw)
 
 
 def write_token_file(raw: bytes) -> None:
@@ -415,8 +450,9 @@ def write_token_file(raw: bytes) -> None:
 
 
 async def save_current_back(db: AsyncSession, org_id: uuid.UUID, kind: str = AGY) -> None:
-    """Lưu tệp phiên đang dùng (có thể đã được CLI làm mới) vào hồ sơ đang hoạt động của đúng loại CLI."""
-    raw = read_session(kind)
+    """Lưu tệp phiên đang dùng (có thể đã được CLI làm mới) vào hồ sơ đang hoạt động của đúng loại CLI. Tệp không đạt
+    khuôn (`read_session` trả None: không phải JSON, liên kết, quá lớn) thì KHÔNG lưu — kiểm email luôn chạy được."""
+    raw = await asyncio.to_thread(read_session, kind)
     if raw is None:
         return
     email = session_email(kind, raw)
@@ -497,126 +533,6 @@ def _inside(path: Path, parent: Path) -> bool:
     return path == parent or parent in path.parents
 
 
-def _remove(p: Path) -> None:
-    if p.is_dir() and not p.is_symlink():
-        shutil.rmtree(p)
-    elif p.exists() or p.is_symlink():
-        p.unlink()
-
-
-def _copy_into(item: Path, dest: Path) -> None:
-    """Chép `item` sang `dest` an toàn khi đứt giữa chừng: chép vào `<dest>.migrating` rồi `os.replace` — đích không
-    bao giờ là bản dở. Hai volume khác nhau nên không dùng `rename`/`shutil.move` (= chép rồi xoá, không nguyên tử)."""
-    tmp = dest.with_name(dest.name + ".migrating")
-    _remove(tmp)
-    try:
-        if item.is_symlink():
-            os.symlink(os.readlink(item), tmp)
-        elif item.is_dir():
-            shutil.copytree(item, tmp, symlinks=True)
-            tmp.chmod(0o700)
-        else:
-            shutil.copy2(item, tmp)
-            tmp.chmod(0o600)
-        os.replace(tmp, dest)
-    except OSError:
-        with contextlib.suppress(OSError):
-            _remove(tmp)
-        raise
-
-
-def legacy_claude_pending() -> bool:
-    """True khi còn thư mục phiên Claude cũ (GH_CLAUDE_LEGACY_HOME) chờ api chuyển (F-22). Worker dùng để KHÔNG tự ghi
-    tệp phiên Claude từ hồ sơ trước khi api chuyển — bản trong CSDL là ảnh lúc đăng nhập, có thể cũ hơn tệp CLI đã tự
-    làm mới; ghi trước thì api thấy đích đã có và bỏ qua bản mới."""
-    s = get_settings()
-    if not s.claude_legacy_home.strip():
-        return False
-    with contextlib.suppress(OSError):
-        legacy = cli_home_dir(s.claude_legacy_home)
-        return legacy.is_dir() and not legacy.is_symlink()
-    return False
-
-
-def _legacy_session_newer(item: Path, dest: Path) -> bool:
-    """Tệp phiên (`.credentials.json`/`.claude.json`) cũ mới hơn tệp ở đích (vd. đích là bản ghi lại từ hồ sơ lúc đăng
-    nhập, còn bản cũ đã được CLI làm mới token) ⇒ bản cũ được ghi đè lên đích. Mục khác: đích đã có thì giữ."""
-    if item.name not in (CLAUDE_CRED_FILE, CLAUDE_STATE_FILE):
-        return False
-    try:
-        if item.is_symlink() or not item.is_file() or dest.is_symlink() or not dest.is_file():
-            return False
-        return item.stat().st_mtime > dest.stat().st_mtime
-    except OSError:
-        return False
-
-
-def migrate_legacy_claude_home() -> int:
-    """F-22 (v0.1.38): chuyển phiên Claude Code từ đường dẫn cũ (≤ v0.1.37: `/var/lib/gh/agy/claude/.claude`, nằm trong
-    volume agy_state — agy có công cụ đọc tệp nên đọc được `.credentials.json`) sang GH_CLAUDE_HOME mới (volume
-    claude_state). Trả số mục đã chuyển.
-
-    Đường dẫn cũ CHỈ lấy từ GH_CLAUDE_LEGACY_HOME (chỉ đặt trong api.Dockerfile). Rỗng (dev, pytest) ⇒ không làm gì:
-    ngoài Docker HOME của agy là HOME thật của người dùng, `~/claude/.claude` có thể là thư mục dự án của họ.
-
-    Chỉ api gọi (đầu `restore_active`, `owns_logins=True`), trước khi trả bản gửi tạm/ghi lại phiên. Tệp/thư mục đã có
-    ở đích (vd. phiên mới hơn) KHÔNG bị bản cũ ghi đè — trừ `.credentials.json`/`.claude.json` cũ có mtime mới hơn
-    đích (CLI đã tự làm mới token). Mỗi mục chép vào tên tạm rồi `os.replace`; CHỈ khi mọi mục đều xong mới xoá
-    đúng thư mục cũ và `<cha>/work` (thư mục làm việc cũ của claude), rồi `rmdir` thư mục cha nếu đã rỗng (còn mục
-    khác ⇒ chỉ ghi TÊN chúng vào log) — không bao giờ xoá cả thư mục cha. Có lỗi ⇒ giữ nguyên thư mục cũ, lần
-    khởi động sau làm tiếp. Chạy lại an toàn.
-    Lỗi OSError chỉ ghi cảnh báo (không làm sập api); tệp còn thiếu thì `restore_active` ghi lại từ agent.cli_profiles.
-    Rollback về v0.1.37: bản cũ thấy thiếu tệp ở đường dẫn cũ ⇒ restore_active của nó ghi lại từ CSDL ⇒ vẫn an toàn.
-    Không bao giờ log nội dung tệp — chỉ số mục."""
-    s = get_settings()
-    if not s.claude_legacy_home.strip():
-        return 0
-    target = cli_home_dir(s.claude_home)
-    legacy = cli_home_dir(s.claude_legacy_home)
-    moved = 0
-    try:
-        if not legacy.is_dir() or legacy.is_symlink():
-            return 0
-        legacy_r, target_r = legacy.resolve(), target.resolve()
-        if legacy_r == target_r or _inside(target_r, legacy_r) or _inside(legacy_r, target_r):
-            return 0
-        target.mkdir(parents=True, exist_ok=True)
-        failed = 0
-        for item in sorted(legacy.iterdir()):
-            if item.name.endswith(".migrating"):
-                continue
-            dest = target / item.name
-            if (dest.exists() or dest.is_symlink()) and not _legacy_session_newer(item, dest):
-                continue
-            try:
-                _copy_into(item, dest)
-                moved += 1
-            except OSError as exc:
-                failed += 1
-                log.warning("Chuyển một mục phiên Claude Code lỗi (%s) — giữ thư mục cũ, thử lại lần khởi động sau",
-                            type(exc).__name__)
-        if failed:
-            return moved
-        shutil.rmtree(legacy)
-        work = legacy.parent / "work"
-        if work.is_dir() and not work.is_symlink():
-            shutil.rmtree(work)
-        try:
-            legacy.parent.rmdir()  # chỉ khi đã rỗng
-        except OSError:
-            # Không xoá thay (có thể là dự án của người dùng) — chỉ ghi TÊN các mục còn lại để Owner/hỗ trợ dọn tay.
-            with contextlib.suppress(OSError):
-                left = sorted(p.name for p in legacy.parent.iterdir())
-                if left:
-                    log.warning("Thư mục phiên Claude Code cũ %s còn %d mục không thuộc phiên đã chuyển: %s",
-                                legacy.parent, len(left), ", ".join(left[:20]))
-        log.info("Đã chuyển %d mục phiên Claude Code sang thư mục riêng (F-22)", moved)
-    except OSError as exc:
-        log.warning("Chuyển phiên Claude Code sang thư mục riêng lỗi (%s) — sẽ ghi lại từ hồ sơ đã lưu",
-                    type(exc).__name__)
-    return moved
-
-
 def claude_home_shared() -> bool:
     """True khi GH_CLAUDE_HOME nằm trong HOME của Antigravity CLI (agy có thể đọc phiên Claude)."""
     try:
@@ -656,10 +572,10 @@ async def restore_active(sm: async_sessionmaker[AsyncSession] | None, *, owns_lo
     (`owns_logins=False`) không đụng tới khi còn bản gửi tạm: có thể api đang chạy một phiên đăng nhập, ghi tệp lúc đó
     sẽ bị nhận nhầm là tài khoản mới.
 
-    F-22: api chuyển phiên Claude từ đường dẫn cũ trong HOME của agy sang GH_CLAUDE_HOME riêng TRƯỚC mọi bước khác
-    (`migrate_legacy_claude_home`); tệp còn thiếu sau đó được ghi lại từ hồ sơ như thường."""
+    Review v0.1.63 (P1-1): bỏ hẳn bước chuyển phiên Claude từ đường dẫn cũ ≤ v0.1.37 trong volume agy_state (F-22 đã
+    chuyển ở v0.1.38, 02/10/2026) — api không còn chép gì từ volume của agy lúc khởi động; tệp phiên còn thiếu được ghi
+    lại từ hồ sơ như thường. Tệp phiên là liên kết tượng trưng / không phải tệp thường ⇒ gỡ và ghi lại từ hồ sơ."""
     if owns_logins:
-        migrate_legacy_claude_home()
         shared = claude_home_shared()
         if shared and get_settings().env == "development":
             # Dev ngoài Docker: HOME của agy là HOME thật (~) nên mọi GH_CLAUDE_HOME mặc định đều "chung" — chỉ nhắc,
@@ -677,11 +593,11 @@ async def restore_active(sm: async_sessionmaker[AsyncSession] | None, *, owns_lo
             # khớp nhau và bản gửi tạm không bị lượt đăng nhập sau ghi đè mất.
             with contextlib.suppress(OSError):
                 await unpark_token_async(kind)
-        elif not token_path(kind).exists() and backup_path(kind).exists():
+        elif not is_regular_file(token_path(kind)) and is_regular_file(backup_path(kind)):
             continue
-        elif kind == CLAUDE and legacy_claude_pending():
-            continue  # F-22: chờ api chuyển phiên cũ trước (xem legacy_claude_pending)
-        if not token_path(kind).exists():
+        with contextlib.suppress(OSError):
+            await asyncio.to_thread(_drop_link, token_path(kind))
+        if not is_regular_file(token_path(kind)):
             need.append(kind)
     if not need or sm is None:
         return
@@ -693,6 +609,23 @@ async def restore_active(sm: async_sessionmaker[AsyncSession] | None, *, owns_lo
     for r in rows:
         with contextlib.suppress(Exception):
             await write_session_async(r.kind, crypto.decrypt(bytes(r.token_enc), CLI_AAD))
+
+
+def _mtime(path: Path) -> float:
+    """mtime của tệp THƯỜNG `path` (lstat — liên kết tượng trưng không tính, coi như chưa có ⇒ 0)."""
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return 0.0
+    return st.st_mtime if stat.S_ISREG(st.st_mode) else 0.0
+
+
+def _size(path: Path) -> int:
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return 0
+    return st.st_size if stat.S_ISREG(st.st_mode) else 0
 
 
 # ─── Phiên đăng nhập ───────────────────────────────────────────────────────
@@ -799,7 +732,7 @@ class CliLogins:
             path.parent.mkdir(parents=True, exist_ok=True)
         # CLI đang đăng nhập sẵn sẽ không in link → gửi tạm tệp phiên (đã lưu vào hồ sơ ở start()).
         await park_token_async(s.kind)
-        before = path.stat().st_mtime if path.exists() else 0.0
+        before = _mtime(path)
         env = {**sp.env(), "TERM": "xterm", "SSH_CONNECTION": "127.0.0.1 0 127.0.0.1 22",
                "SSH_CLIENT": "127.0.0.1 0 22", "SSH_TTY": "/dev/pts/0", "COLUMNS": str(PTY_COLS),
                "LINES": str(PTY_ROWS)}
@@ -835,16 +768,20 @@ class CliLogins:
             loop.add_reader(master, readable)
             code_task: asyncio.Task[str] | None = None
             while time.time() - started < LOGIN_TIMEOUT_S:
-                if path.exists() and path.stat().st_mtime > before and path.stat().st_size > 20:
+                if _mtime(path) > before and _size(path) > 20:
                     await asyncio.sleep(0.5)   # chờ CLI ghi xong (Claude: cả .claude.json)
-                    await self._finish(s, read_session(s.kind) or path.read_bytes())
+                    fresh = read_session(s.kind)
+                    if fresh is None:
+                        # Review v0.1.63 (P1-1): tệp vừa ghi không đạt khuôn (không phải JSON / liên kết) ⇒ không lưu.
+                        raise RuntimeError("Tệp phiên CLI vừa ghi không đúng khuôn (không phải JSON hoặc là liên kết)")
+                    await self._finish(s, fresh)
                     return
                 try:
                     chunk = await asyncio.wait_for(out.get(), 0.5)
                 except TimeoutError:
                     chunk = None
                 if chunk == b"":
-                    if path.exists() and path.stat().st_mtime > before:
+                    if _mtime(path) > before:
                         continue
                     raise RuntimeError("CLI đã thoát trước khi đăng nhập xong: " + buf[-300:].strip())
                 if chunk:
@@ -914,7 +851,8 @@ class CliLogins:
             with contextlib.suppress(OSError):
                 if s.status == "done" or s.committed:
                     drop_parked_token(s.kind)
-                elif not await unpark_token_async(s.kind) and path.exists() and path.stat().st_mtime > before:
+                elif not await unpark_token_async(s.kind) and (_mtime(path) > before or (
+                        os.path.lexists(path) and not is_regular_file(path))):  # noqa: ASYNC240 — một lstat
                     # Chưa có tài khoản nào: bỏ tệp dở dang CLI để lại, để không thành "đã đăng nhập" giả.
                     path.unlink()
 
@@ -997,7 +935,7 @@ class CliLogins:
         if s.code_shape is not None:
             detail["code_shape"] = s.code_shape
         if ok:
-            detail["credentials_file"] = token_path(s.kind).exists()
+            detail["credentials_file"] = is_regular_file(token_path(s.kind))
             detail["account_masked"] = boss_checks.mask_email(email if isinstance(email, str) else None)
             code, message = None, None
         elif isinstance(exc, FileNotFoundError):

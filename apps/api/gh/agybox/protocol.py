@@ -3,12 +3,15 @@
 Chỉ stdlib + orjson: module này nằm trong hộp nên KHÔNG được kéo theo `gh.config` / DB / Redis.
 
 Đường HTTP (nghe `0.0.0.0:8090` trong mạng nội bộ `agy-bus`; hộp KHÔNG bao giờ gọi ngược api):
-  GET  /healthz       không ký. {"ok": true, "service": "agy-box", "protocol": 1, "agy_version": "1.2.9"|null,
-                           "cli_logged_in": bool}
-  POST /v1/generate   ký. Yêu cầu  {request_id, model, effort|null, prompt, json_mode, timeout_s}
+  GET  /healthz       không ký. {"ok": true, "service": "agy-box", "protocol": 2, "agy_version": "1.2.9"|null,
+                           "cli_logged_in": null}
+  POST /v1/generate   ký. Yêu cầu  {request_id, model, effort|null, prompt, json_mode, timeout_s, session}
                            Trả lời {request_id, text, tokens_in, tokens_out, raw}
-  POST /v1/models     ký. Yêu cầu  {request_id, timeout_s?}
+  POST /v1/models     ký. Yêu cầu  {request_id, timeout_s?, session}
                            Trả lời {request_id, models: [{id, ...}], raw_text}
+`session` (protocol 2, review v0.1.63 P1-1): nội dung tệp token agy của hồ sơ đang hoạt động (chuỗi JSON đối tượng
+≤ 64 KiB) — api đọc từ kho phiên của nó (O_NOFOLLOW, đã kiểm) và gửi theo từng yêu cầu; hộp không có volume, không lưu,
+không trả lại.
 Lỗi (mọi mã khác 2xx): {"error": {"code": <mã dưới đây>, "message": "...", ...}} — xem ERROR_STATUS.
 
 Ký: header `X-GH-Ts` (giây UNIX, số nguyên) và `X-GH-Sig` = hex HMAC-SHA256(subkey("request"),
@@ -24,7 +27,7 @@ import hmac
 import re
 from collections.abc import Mapping
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 SERVICE = "agy-box"
 DEFAULT_PORT = 8090
 

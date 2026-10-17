@@ -159,8 +159,10 @@ services:
   # có lừa được agy đọc tệp/chạy lệnh cũng KHÔNG chạm khoá master, DB hay Redis chính. Cùng ảnh api (đã có agy ghim SHA) nhưng
   # chạy `python -m gh.agybox.server`. KHÔNG có GH_DATABASE_URL/GH_ADMIN_DATABASE_URL/GH_REDIS_URL, KHÔNG có khoá master/bridge/
   # browser/offsite (chỉ gh_agy_key để kiểm chữ ký yêu cầu), KHÔNG ở mạng default (không thấy db/redis/bridge/browser-redis).
-  # Hai mạng: agy-bus (internal — chỉ api/worker gọi vào) và agy-out (đường ra Internet cho agy gọi Google). Chỉ mount agy_state
-  # (tệp token OAuth của hồ sơ đang hoạt động) — không claude_state, gh_objects hay run/ của máy chủ. Hộp KHÔNG gọi ngược api.
+  # Hai mạng: agy-bus (internal — chỉ api/worker gọi vào) và agy-out (đường ra Internet cho agy gọi Google).
+  # Review v0.1.63 (P1-1): hộp KHÔNG mount volume nào (kể cả agy_state) — tệp token OAuth của hồ sơ đang hoạt động đến trong
+  # từng yêu cầu đã ký, đặt vào HOME tạm của đúng lượt đó (tmpfs /tmp, xoá sau lượt); agy trong hộp có bị lừa cũng không
+  # ghi được gì mà api/worker hay lượt sau đọc lại. Không claude_state, gh_objects hay run/ của máy chủ. Hộp KHÔNG gọi ngược api.
   # Nợ (ke-hoach-sau-v0162 §6): lối ra agy-out chưa có allowlist tên miền (agy chưa chứng minh theo HTTPS_PROXY).
   agy-box:
     build: { context: .., dockerfile: deploy/images/api.Dockerfile }
@@ -170,15 +172,10 @@ services:
     init: true
     environment:
       GH_AGYBOX_KEY_FILE: /run/secrets/gh_agy_key
-      GH_CLI_HOME: /var/lib/gh/agy/.gemini/antigravity-cli
       GH_CLI_BINARY: agy
       AGY_CLI_DISABLE_AUTO_UPDATE: "1"
       GH_AGYBOX_MAX_JOBS: "2"
     secrets: [gh_agy_key]
-    # nocopy + chờ api: volume mới tinh do api chép nội dung ảnh (thư mục thuộc gh:gh) ở lần mount đầu — như worker. Hộp mount
-    # sau, không chép: nếu hộp tạo volume trước thì thư mục thuộc root, hộp lẫn api đều không ghi được token agy.
-    volumes:
-      - { type: volume, source: agy_state, target: /var/lib/gh/agy, volume: { nocopy: true } }
     networks: [agy-bus, agy-out]
     depends_on:
       api: { condition: service_started }

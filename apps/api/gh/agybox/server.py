@@ -1,16 +1,19 @@
 """Dịch vụ `agy-box` (v0.1.63 H1): `python -m gh.agybox.server` — nhận yêu cầu ký HMAC từ api/worker qua mạng nội bộ
 `agy-bus` và chạy `agy` bằng ĐÚNG `AgyClient` có sẵn (cwd rỗng 0700 mỗi lượt, env sạch, prompt qua stdin, killpg).
 
-Cô lập (docs/api/agybox-protocol.md): tiến trình này chỉ đọc 6 biến môi trường trong ALLOWED_ENV, tự xoá mọi biến GH_*
-khác khỏi môi trường của mình, KHÔNG import `gh.config`/DB/Redis/crypto, chỉ giữ một khoá `gh_agy_key` (ký yêu cầu) và
-tệp token agy trong volume `agy_state`. Hộp không bao giờ gọi ngược api. Nhật ký chỉ ghi mã yêu cầu + kết quả, không ghi
-prompt."""
+Cô lập (docs/api/agybox-protocol.md): tiến trình này chỉ đọc các biến môi trường trong ALLOWED_ENV, tự xoá mọi
+biến GH_* khác khỏi môi trường của mình, KHÔNG import `gh.config`/DB/Redis/crypto, chỉ giữ một khoá `gh_agy_key`
+(ký yêu cầu). Review v0.1.63 (P1-1): hộp KHÔNG có volume / kho phiên nào — tệp token agy đến trong từng yêu cầu đã
+ký (`session`), được đặt vào HOME tạm 0700 của đúng lượt đó (xoá sau lượt) và không bao giờ được ghi lại đâu cả;
+lượt sau không thấy gì lượt trước để lại. Hộp không bao giờ gọi ngược api. Nhật ký chỉ ghi mã yêu cầu + kết quả,
+không ghi prompt hay token."""
 
 import asyncio
 import logging
 import math
 import os
 import re
+import shutil
 import time
 from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass
@@ -25,7 +28,6 @@ from starlette.routing import Route
 
 from gh.agybox import protocol as P
 from gh.providers.clients import (
-    TOKEN_FILE,
     AgyClient,
     AuthFailed,
     BadRequest,
@@ -34,8 +36,9 @@ from gh.providers.clients import (
     ProviderError,
     RateLimited,
     cli_env,
-    cli_home_dir,
+    make_turn_home,
     redact,
+    valid_token_json,
 )
 
 log = logging.getLogger("agybox")
@@ -44,10 +47,10 @@ ENV_KEY_FILE = "GH_AGYBOX_KEY_FILE"
 ENV_MAX_JOBS = "GH_AGYBOX_MAX_JOBS"
 ENV_HOST = "GH_AGYBOX_HOST"
 ENV_PORT = "GH_AGYBOX_PORT"
-ENV_CLI_HOME = "GH_CLI_HOME"
 ENV_CLI_BINARY = "GH_CLI_BINARY"
-#: Toàn bộ biến GH_* hộp được phép đọc. Mọi biến GH_* khác (DB, Redis, khoá master/bridge/browser…) bị bỏ qua và xoá.
-ALLOWED_ENV = frozenset({ENV_KEY_FILE, ENV_MAX_JOBS, ENV_HOST, ENV_PORT, ENV_CLI_HOME, ENV_CLI_BINARY})
+#: Toàn bộ biến GH_* hộp được phép đọc. Mọi biến GH_* khác (DB, Redis, khoá master/bridge/browser…, cả GH_CLI_HOME của
+#: ảnh api — hộp không có kho phiên) bị bỏ qua và xoá.
+ALLOWED_ENV = frozenset({ENV_KEY_FILE, ENV_MAX_JOBS, ENV_HOST, ENV_PORT, ENV_CLI_BINARY})
 VERSION_TTL_S = 300.0
 _VERSION_RE = re.compile(r"\d+\.\d+\.\d+\S*")
 
@@ -55,7 +58,6 @@ _VERSION_RE = re.compile(r"\d+\.\d+\.\d+\S*")
 @dataclass
 class Config:
     key_file: str
-    cli_home: str = "~/.gemini/antigravity-cli"
     cli_binary: str = "agy"
     max_jobs: int = 2
     host: str = "0.0.0.0"  # noqa: S104 — chỉ nghe trong mạng nội bộ agy-bus, không publish cổng ra máy chủ
@@ -71,9 +73,8 @@ def load_config(env: "MutableMapping[str, str] | dict[str, str]") -> Config:
         port = int(env.get(ENV_PORT) or P.DEFAULT_PORT)
     except ValueError as e:
         raise RuntimeError("GH_AGYBOX_MAX_JOBS / GH_AGYBOX_PORT phải là số nguyên") from e
-    return Config(key_file=key_file, cli_home=env.get(ENV_CLI_HOME) or "~/.gemini/antigravity-cli",
-                  cli_binary=env.get(ENV_CLI_BINARY) or "agy", max_jobs=jobs, host=env.get(ENV_HOST) or "0.0.0.0",  # noqa: S104
-                  port=port)
+    return Config(key_file=key_file, cli_binary=env.get(ENV_CLI_BINARY) or "agy", max_jobs=jobs,
+                  host=env.get(ENV_HOST) or "0.0.0.0", port=port)  # noqa: S104
 
 
 def scrub_environ(env: MutableMapping[str, str]) -> list[str]:
@@ -176,6 +177,14 @@ def create_app(cfg: Config, *, clock: Callable[[], float] = time.time) -> Starle
             raise _Reject(P.E_BAD_REQUEST, "request_id không hợp lệ")
         return obj
 
+    def session_of(obj: dict[str, Any]) -> bytes:
+        """Tệp token agy gửi kèm yêu cầu: chuỗi JSON đối tượng ≤ 64 KiB (khuôn tối thiểu như kho phiên của api)."""
+        raw = obj.get("session")
+        data = raw.encode() if isinstance(raw, str) else b""
+        if not valid_token_json(data):
+            raise _Reject(P.E_BAD_REQUEST, "session phải là tệp phiên Antigravity (đối tượng JSON ≤ 64 KiB)")
+        return data
+
     async def run_job(request: Request, kind: str) -> Response:
         rid: str | None = None
         sig: str | None = None
@@ -186,6 +195,7 @@ def create_app(cfg: Config, *, clock: Callable[[], float] = time.time) -> Starle
             sig = authenticate(request, body)
             obj = parse(body)
             rid = obj["request_id"]
+            session = session_of(obj)
             if kind == "generate":
                 prompt, model, effort = obj.get("prompt"), obj.get("model"), obj.get("effort")
                 if not isinstance(prompt, str) or not prompt.strip():
@@ -205,7 +215,8 @@ def create_app(cfg: Config, *, clock: Callable[[], float] = time.time) -> Starle
                 raise _Reject(P.E_BUSY, "Hộp đang bận", retry_after=P.BUSY_RETRY_AFTER_S)
             state["active"] += 1
             try:
-                agy = AgyClient(cfg.cli_binary, cfg.cli_home, timeout=timeout)
+                # Không có kho phiên: `cli_home` không dùng tới khi có `session` (không đọc, không ghi, không khoá).
+                agy = AgyClient(cfg.cli_binary, "/nonexistent/agy-box", timeout=timeout, session=session)
                 if kind == "generate":
                     assert isinstance(prompt, str) and isinstance(model, str)  # đã kiểm ở trên (cho mypy)
                     c = await agy.generate(model, [Message("user", prompt)], json_mode=bool(obj.get("json_mode")),
@@ -239,10 +250,11 @@ def create_app(cfg: Config, *, clock: Callable[[], float] = time.time) -> Starle
             if now - state["version_at"] < VERSION_TTL_S:
                 return state["version"]
             version: str | None = None
+            home = make_turn_home(None)
             try:
                 proc = await asyncio.create_subprocess_exec(
                     cfg.cli_binary, "--version", stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.DEVNULL, env=cli_env(cfg.cli_home), start_new_session=True)
+                    stderr=asyncio.subprocess.DEVNULL, env=cli_env("", home=home), start_new_session=True)
                 try:
                     out, _ = await asyncio.wait_for(proc.communicate(), 10)
                 except TimeoutError:
@@ -253,13 +265,15 @@ def create_app(cfg: Config, *, clock: Callable[[], float] = time.time) -> Starle
                 version = m.group(0) if m else None
             except OSError:
                 version = None
+            finally:
+                shutil.rmtree(home, ignore_errors=True)
             state["version"], state["version_at"] = version, now
             return version
 
     async def healthz(request: Request) -> Response:
-        token = cli_home_dir(cfg.cli_home) / TOKEN_FILE
+        # Hộp không giữ phiên (token đến theo từng yêu cầu) ⇒ `cli_logged_in` luôn null; api tự biết có phiên hay không.
         return reply(200, {"ok": True, "service": P.SERVICE, "protocol": P.PROTOCOL_VERSION,
-                           "agy_version": await agy_version(), "cli_logged_in": token.exists()})
+                           "agy_version": await agy_version(), "cli_logged_in": None})
 
     async def generate(request: Request) -> Response:
         return await run_job(request, "generate")

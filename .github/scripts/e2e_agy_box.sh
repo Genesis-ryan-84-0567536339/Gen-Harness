@@ -93,11 +93,11 @@ for line in open("/proc/self/mountinfo"):
     parts = line.split()
     if len(parts) > 4:
         mounts.add(parts[4])
-for m in ("/var/lib/gh/claude", "/var/lib/gh/objects", "/var/lib/gh/host", "/var/run/docker.sock", "/run/docker.sock"):
+# Review v0.1.63 (P1-1): hộp không mount volume nào — kể cả agy_state (token đến theo từng yêu cầu đã ký).
+for m in ("/var/lib/gh/agy", "/var/lib/gh/claude", "/var/lib/gh/objects", "/var/lib/gh/host", "/var/run/docker.sock",
+          "/run/docker.sock"):
     if m in mounts or os.path.exists(m) and m.endswith(".sock"):
         bad.append("FAIL box mount %s" % m)
-if "/var/lib/gh/agy" not in mounts:
-    bad.append("FAIL box không mount agy_state ở /var/lib/gh/agy")
 try:
     open("/etc/gh-write-probe", "w").close()
     os.unlink("/etc/gh-write-probe")

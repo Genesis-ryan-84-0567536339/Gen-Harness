@@ -77,7 +77,7 @@ Nhánh local đang làm (CHƯA push, ngoài `claude/v0162`): **v0.1.63** đã t�
 ### Boss phải làm — v0.1.63 (không bắt buộc; chi tiết ở [v0.1.63.md](../releases/v0.1.63.md))
 
 1. Sau khi bản chính thức ra: `genh update` (hoặc đợi lịch đêm) — hộp `agy-box` và khoá `gh_agy_key` tự lên, không migration. Thẻ Sức khoẻ có dòng "Hộp riêng Antigravity: Đang chạy".
-2. Antigravity: đăng nhập vẫn ở **Kết nối › Bộ não AI** như cũ (hộp dùng chung phiên). Thẻ báo hết hạn ⇒ đăng nhập lại ở đó, không cần làm gì riêng trong hộp. Từ giờ agent trực kênh, Soạn lại / Dịch nháp chạy được bằng Antigravity; chưa có khoá API cũng được.
+2. Antigravity: đăng nhập vẫn ở **Kết nối › Bộ não AI** như cũ (api gửi phiên sang hộp theo từng lượt). Thẻ báo hết hạn ⇒ đăng nhập lại ở đó, không cần làm gì riêng trong hộp. Từ giờ agent trực kênh, Soạn lại / Dịch nháp chạy được bằng Antigravity; chưa có khoá API cũng được.
 3. Thẻ Zalo/WhatsApp "Mất liên lạc" ⇒ **Nối lại bằng phiên đã lưu** (từ v0.1.62). Tuỳ chọn: "Câu hỏi mở — mặc định đã chọn" ở [ROADMAP](../ROADMAP.md).
 
 ### Boss phải làm — v0.1.61 (đã qua; `genh update` + người được giao quyền tự đặt mã PIN ở Tài khoản của tôi; [v0.1.61.md](../releases/v0.1.61.md))

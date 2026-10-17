@@ -25,7 +25,6 @@ BOX = "agy-box"
 KEY = "gh_agy_key"
 ALLOWED_ENV = {
     "GH_AGYBOX_KEY_FILE",
-    "GH_CLI_HOME",
     "GH_CLI_BINARY",
     "AGY_CLI_DISABLE_AUTO_UPDATE",
     "GH_AGYBOX_MAX_JOBS",
@@ -144,19 +143,17 @@ def check(compose: dict[str, Any], release: bool) -> list[str]:
     for k in sorted(_env_keys(box) - ALLOWED_ENV):
         errs.append(f"{BOX} có biến môi trường {k} — ngoài danh sách cho phép {sorted(ALLOWED_ENV)}")
 
-    # Volume: chỉ agy_state (có tên), không bind, không docker.sock.
-    vols = _volumes(box)
-    for typ, src in vols:
+    # Volume (review v0.1.63, P1-1): KHÔNG volume nào ngoài tmpfs — kể cả agy_state. Token agy đến theo từng yêu cầu đã
+    # ký; hộp mount volume ghi được thì agy bị lừa trong hộp ghi được cấu hình/phiên mà api/worker đọc lại.
+    for typ, src in _volumes(box):
         if typ == "tmpfs":
             continue
         if typ == "bind":
             errs.append(f"{BOX} mount kiểu bind {src} (vd docker.sock, run/) — không được")
         elif typ == "anon":
             errs.append(f"{BOX} có volume ẩn danh {src}")
-        elif src != "agy_state":
-            errs.append(f"{BOX} mount volume {src} — chỉ được agy_state")
-    if not any(typ == "volume" and src == "agy_state" for typ, src in vols):
-        errs.append(f"{BOX} không mount agy_state (không có token OAuth của hồ sơ đang dùng)")
+        else:
+            errs.append(f"{BOX} mount volume {src} — hộp không được mount volume nào (token đến theo yêu cầu đã ký)")
 
     # Ảnh: bản phát hành dùng đúng ảnh api đã ghim digest; bản nguồn build từ api.Dockerfile.
     image = str(box.get("image") or "")

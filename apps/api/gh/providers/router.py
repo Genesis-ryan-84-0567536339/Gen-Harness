@@ -367,7 +367,7 @@ class ModelRouter:
         #: agy TRONG tiến trình — chỉ cho vai `placement.INPROC` và việc của Sếp (đăng nhập, gọi thử, chẩn đoán).
         self.cli_factory = cli_factory or (lambda: AgyClient(s.cli_binary, s.cli_home))
         #: agy QUA HỘP RIÊNG (`AgyBoxClient`, v0.1.63 H1); trả None khi hộp chưa được cài.
-        self.box_factory = box_factory or (lambda: AgyBoxClient.from_env())
+        self.box_factory = box_factory or (lambda: AgyBoxClient.from_env(cli_home=get_settings().cli_home))
         self.claude_factory = claude_factory or (lambda: ClaudeCodeClient(get_settings().claude_binary,
                                                                           get_settings().claude_home))
 

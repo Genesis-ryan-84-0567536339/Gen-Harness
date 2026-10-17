@@ -39,13 +39,11 @@ GOOD = {
             "command": ["python", "-m", "gh.agybox.server"],
             "environment": {
                 "GH_AGYBOX_KEY_FILE": "/run/secrets/gh_agy_key",
-                "GH_CLI_HOME": "/var/lib/gh/agy/.gemini/antigravity-cli",
                 "GH_CLI_BINARY": "agy",
                 "AGY_CLI_DISABLE_AUTO_UPDATE": "1",
                 "GH_AGYBOX_MAX_JOBS": "2",
             },
             "secrets": ["gh_agy_key"],
-            "volumes": [{"type": "volume", "source": "agy_state", "target": "/var/lib/gh/agy", "volume": {"nocopy": True}}],
             "networks": ["agy-bus", "agy-out"],
             "read_only": True,
             "tmpfs": ["/tmp:size=256m"],
@@ -147,16 +145,25 @@ class IsolationRules(unittest.TestCase):
         self.assertFlags(mutated(lambda d: box(d).update(env_file=[".env"])), "env_file")
 
     def test_extra_volume_named(self) -> None:
-        self.assertFlags(mutated(lambda d: box(d)["volumes"].append("claude_state:/var/lib/gh/claude")), "claude_state")
+        self.assertFlags(mutated(lambda d: box(d).update(volumes=["claude_state:/var/lib/gh/claude"])), "claude_state")
 
     def test_bind_mount_short(self) -> None:
-        self.assertFlags(mutated(lambda d: box(d)["volumes"].append("/var/run/docker.sock:/var/run/docker.sock")), "docker.sock")
+        self.assertFlags(mutated(lambda d: box(d).update(volumes=["/var/run/docker.sock:/var/run/docker.sock"])),
+                         "docker.sock")
 
     def test_bind_mount_long(self) -> None:
-        self.assertFlags(mutated(lambda d: box(d)["volumes"].append({"type": "bind", "source": "../run", "target": "/x"})), "bind")
+        self.assertFlags(mutated(lambda d: box(d).update(volumes=[{"type": "bind", "source": "../run",
+                                                                    "target": "/x"}])), "bind")
 
-    def test_agy_state_missing(self) -> None:
-        self.assertFlags(mutated(lambda d: box(d).update(volumes=[])), "agy_state")
+    def test_agy_state_mounted_is_refused(self) -> None:
+        """Review v0.1.63 (P1-1): hộp mount agy_state (kể cả nocopy / chỉ đọc) ⇒ vi phạm — token đến theo yêu cầu."""
+        for v in ("agy_state:/var/lib/gh/agy", "agy_state:/var/lib/gh/agy:ro",
+                  {"type": "volume", "source": "agy_state", "target": "/var/lib/gh/agy", "volume": {"nocopy": True}}):
+            self.assertFlags(mutated(lambda d, v=v: box(d).update(volumes=[v])), "agy_state")
+
+    def test_gh_cli_home_env_is_refused(self) -> None:
+        self.assertFlags(mutated(lambda d: box(d)["environment"].update(GH_CLI_HOME="/var/lib/gh/agy/x")),
+                         "GH_CLI_HOME")
 
     def test_published_ports(self) -> None:
         self.assertFlags(mutated(lambda d: box(d).update(ports=["8090:8090"])), "ports")

@@ -20,6 +20,7 @@ import orjson
 
 from gh.agybox import protocol as P
 from gh.providers.clients import (
+    TOKEN_FILE,
     AuthFailed,
     BadRequest,
     Completion,
@@ -27,11 +28,16 @@ from gh.providers.clients import (
     ModelRejected,
     ProviderError,
     RateLimited,
+    cli_home_dir,
+    is_regular_file,
+    read_token_file,
     redact,
 )
 
 ENV_URL = "GH_AGYBOX_URL"
 ENV_KEY_FILE = "GH_AGYBOX_KEY_FILE"
+ENV_CLI_HOME = "GH_CLI_HOME"
+DEFAULT_CLI_HOME = "~/.gemini/antigravity-cli"     # = gh.config.Settings.cli_home
 STATUS_TTL_S = 10.0
 STATUS_TIMEOUT_S = 2.0
 CONNECT_TIMEOUT_S = 5.0
@@ -82,16 +88,39 @@ class AgyBoxClient:
     MAX_PROMPT = P.MAX_PROMPT_BYTES
 
     def __init__(self, url: str, key_file: str, timeout: float = P.DEFAULT_TIMEOUT_S, effort: str | None = None, *,
-                 transport: httpx.AsyncBaseTransport | None = None, clock: Any = time.time):
+                 cli_home: str | None = None, transport: httpx.AsyncBaseTransport | None = None,
+                 clock: Any = time.time):
         self.url, self.key_file, self.timeout, self.effort = url.rstrip("/"), key_file, timeout, effort
+        #: Kho phiên agy của api/worker (volume agy_state) — nguồn tệp token gửi kèm mỗi yêu cầu (protocol 2).
+        self.cli_home = cli_home or os.environ.get(ENV_CLI_HOME) or DEFAULT_CLI_HOME
         self.transport, self.clock = transport, clock
         self.last_models_raw: str | None = None
         self._key: bytes | None = None
 
     @classmethod
-    def from_env(cls, timeout: float = P.DEFAULT_TIMEOUT_S, effort: str | None = None) -> "AgyBoxClient | None":
+    def from_env(cls, timeout: float = P.DEFAULT_TIMEOUT_S, effort: str | None = None,
+                 cli_home: str | None = None) -> "AgyBoxClient | None":
         url, key_file = os.environ.get(ENV_URL, ""), os.environ.get(ENV_KEY_FILE, "")
-        return cls(url, key_file, timeout, effort) if url and key_file and os.path.isfile(key_file) else None
+        if not (url and key_file and os.path.isfile(key_file)):
+            return None
+        return cls(url, key_file, timeout, effort, cli_home=cli_home)
+
+    def _session(self) -> str:
+        """Tệp token agy của hồ sơ đang hoạt động, đã kiểm (tệp thường, không liên kết, ≤ 64 KiB, đối tượng JSON) — gửi
+        kèm yêu cầu vì hộp không có kho phiên. Chưa đăng nhập ⇒ AuthFailed ngay, không gọi hộp."""
+        path = cli_home_dir(self.cli_home) / TOKEN_FILE
+        raw = read_token_file(path)
+        if raw is None:
+            if os.path.lexists(path):
+                raise AuthFailed("Tệp phiên Antigravity không hợp lệ (không phải JSON hoặc là liên kết) — "
+                                 "đăng nhập lại")
+            if is_regular_file(path.with_name(TOKEN_FILE + ".before-login")):
+                raise ProviderError("CLI đang đăng nhập thêm tài khoản Google")
+            raise AuthFailed("CLI chưa đăng nhập")
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError as e:
+            raise AuthFailed("Tệp phiên Antigravity không phải UTF-8 — đăng nhập lại") from e
 
     def _load_key(self) -> bytes:
         if self._key is None:
@@ -146,7 +175,7 @@ class AgyBoxClient:
             raise BadRequest("Prompt quá dài cho CLI")
         out = await self._call("POST", P.PATH_GENERATE, {
             "request_id": _rid(), "model": model, "effort": effort or self.effort, "prompt": prompt,
-            "json_mode": json_mode, "timeout_s": self.timeout}, self.timeout)
+            "json_mode": json_mode, "timeout_s": self.timeout, "session": self._session()}, self.timeout)
         text = out.get("text")
         if not isinstance(text, str):
             raise ProviderError("Trả lời của hộp riêng Antigravity thiếu văn bản")
@@ -160,7 +189,8 @@ class AgyBoxClient:
 
     async def discover_models(self) -> list[dict[str, Any]]:
         t = min(self.timeout, P.DEFAULT_MODELS_TIMEOUT_S)
-        out = await self._call("POST", P.PATH_MODELS, {"request_id": _rid(), "timeout_s": t}, t)
+        out = await self._call("POST", P.PATH_MODELS, {"request_id": _rid(), "timeout_s": t,
+                                                       "session": self._session()}, t)
         models = out.get("models")
         if not isinstance(models, list) or not all(
                 isinstance(m, dict) and isinstance(m.get("id"), str) for m in models):
