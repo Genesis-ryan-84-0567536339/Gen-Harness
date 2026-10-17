@@ -2,10 +2,11 @@
 
 v0.1.63 (gói H2) — kiến trúc hai chỗ chạy (luật chỗ chạy nằm ở `gh.providers.placement`, thuần; ở đây gộp với trạng
 thái hộp để ra MỘT kết luận cho mỗi lượt):
-- LỚP CORE (chỉ Sếp và hệ thống tham gia): `core.gen` của Sếp (Owner), `core.briefing` và agent nội bộ (`agent:<id>`
-  KHÔNG gắn kênh / nhóm / người) ⇒ agy chạy TRONG TIẾN TRÌNH (`inproc`).
+- LỚP CORE (chỉ Sếp và hệ thống tham gia): `core.gen` của Sếp (Owner) và agent nội bộ (`agent:<id>` KHÔNG gắn kênh /
+  nhóm / người) ⇒ agy chạy TRONG TIẾN TRÌNH (`inproc`).
 - LỚP NGOẠI GIAO / người ngoài: `core.reply` (soạn lại, dịch nháp tin gửi khách), agent ngoại giao, sàng lọc tin người
-  lạ `core.refinery`, Gen của nhân viên (không phải Owner) và lượt thử agent ⇒ agy chạy QUA HỘP RIÊNG (`box`,
+  lạ `core.refinery`, Bản tin `core.briefing` (prompt có tên hiển thị khách, tiêu đề việc — review v0.1.63 P2-3), Gen
+  của nhân viên (không phải Owner) và lượt thử agent ⇒ agy chạy QUA HỘP RIÊNG (`box`,
   `gh.agybox`): container không có khoá, DB, Redis — nội dung bên ngoài có lừa agy đọc tệp cũng không chạm bí mật.
 - Hộp chưa cài / tắt ⇒ lượt thuộc vai `box` KHÔNG được dùng agy (`allowed=False`, KHÔNG rơi về agy trong tiến trình):
   bộ định tuyến gỡ Antigravity khỏi chuỗi và chuyển nguồn AI kế; `reason` là câu tiếng Việt trung thực hiển thị cho

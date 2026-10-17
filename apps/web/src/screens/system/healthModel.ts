@@ -348,7 +348,8 @@ export function healthTips(h: SystemHealth): HealthTip[] {
       title: 'Cách bật lại Hộp riêng Antigravity',
       steps: [
         { text: 'Trên máy chủ, xem lỗi của hộp (dịch vụ agy-box) và gửi kèm khi báo lỗi nếu cần (Trợ giúp › Báo lỗi):', cmd: 'genh logs agy-box' },
-        { text: 'Dựng lại hộp bằng cách cập nhật (không mất dữ liệu, giữ nguyên đăng nhập Antigravity):', cmd: 'genh update' },
+        // Review v0.1.63 (P3): `genh start` dựng lại container đã dừng; `genh update` là tải bản mới (đã mới nhất thì không làm gì).
+        { text: 'Dựng lại hộp (không mất dữ liệu, giữ nguyên đăng nhập Antigravity):', cmd: 'genh start' },
         { text: 'Trong lúc hộp chưa chạy, soạn trả lời khách và sàng lọc tin người lạ dùng nguồn AI khác — không dùng Antigravity chạy chung với khoá hệ thống.' },
       ],
     });

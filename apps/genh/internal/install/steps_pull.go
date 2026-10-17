@@ -16,8 +16,9 @@ import (
 // cũng là thứ tự hiển thị SubLines khi nhiều image đang tải cùng lúc.
 //
 // v0.1.63 (H3): thêm agy-box (hộp riêng Antigravity). Bản phát hành ghim nó CÙNG digest với api
-// (chung deploy/images/api.Dockerfile) nên resolveImages gộp ảnh trùng — chỉ tải một lần.
-var pullServiceOrder = []string{"db", "redis", "proxy", "api", "agy-box", "web", "bridge", "browser"}
+// (chung deploy/images/api.Dockerfile) nên resolveImages gộp ảnh trùng — chỉ tải một lần. Gói sửa review v0.1.63
+// (P2-2): thêm agy-egress (proxy lối ra của hộp, cũng cùng ảnh api).
+var pullServiceOrder = []string{"db", "redis", "proxy", "api", "agy-box", "agy-egress", "web", "bridge", "browser"}
 
 // pullStep cài Bước 3 — Tải image (50%, trọng số lớn nhất): tải song song
 // image của 7 service compose.yaml có sẵn "image:" (build: cục bộ chưa có

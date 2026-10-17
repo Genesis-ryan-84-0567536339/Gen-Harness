@@ -62,3 +62,30 @@ func TestDoctor_KhongCoAgyBoxTrongCompose(t *testing.T) {
 		t.Fatalf("compose không có agy-box thì không được có dòng agy-box: %+v", l)
 	}
 }
+
+// Gói sửa review v0.1.63 (P2-2): hộp chỉ ra Internet qua proxy agy-egress ⇒ doctor báo cả proxy.
+const doctorAgyEgressCompose = doctorAgyCompose + `  agy-egress:
+    image: ghcr.io/o/gen-harness-api:v0.1.63
+`
+
+func TestDoctor_AgyEgressHong(t *testing.T) {
+	for name, ps := range map[string]string{
+		"đã thoát": `[{"Service":"agy-box","State":"running","Health":"healthy"},{"Service":"agy-egress","State":"exited","Health":""}]`,
+		"chưa có":  `[{"Service":"agy-box","State":"running","Health":"healthy"}]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			l, ok := doctorAgyLine(t, doctorAgyEgressCompose, ps)
+			if !ok || l.OK || !strings.Contains(l.Info, "genh logs agy-egress") {
+				t.Fatalf("proxy hỏng phải ✕ và chỉ cách xem log: %+v (có dòng: %v)", l, ok)
+			}
+		})
+	}
+}
+
+func TestDoctor_AgyEgressKhoe(t *testing.T) {
+	l, ok := doctorAgyLine(t, doctorAgyEgressCompose,
+		`[{"Service":"agy-box","State":"running","Health":"healthy"},{"Service":"agy-egress","State":"running","Health":"healthy"}]`)
+	if !ok || !l.OK || !strings.Contains(l.Info, "proxy lối ra") {
+		t.Fatalf("hộp + proxy khoẻ phải ✓ và nhắc proxy: %+v (có dòng: %v)", l, ok)
+	}
+}

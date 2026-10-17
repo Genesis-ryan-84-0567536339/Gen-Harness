@@ -93,11 +93,11 @@ for line in open("/proc/self/mountinfo"):
     parts = line.split()
     if len(parts) > 4:
         mounts.add(parts[4])
-for m in ("/var/lib/gh/claude", "/var/lib/gh/objects", "/var/lib/gh/host", "/var/run/docker.sock", "/run/docker.sock"):
+# Review v0.1.63 (P1-1): hộp không mount volume nào — kể cả agy_state (token đến theo từng yêu cầu đã ký).
+for m in ("/var/lib/gh/agy", "/var/lib/gh/claude", "/var/lib/gh/objects", "/var/lib/gh/host", "/var/run/docker.sock",
+          "/run/docker.sock"):
     if m in mounts or os.path.exists(m) and m.endswith(".sock"):
         bad.append("FAIL box mount %s" % m)
-if "/var/lib/gh/agy" not in mounts:
-    bad.append("FAIL box không mount agy_state ở /var/lib/gh/agy")
 try:
     open("/etc/gh-write-probe", "w").close()
     os.unlink("/etc/gh-write-probe")
@@ -109,6 +109,24 @@ if os.getuid() == 0:
 for line in open("/proc/self/status"):
     if line.startswith("CapEff:") and int(line.split()[1], 16) != 0:
         bad.append("FAIL box còn capability (CapEff=%s)" % line.split()[1])
+# Gói sửa review v0.1.63 (P2-2): hộp chỉ ở mạng internal — không ra thẳng Internet; ra qua proxy agy-egress, proxy chặn
+# đích IP nội bộ (gateway Docker 172.17.0.1, LAN).
+if os.environ.get("HTTPS_PROXY") != "http://agy-egress:3128":
+    bad.append("FAIL box thiếu HTTPS_PROXY=http://agy-egress:3128")
+try:
+    socket.create_connection(("1.1.1.1", 443), 3).close()
+    bad.append("FAIL box ra thẳng Internet được (phải qua proxy agy-egress)")
+except OSError:
+    pass
+try:
+    s = socket.create_connection(("agy-egress", 3128), 5)
+    s.sendall(b"CONNECT 172.17.0.1:443 HTTP/1.1\r\nHost: 172.17.0.1:443\r\n\r\n")
+    first = s.recv(64).split(b"\r\n", 1)[0]
+    s.close()
+    if b" 403 " not in first + b" ":
+        bad.append("FAIL proxy agy-egress không chặn CONNECT tới gateway 172.17.0.1 (%r)" % first)
+except OSError as e:
+    bad.append("FAIL box không nối được proxy agy-egress: %s" % type(e).__name__)
 for host in ("db", "redis", "bridge", "browser-redis"):
     try:
         socket.gethostbyname(host)
