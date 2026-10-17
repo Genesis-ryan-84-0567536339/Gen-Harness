@@ -101,7 +101,7 @@ async def channel_row(db: AsyncSession, org_id: uuid.UUID, type: str) -> Any:
 
 async def upsert_group(db: AsyncSession, org_id: uuid.UUID, channel: Any, external_id: str, name: str | None,
                        member_count: int | None = None) -> Any:
-    row = (await db.execute(text("""SELECT id, code, name, listen_mode FROM core.groups
+    row = (await db.execute(text("""SELECT id, code, name, listen_mode, left_at FROM core.groups
                                     WHERE channel_id = :c AND external_id = :x"""),
                             {"c": channel.id, "x": external_id})).one_or_none()
     if row is None:
@@ -115,7 +115,7 @@ async def upsert_group(db: AsyncSession, org_id: uuid.UUID, channel: Any, extern
             INSERT INTO core.groups (org_id, code, channel_id, external_id, name, listen_mode, member_count)
             VALUES (:o, :code, :c, :x, :n, :mode, :m)
             ON CONFLICT (channel_id, external_id) DO UPDATE SET name = core.groups.name
-            RETURNING id, code, name, listen_mode"""),
+            RETURNING id, code, name, listen_mode, left_at"""),
             {"o": org_id, "code": code, "c": channel.id, "x": external_id, "n": name or external_id,
              "m": member_count, "mode": mode})).one()
     elif (name and name != row.name) or member_count is not None:
@@ -234,6 +234,10 @@ async def ingest_message(db: AsyncSession, org_id: uuid.UUID, p: dict[str, Any])
         group = await upsert_group(db, org_id, channel, str(p["external_group_id"]), p.get("group_name"))
         if group.listen_mode not in LISTENING_MODES:
             return None
+        if group.left_at is not None:
+            # Nhận được tin của nhóm ⇒ chắc chắn còn trong nhóm: xoá cờ «đã rời» (do quét danh bạ đủ nhưng sót nhóm).
+            await db.execute(text("UPDATE core.groups SET left_at = NULL WHERE id = :g AND left_at IS NOT NULL"),
+                             {"g": group.id})
     else:
         # v0.1.65: tin 1-1 mặc định LƯU IM LẶNG (silent); chỉ "off" mới bỏ.
         dm = direct_mode(await org_settings(db, org_id), channel.type)
