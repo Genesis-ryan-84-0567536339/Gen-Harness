@@ -158,6 +158,10 @@ export interface ProfilePatchBody {
   owner_user_id?: string | null;
   autonomy_level?: number | null;
   note?: string | null;
+  /** v0.1.64 (F045, F141): Sếp tự đặt loại người ("Đánh dấu là nhân viên"); không gửi = giữ nguyên. */
+  person_type?: PersonType;
+  /** v0.1.64: mức "Liên quan Sếp". */
+  relation_to_owner?: DirRelation;
 }
 
 // ─── Sổ tay nhận thức (notebook) ─────────────────────────────────────────────

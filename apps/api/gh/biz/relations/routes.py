@@ -469,6 +469,9 @@ class ProfilePatch(BaseModel):
     owner_user_id: uuid.UUID | None = None
     autonomy_level: int | None = Field(default=None, ge=0, le=6)
     note: str | None = Field(default=None, max_length=4000)
+    # v0.1.64 (F045, F141): Sếp tự đặt loại người ("Đánh dấu là nhân viên") và mức "Liên quan Sếp". null = không đổi.
+    person_type: Literal["customer", "partner", "staff", "candidate", "learner", "supplier", "unknown"] | None = None
+    relation_to_owner: Literal["direct", "via_staff", "staff", "stranger"] | None = None
 
 
 @router.patch("/profile/{person_id}")
@@ -487,6 +490,16 @@ async def patch_profile(person_id: uuid.UUID, body: ProfilePatch, user: service.
         await rsvc.set_person_bot(db, person_id, agent_id=None, set_agent=False,
                                   autonomy_level=body.autonomy_level, set_autonomy=True)
         detail["autonomy_level"] = body.autonomy_level
+    if body.person_type is not None:
+        # Khoá `person_type_locked`: loại do Sếp đặt thắng quy tắc sàng lọc (runner chỉ nâng từ 'unknown' chưa khoá).
+        await db.execute(text("""UPDATE core.persons SET person_type = :t, updated_at = now(),
+                                 attrs = COALESCE(attrs, '{}'::jsonb) || '{"person_type_locked": true}'::jsonb
+                                 WHERE id = :i"""), {"t": body.person_type, "i": person_id})
+        detail["person_type"] = body.person_type
+    if body.relation_to_owner is not None:
+        await db.execute(text("UPDATE core.persons SET relation_to_owner = :r, updated_at = now() WHERE id = :i"),
+                         {"r": body.relation_to_owner, "i": person_id})
+        detail["relation_to_owner"] = body.relation_to_owner
     if "note" in fields:
         row = (await db.execute(text("SELECT attrs FROM core.persons WHERE id = :i"), {"i": person_id})).scalar_one()
         attrs = dict(row or {})

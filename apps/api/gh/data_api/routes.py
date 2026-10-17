@@ -75,6 +75,7 @@ async def pipeline(user: service.CurrentUser = Depends(READ), db: AsyncSession =
           (SELECT count(*) FROM core.groups WHERE org_id = :o AND listen_mode = ANY(:modes)) AS groups_listening,
           (SELECT count(*) FROM raw.events WHERE org_id = :o) AS raw_total,
           (SELECT count(*) FROM refinery.event_state WHERE org_id = :o AND state = 'pending') AS raw_pending,
+          (SELECT count(*) FROM refinery.event_state WHERE org_id = :o AND state = 'error') AS raw_error,
           (SELECT count(*) FROM clean.meaning_units WHERE org_id = :o AND superseded_by IS NULL) AS clean_total"""),
         {"o": o, "modes": list(LISTENING_MODES)})).one()
     sched = await load_schedule(db, o)

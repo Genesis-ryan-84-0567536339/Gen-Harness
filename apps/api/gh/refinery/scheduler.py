@@ -27,6 +27,23 @@ log = logging.getLogger("gh.refinery.scheduler")
 TICK_S = 5.0
 STUCK_AFTER = timedelta(minutes=15)
 FAST_LIMIT = 20
+#: F055: tin `error` (model trả sai định dạng đủ MAX_ATTEMPTS lần) tự được nhận lại sau chừng này, tối đa chừng này lần;
+#: hết lượt vẫn nằm ở `error` và hiện số ở dải pipeline — không thử vô hạn, cũng không biến mất âm thầm.
+ERROR_RETRY_AFTER = timedelta(minutes=30)
+MAX_ERROR_RETRIES = 3
+
+
+async def requeue_errors(db: AsyncSession, org_id: uuid.UUID) -> int:
+    """Đưa tin `error` đã nằm đủ lâu về `pending` (làm lại từ đầu số lần thử), có giới hạn số lần thử lại."""
+    rows = (await db.execute(text("""
+        UPDATE refinery.event_state SET state = 'pending', attempts = 0, updated_at = now(),
+               detail = detail || jsonb_build_object('error_retries',
+                                                     COALESCE((detail ->> 'error_retries')::int, 0) + 1)
+        WHERE org_id = :o AND state = 'error' AND updated_at < :cut
+          AND COALESCE((detail ->> 'error_retries')::int, 0) < :max
+        RETURNING event_id"""), {"o": org_id, "cut": datetime.now(UTC) - ERROR_RETRY_AFTER,
+                                 "max": MAX_ERROR_RETRIES})).all()
+    return len(rows)
 
 
 def tick_key(org_id: Any) -> str:
@@ -113,10 +130,11 @@ class Scheduler:
         async with self.sm() as db:
             # Tin kẹt: lượt chết giữa chừng (worker bị giết) → trả về pending.
             await db.execute(text("""
-                UPDATE refinery.event_state s SET state = 'pending'
+                UPDATE refinery.event_state s SET state = 'pending', attempts = GREATEST(s.attempts - 1, 0)
                 FROM refinery.runs r WHERE s.run_id = r.id AND s.state = 'processing' AND s.org_id = :o
                   AND (r.status <> 'running' OR r.started_at < :cut)"""),
                 {"o": org_id, "cut": datetime.now(UTC) - STUCK_AFTER})
+            await requeue_errors(db, org_id)
             await db.execute(text("""UPDATE refinery.runs SET status = 'failed', finished_at = now(),
                                      error = 'Lượt bị ngắt giữa chừng' WHERE org_id = :o AND status = 'running'
                                      AND started_at < :cut"""),

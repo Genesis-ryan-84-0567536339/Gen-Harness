@@ -102,7 +102,10 @@ cụm `duty`, ngoài phạm vi cụm này; ở đây chỉ dựng chỗ lưu + m
   đúng lịch sử dù đang xem từ hồ sơ gốc hay hồ sơ đã gộp.
 
 `PATCH /profile/{person_id}` (`profile.write`) `{"owner_user_id"?: uuid|null, "autonomy_level"?: 0-6|null,
-"note"?: string|null}` → **Gán phụ trách**, **mức tự trị với đối tượng này**, **ghi chú tay của Sếp**. `note`
+"note"?: string|null, "person_type"?: customer|partner|staff|candidate|learner|supplier|unknown,
+"relation_to_owner"?: direct|via_staff|staff|stranger}` → **Gán phụ trách**, **mức tự trị với đối tượng này**,
+**ghi chú tay của Sếp**, **loại người / Liên quan Sếp** (v0.1.64: nút "Đánh dấu là nhân viên"; loại do Sếp đặt khoá
+bằng `attrs.person_type_locked` nên quy tắc sàng lọc không đè lại). `note`
 lưu ở `attrs.owner_note` — đây là ghi chú **tay**, không endpoint/mã nào khác của hệ thống (refinery, agent
 trực kênh, worker) từng ghi vào khoá này, nên "hệ thống không sửa" là bảo đảm kiến trúc, không chỉ quy ước UI.
 Trả về hồ sơ đầy đủ (như `GET`).

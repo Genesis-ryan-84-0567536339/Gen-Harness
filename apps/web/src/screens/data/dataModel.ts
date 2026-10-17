@@ -103,7 +103,11 @@ export interface PipelineCard {
 
 export type DataScreen = 'raw' | 'rules' | 'clean';
 
-export function pipelineCards(p: Pipeline, screen: DataScreen): PipelineCard[] {
+/** `raw_error` (v0.1.64, F055): số tin "Lỗi xử lý"; máy chủ cũ không trả ⇒ coi như 0. */
+export type PipelineView = Pipeline & { raw_error?: number };
+
+export function pipelineCards(p: PipelineView, screen: DataScreen): PipelineCard[] {
+  const rawError = p.raw_error ?? 0;
   return [
     {
       step: 1,
@@ -122,8 +126,10 @@ export function pipelineCards(p: Pipeline, screen: DataScreen): PipelineCard[] {
       icon: 'ph ph-database',
       value: fmtInt(p.raw_total),
       unit: 'bản ghi',
-      note: `${fmtInt(p.raw_pending)} bản ghi chưa phân loại đang chờ chu kỳ tới.`,
-      tone: WARN,
+      note:
+        `${fmtInt(p.raw_pending)} bản ghi chưa phân loại đang chờ chu kỳ tới.` +
+        (rawError > 0 ? ` ${fmtInt(rawError)} bản ghi lỗi xử lý — hệ thống tự thử lại sau ít phút.` : ''),
+      tone: rawError > 0 ? BAD : WARN,
       on: screen === 'raw',
       last: false,
     },

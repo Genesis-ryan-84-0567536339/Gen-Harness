@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { AUTONOMY_AUTO_LABEL, AUTONOMY_CHOICES, AUTONOMY_LEVELS, autonomyChoice, autonomyPatch, type Profile } from '@gen-harness/contracts';
-import { Button, Card, Dialog, EmptyState, Icon, TextField } from '@gen-harness/ui';
+import { AUTONOMY_AUTO_LABEL, AUTONOMY_CHOICES, AUTONOMY_LEVELS, autonomyChoice, autonomyPatch, type DirRelation, type PersonType, type Profile } from '@gen-harness/contracts';
+import { Button, Card, Dialog, EmptyState, Icon, SelectField, TextField } from '@gen-harness/ui';
 import { fmtDMClock } from '../../lib/format';
 import { useCan } from '../../lib/permissions';
 import { useUrlState } from '../../lib/uiStore';
@@ -9,7 +9,8 @@ import { CardError, InlineError, Panel, SkeletonLines } from '../common';
 import { AutonomySelect } from '../AutonomySelect';
 import { WhyButton } from '../core/Evidence';
 import { errorText } from '../../lib/errorText';
-import { SUMMARY_TONE, channelIcon, channelTone, eventTone, fmtBytes, initialsOf } from './relationsModel';
+import { PERSON_TYPE_LIST, PERSON_TYPE_LABEL, personTypeLabel, personTypePatch, staffPatch } from '../people/peopleModel';
+import { RELATION_LABEL, SUMMARY_TONE, channelIcon, channelTone, eventTone, fmtBytes, initialsOf } from './relationsModel';
 import { useProfile, useUpdateProfile } from './queries';
 
 export function ProfileScreen() {
@@ -60,6 +61,8 @@ export function ProfileScreen() {
 function ProfileBody({ id, p }: { id: string; p: Profile }) {
   const [noteOpen, setNoteOpen] = useState(false);
   const [autonomyOpen, setAutonomyOpen] = useState(false);
+  const [typeOpen, setTypeOpen] = useState(false);
+  const markStaff = useUpdateProfile();
   // Đổi mức tự trị cần profile.write — vai trò chỉ đọc (Auditor) không thấy nút (mở ra chỉ gặp 403), như Danh bạ.
   const canWrite = useCan('profile.write');
 
@@ -77,7 +80,8 @@ function ProfileBody({ id, p }: { id: string; p: Profile }) {
         <div className="pf-head__body">
           <div className="pf-head__row">
             <span className="pf-head__name">{p.person.name}</span>
-            {p.person.type ? <span className="mono-tag">{p.person.type}</span> : null}
+            <span className="mono-tag">{personTypeLabel(p.person.type)}</span>
+            {relationText(p.person.relation_to_owner) ? <span className="mono-tag">{relationText(p.person.relation_to_owner)}</span> : null}
           </div>
           <div className="pf-head__identities">
             {p.identities.map((idn) => (
@@ -97,12 +101,24 @@ function ProfileBody({ id, p }: { id: string; p: Profile }) {
           <Button variant="secondary" icon="ph ph-user-plus" onClick={() => setNoteOpen(true)}>
             Gán phụ trách / ghi chú
           </Button>
+          {canWrite && p.person.type !== 'staff' ? (
+            <Button variant="secondary" icon="ph ph-identification-badge" loading={markStaff.isPending} onClick={() => markStaff.mutate({ id, body: staffPatch() })}>
+              Đánh dấu là nhân viên
+            </Button>
+          ) : null}
+          {canWrite ? (
+            <Button variant="ghost" icon="ph ph-tag" onClick={() => setTypeOpen(true)}>
+              Sửa loại người
+            </Button>
+          ) : null}
           <Link to="/workbench" className="gh-btn gh-btn--primary pf-head__workbench">
             <Icon name="ph ph-pen-nib" size={14} />
             Mở bàn làm việc
           </Link>
         </div>
       </div>
+
+      {markStaff.isError ? <InlineError>{errorText(markStaff.error)}</InlineError> : null}
 
       <div className="pf-scores">
         {p.scores.map((s) => (
@@ -218,6 +234,7 @@ function ProfileBody({ id, p }: { id: string; p: Profile }) {
       </div>
 
       {noteOpen ? <NoteDialog id={id} p={p} onClose={() => setNoteOpen(false)} /> : null}
+      {typeOpen && canWrite ? <PersonTypeDialog id={id} p={p} onClose={() => setTypeOpen(false)} /> : null}
       {autonomyOpen && canWrite ? <AutonomyDialog id={id} p={p} onClose={() => setAutonomyOpen(false)} /> : null}
     </div>
   );
@@ -264,6 +281,50 @@ function AutonomyDialog({ id, p, onClose }: { id: string; p: Profile; onClose: (
       }}
     >
       <AutonomySelect current={p.autonomy_level} value={picked} onChange={setPicked} />
+    </DialogShell>
+  );
+}
+
+/** Nhãn "Liên quan Sếp"; giá trị lạ/trống → không hiện (không lộ mã kỹ thuật). */
+function relationText(r: string | null | undefined): string {
+  return r && r in RELATION_LABEL ? RELATION_LABEL[r as DirRelation] : '';
+}
+
+/** v0.1.64 (F045): Sếp tự sửa loại người và mức "Liên quan Sếp" — loại Sếp đặt luôn thắng quy tắc sàng lọc. */
+function PersonTypeDialog({ id, p, onClose }: { id: string; p: Profile; onClose: () => void }) {
+  const update = useUpdateProfile();
+  const [type, setType] = useState<PersonType | null>(null);
+  const [relation, setRelation] = useState<DirRelation | null>(null);
+  const current = { type: p.person.type, relation: p.person.relation_to_owner };
+  const patch = personTypePatch(current, type, relation);
+  const changed = Object.keys(patch).length > 0;
+  const shownType = type ?? p.person.type ?? 'unknown';
+  const shownRelation = relation ?? (relationText(current.relation) ? (current.relation as DirRelation) : 'stranger');
+  return (
+    <DialogShell
+      title="Loại người và quan hệ với Sếp"
+      kicker={p.person.name}
+      onClose={onClose}
+      busy={update.isPending}
+      saveDisabled={!changed}
+      error={update.isError ? update.error : null}
+      onSave={() => {
+        if (!changed) return onClose();
+        update.mutate({ id, body: patch }, { onSuccess: onClose });
+      }}
+    >
+      <SelectField
+        label="Loại người"
+        value={shownType}
+        onChange={(e) => setType(e.target.value as PersonType)}
+        options={PERSON_TYPE_LIST.map((t) => ({ value: t, label: PERSON_TYPE_LABEL[t] }))}
+      />
+      <SelectField
+        label="Liên quan Sếp"
+        value={shownRelation}
+        onChange={(e) => setRelation(e.target.value as DirRelation)}
+        options={(Object.keys(RELATION_LABEL) as DirRelation[]).map((r) => ({ value: r, label: RELATION_LABEL[r] }))}
+      />
     </DialogShell>
   );
 }
