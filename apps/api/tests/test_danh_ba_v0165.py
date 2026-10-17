@@ -235,7 +235,7 @@ def test_migration_0038_follows_0037_and_single_head() -> None:
     script = ScriptDirectory.from_config(cfg)
     rev = script.get_revision("0038")
     assert rev is not None and rev.down_revision == "0037"
-    assert script.get_heads() == ["0038"]
+    assert len(script.get_heads()) == 1   # v0.1.67+: đầu cây đã lên 0039/0040; chỉ cần còn đúng một head
 
 
 @pytest.mark.parametrize("name", ["tagged_only", "silent", "proactive"])
