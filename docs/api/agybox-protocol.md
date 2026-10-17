@@ -64,9 +64,10 @@ st = await box_status()          # cache 10 giây; không tham số = đọc GH_
   client bỏ trả lời sai chữ ký. `401` không ký.
 - **Lỗi**: `{"error": {"code", "message", …}, "request_id"?}`. Mã → HTTP: `bad_request` 400 · `model_rejected` 400 (+`what`, `available`, `raw`) ·
   `unauthorized` 401 · `cli_auth_failed` 403 · `not_found` 404 · `method_not_allowed` 405 · `too_large` 413 (thân > 1 MiB hoặc prompt > 120 000 byte) ·
-  `rate_limited` 429 (+`retry_after`) · `busy` 429 (+`retry_after`; quá `GH_AGYBOX_MAX_JOBS` lượt đồng thời) · `internal` 500 ·
+  `rate_limited` 429 (+`retry_after`) · `busy` 429 (+`retry_after`; hộp đang chạy một lượt — `GH_AGYBOX_MAX_JOBS` luôn 1 từ gói sửa review; hoặc bộ nhớ chống phát lại đầy) · `internal` 500 ·
   `provider_error` 502 · `timeout` 504. Thông điệp lỗi đã che bí mật.
 - Hộp KHÔNG gọi ngược api; kết quả là văn bản không tin cậy (parse như đầu ra agy trực tiếp).
+- Client ngắt kết nối trước khi lượt xong ⇒ hộp huỷ lượt (giết nhóm tiến trình agy, xoá HOME tạm), không trả lời.
 
 ## Cô lập (tóm tắt) và cách kiểm
 

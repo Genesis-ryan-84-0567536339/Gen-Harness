@@ -84,3 +84,82 @@ def test_client_compares_signatures_in_constant_time() -> None:
     src = inspect.getsource(boxclient.AgyBoxClient._call)
     assert "signature_equal" in src and "sig == P.response_signature" not in src
     assert "compare_digest" in inspect.getsource(protocol.signature_equal)
+
+
+# ─── P3: client ngắt ⇒ dừng agy; mỗi lúc chỉ MỘT lượt agy trong hộp ─────────────────────────────────────────────
+
+async def test_client_disconnect_kills_agy(box, tmp_path) -> None:  # noqa: F811
+    import asyncio
+    import os
+    import time
+
+    pidfile = tmp_path / "agy.pid"
+    slow = tmp_path / "bin" / "agy-slow"
+    slow.parent.mkdir(exist_ok=True)
+    slow.write_text('#!/bin/sh\ncase "$1" in --version) echo 1.2.9; exit 0;; esac\n'
+                    f'echo $$ > {pidfile}\nexec sleep 30\n')
+    slow.chmod(0o755)
+    box.cfg.cli_binary = str(slow)
+    app = server.create_app(box.cfg, clock=box.clock)
+    body = _body(prompt="lâu", timeout_s=60)
+    headers = protocol.sign_request(KEY, "POST", "/v1/generate", body, box.clock())
+    sent: list[dict[str, Any]] = []
+    gone = asyncio.Event()
+    msgs = [{"type": "http.request", "body": body, "more_body": False}]
+
+    async def receive() -> dict[str, Any]:
+        if msgs:
+            return msgs.pop(0)
+        await gone.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(m: dict[str, Any]) -> None:
+        sent.append(m)
+
+    scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST", "scheme": "http",
+             "path": "/v1/generate", "raw_path": b"/v1/generate", "query_string": b"", "root_path": "",
+             "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()]
+             + [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())],
+             "client": ("127.0.0.1", 5555), "server": ("agy-box", 8090)}
+    task = asyncio.create_task(app(scope, receive, send))
+    for _ in range(100):
+        if pidfile.exists() and pidfile.read_text().strip():
+            break
+        await asyncio.sleep(0.05)
+    pid = int(pidfile.read_text())
+    started = time.monotonic()
+    gone.set()                                                          # api ngắt (hết giờ / huỷ lượt)
+    await asyncio.wait_for(task, 10)
+    assert time.monotonic() - started < 5
+
+    def alive(p: int) -> bool:
+        try:
+            os.kill(p, 0)
+        except ProcessLookupError:
+            return False
+        try:
+            return open(f"/proc/{p}/stat").read().split()[2] != "Z"
+        except OSError:
+            return False
+
+    for _ in range(50):
+        if not alive(pid):
+            break
+        await asyncio.sleep(0.1)
+    assert not alive(pid)                                               # agy đã bị dừng, không chạy tiếp vô ích
+
+
+def test_max_jobs_is_one() -> None:
+    """Hai lượt agy cùng uid trong hộp đọc được /proc và HOME tạm của nhau ⇒ mỗi lúc một lượt."""
+    assert server.Config(key_file="k").max_jobs == 1
+    assert server.load_config({"GH_AGYBOX_KEY_FILE": "k"}).max_jobs == 1
+    assert server.load_config({"GH_AGYBOX_KEY_FILE": "k", "GH_AGYBOX_MAX_JOBS": "4"}).max_jobs == 1
+
+
+def test_compose_box_runs_one_job() -> None:
+    from pathlib import Path
+
+    import yaml
+
+    doc = yaml.safe_load((Path(__file__).resolve().parents[3] / "deploy" / "compose.yaml").read_text(encoding="utf-8"))
+    assert doc["services"]["agy-box"]["environment"]["GH_AGYBOX_MAX_JOBS"] == "1"

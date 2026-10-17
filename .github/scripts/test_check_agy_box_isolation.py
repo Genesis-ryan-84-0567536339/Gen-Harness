@@ -41,7 +41,7 @@ GOOD = {
                 "GH_AGYBOX_KEY_FILE": "/run/secrets/gh_agy_key",
                 "GH_CLI_BINARY": "agy",
                 "AGY_CLI_DISABLE_AUTO_UPDATE": "1",
-                "GH_AGYBOX_MAX_JOBS": "2",
+                "GH_AGYBOX_MAX_JOBS": "1",
                 "HTTPS_PROXY": "http://agy-egress:3128",
                 "HTTP_PROXY": "http://agy-egress:3128",
             },

@@ -15,7 +15,7 @@ import os
 import re
 import shutil
 import time
-from collections.abc import Callable, MutableMapping
+from collections.abc import Callable, Coroutine, MutableMapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -62,7 +62,9 @@ _VERSION_RE = re.compile(r"\d+\.\d+\.\d+\S*")
 class Config:
     key_file: str
     cli_binary: str = "agy"
-    max_jobs: int = 2
+    #: Review v0.1.63 (P3): MỘT lượt agy mỗi lúc — hai lượt cùng uid `gh` đọc được /proc và HOME tạm của nhau (prompt,
+    #: token) nên không cho chạy song song; lượt thứ hai nhận `busy` (thử lại sau 5 giây).
+    max_jobs: int = 1
     host: str = "0.0.0.0"  # noqa: S104 — chỉ nghe trong mạng nội bộ agy-bus, không publish cổng ra máy chủ
     port: int = P.DEFAULT_PORT
 
@@ -72,7 +74,10 @@ def load_config(env: "MutableMapping[str, str] | dict[str, str]") -> Config:
     if not key_file:
         raise RuntimeError(f"Thiếu {ENV_KEY_FILE} — hộp agy không chạy được nếu không có khoá ký")
     try:
-        jobs = max(1, int(env.get(ENV_MAX_JOBS) or 2))
+        asked = int(env.get(ENV_MAX_JOBS) or 1)
+        jobs = 1                                   # luôn 1 (xem Config.max_jobs); GH_AGYBOX_MAX_JOBS > 1 bị bỏ qua
+        if asked > 1:
+            log.warning("agy-box: GH_AGYBOX_MAX_JOBS=%d bị hạ về 1 (mỗi lúc một lượt agy)", asked)
         port = int(env.get(ENV_PORT) or P.DEFAULT_PORT)
     except ValueError as e:
         raise RuntimeError("GH_AGYBOX_MAX_JOBS / GH_AGYBOX_PORT phải là số nguyên") from e
@@ -116,6 +121,35 @@ def _number(v: Any, default: float, lo: float, hi: float) -> float:
     if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
         raise _Reject(P.E_BAD_REQUEST, "timeout_s phải là số")
     return min(max(float(v), lo), hi)
+
+
+async def _disconnected(request: Request) -> None:
+    """Trả về khi client ngắt kết nối (ASGI `http.disconnect`). Gọi SAU khi đã đọc hết thân yêu cầu."""
+    while True:
+        msg = await request.receive()
+        if msg.get("type") == "http.disconnect":
+            return
+
+
+async def until_disconnect(request: Request, job: "Coroutine[Any, Any, dict[str, Any]]") -> dict[str, Any] | None:
+    """Chạy `job` (một lượt agy); client ngắt trước khi xong ⇒ HUỶ lượt (AgyClient giết cả nhóm tiến trình agy và xoá
+    HOME tạm) và trả None — review v0.1.63 (P3): trước đây agy chạy tiếp tới hết `timeout_s` dù api đã bỏ đi, giữ chỗ
+    của lượt kế (MAX_JOBS)."""
+    work = asyncio.ensure_future(job)
+    watch = asyncio.ensure_future(_disconnected(request))
+    try:
+        done, _ = await asyncio.wait({work, watch}, return_when=asyncio.FIRST_COMPLETED)
+        if work in done:
+            return work.result()
+        log.info("agy-box: client ngắt — dừng lượt agy")
+        work.cancel()
+        await asyncio.gather(work, return_exceptions=True)
+        return None
+    finally:
+        for t in (work, watch):
+            if not t.done():
+                t.cancel()
+        await asyncio.gather(work, watch, return_exceptions=True)
 
 
 def create_app(cfg: Config, *, clock: Callable[[], float] = time.time) -> Starlette:
@@ -222,17 +256,24 @@ def create_app(cfg: Config, *, clock: Callable[[], float] = time.time) -> Starle
             try:
                 # Không có kho phiên: `cli_home` không dùng tới khi có `session` (không đọc, không ghi, không khoá).
                 agy = AgyClient(cfg.cli_binary, "/nonexistent/agy-box", timeout=timeout, session=session)
-                if kind == "generate":
-                    assert isinstance(prompt, str) and isinstance(model, str)  # đã kiểm ở trên (cho mypy)
-                    c = await agy.generate(model, [Message("user", prompt)], json_mode=bool(obj.get("json_mode")),
-                                           temperature=0.0, effort=effort)
-                    out = {"request_id": rid, "text": c.text, "tokens_in": c.tokens_in, "tokens_out": c.tokens_out,
-                           "raw": {k: v for k, v in c.raw.items() if isinstance(v, (int, float, str, type(None)))}}
-                else:
+
+                async def work() -> dict[str, Any]:
+                    if kind == "generate":
+                        assert isinstance(prompt, str) and isinstance(model, str)  # đã kiểm ở trên (cho mypy)
+                        c = await agy.generate(model, [Message("user", prompt)],
+                                               json_mode=bool(obj.get("json_mode")), temperature=0.0, effort=effort)
+                        return {"request_id": rid, "text": c.text, "tokens_in": c.tokens_in,
+                                "tokens_out": c.tokens_out,
+                                "raw": {k: v for k, v in c.raw.items() if isinstance(v, (int, float, str, type(None)))}}
                     models = await agy.discover_models()
-                    out = {"request_id": rid, "models": models, "raw_text": agy.last_models_raw}
+                    return {"request_id": rid, "models": models, "raw_text": agy.last_models_raw}
+
+                out = await until_disconnect(request, work())
             finally:
                 state["active"] -= 1
+            if out is None:
+                code = "client_gone"
+                return Response(status_code=499)     # không ai nhận — api đã ngắt (hết giờ / huỷ lượt)
             return reply(200, out, sig)
         except _Reject as r:
             code = r.code

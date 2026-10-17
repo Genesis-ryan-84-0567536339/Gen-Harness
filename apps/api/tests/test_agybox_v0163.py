@@ -342,7 +342,7 @@ def test_config_reads_only_allowlisted_env(tmp_path: Path) -> None:
            "GH_DATABASE_URL": "postgresql://x", "GH_ADMIN_DATABASE_URL": "y", "GH_REDIS_URL": "redis://r",
            "GH_MASTER_KEY_FILE": "/run/secrets/gh_master_key", "GH_BRIDGE_KEY_FILE": "b", "GH_BROWSER_KEY_FILE": "c"}
     cfg = server.load_config(env)
-    assert (cfg.key_file, cfg.cli_binary, cfg.max_jobs) == (str(keyfile), "agy", 3)
+    assert (cfg.key_file, cfg.cli_binary, cfg.max_jobs) == (str(keyfile), "agy", 1)   # P3: luôn một lượt
     assert not any("postgres" in str(v) or "redis" in str(v) or "master" in str(v) for v in vars(cfg).values())
     scrubbed = dict(env)
     server.scrub_environ(scrubbed)
