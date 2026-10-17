@@ -173,6 +173,29 @@ async def test_qd1710_tagged_only_group_still_replies_when_tagged(w, db, redis) 
     assert "người gửi đang chờ bạn phản hồi" in router.calls[0][-1].content
 
 
+async def test_qd1710_group_switched_to_silent_while_model_is_thinking_gets_no_draft(w, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """Review v0.1.65 P3: chế độ nhóm có thể đổi giữa lúc hỏi model và lúc `apply` (Sếp bấm «Lắng nghe im lặng») —
+    `apply` đọc lại `listen_mode` hiện tại của nhóm trước khi tạo bản nháp thay vì tin ảnh chụp lúc chọn ứng viên."""
+    a = await make_agent(db, w, level=6)
+    await db.execute(text("UPDATE core.groups SET listen_mode = 'tagged_only' WHERE id = :g"), {"g": w["g1"]})
+    await db.commit()
+    [u] = await refine(w, redis, msg(BUY, mentions=True))
+    router = decide("draft")
+    real = router.generate
+
+    async def flip_then_answer(*args: Any, **kwargs: Any) -> Any:
+        async with w["sm"]() as other:
+            await other.execute(text("UPDATE core.groups SET listen_mode = 'silent' WHERE id = :g"), {"g": w["g1"]})
+            await other.commit()
+        return await real(*args, **kwargs)
+
+    router.generate = flip_then_answer  # type: ignore[method-assign]
+    await hook(w, redis, router, [u])
+    [d] = await decisions(db, a)
+    assert (d.decision, d.requested, d.outcome, d.draft_id) == ("silent", "draft", "blocked", None)
+    assert await agent_drafts(db) == [] and await redis.xlen("gh.bridge.outbound") == 0
+
+
 async def test_qd1710_bot_assigned_to_a_member_does_not_make_the_silent_group_reply(w, db, redis) -> None:  # type: ignore[no-untyped-def]
     """B8: gán BOT cho một người chỉ áp cho tin 1-1 của họ; tin của họ trong nhóm im lặng vẫn không được trả lời."""
     from gh.biz.relations import service as rsvc

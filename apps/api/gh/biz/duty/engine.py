@@ -14,7 +14,7 @@ Luật:
 import logging
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import orjson
@@ -226,6 +226,13 @@ async def apply(db: AsyncSession, org_id: uuid.UUID, ctx: Context, parsed: Parse
         return Result("note", NOTED, proposal={"note_entry_id": str(entry), "section": parsed.note_section,
                                                  "text": parsed.text})
     proposal = {"text": parsed.text}
+    if c.group_id:
+        # Chế độ nghe có thể đổi giữa lúc chọn ứng viên / hỏi model và lúc này (Sếp bấm «Lắng nghe im lặng») ⇒ đọc lại
+        # giá trị HIỆN TẠI trước khi gợi ý / soạn nháp, không tin ảnh chụp trong `Candidate`.
+        now_mode = (await db.execute(text("SELECT listen_mode FROM core.groups WHERE id = :g"),
+                                     {"g": c.group_id})).scalar_one_or_none()
+        if now_mode != c.listen_mode:
+            c = replace(c, listen_mode=now_mode)
     if not replies_allowed(c):             # QD 17/10: nhóm Lắng nghe im lặng — không gợi ý, không soạn, không gửi
         return Result("silent", BLOCKED, "nhóm Lắng nghe im lặng: không bao giờ trả lời, kể cả khi được tag",
                       proposal=proposal)
