@@ -66,6 +66,11 @@ def identity_block(agent: Any) -> str:
     return _identity(agent)
 
 
+#: Lý do ghi vào `agent.decisions.rationale` khi quyết định bị chặn vì nhóm Lắng nghe im lặng (Nhật ký lắng nghe nhận ra
+#: quyết định này bằng chính chuỗi này để nói đúng nguyên nhân).
+SILENT_GROUP_REASON = "nhóm Lắng nghe im lặng: không bao giờ trả lời, kể cả khi được tag"
+
+
 def replies_allowed(c: Candidate) -> bool:
     """QD 17/10/2026: nhóm «Lắng nghe im lặng» (`silent`) KHÔNG BAO GIỜ trả lời — kể cả khi được tag, kể cả khi agent
     được gán BOT cho nhóm/người. Mọi chế độ khác giữ như cũ (tagged_only: được tag thì trả lời)."""
@@ -233,8 +238,7 @@ async def apply(db: AsyncSession, org_id: uuid.UUID, ctx: Context, parsed: Parse
                                                  "text": parsed.text})
     proposal = {"text": parsed.text}
     if not replies_allowed(c):             # QD 17/10: nhóm Lắng nghe im lặng — không gợi ý, không soạn, không gửi
-        return Result("silent", BLOCKED, "nhóm Lắng nghe im lặng: không bao giờ trả lời, kể cả khi được tag",
-                      proposal=proposal)
+        return Result("silent", BLOCKED, SILENT_GROUP_REASON, proposal=proposal)
     gate = policy.evaluate("message.send", level)
     if gate.outcome == policy.BLOCKED:
         return Result("silent", BLOCKED, f"mức {level} ({policy.LEVELS[level]}) không gợi ý hay soạn tin",

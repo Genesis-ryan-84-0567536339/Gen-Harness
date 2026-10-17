@@ -24,6 +24,7 @@ from gh.auth import rbac, service
 from gh.auth.deps import require
 from gh.biz.core.routes import _readable_draft_ids
 from gh.biz.core.scope import Scope, direct_visible_sql, scope_for
+from gh.biz.duty.engine import SILENT_GROUP_REASON
 from gh.data import listen_events as lev
 from gh.data.common import CHANNEL_NAME, LISTENING_MODES, iso, mask_text, ref, since_cutoff
 from gh.db import DB
@@ -206,8 +207,10 @@ def _screening_note(state: str, detail: Any, label: str | None) -> str:
     return base
 
 
-def _decision_label(decision: str, outcome: str | None, draft_status: str | None) -> str:
+def _decision_label(decision: str, outcome: str | None, draft_status: str | None, rationale: str | None = None) -> str:
     if decision == "silent":
+        if outcome == "blocked" and SILENT_GROUP_REASON in (rationale or ""):
+            return "Im lặng (nhóm Lắng nghe im lặng — không bao giờ trả lời, kể cả khi được tag)"
         return {"rejected": "Im lặng (phản hồi của model bị loại)", "blocked": "Im lặng (mức tự trị không cho phép)"
                 }.get(outcome or "", "Im lặng")
     if decision in ("draft", "send"):
@@ -245,7 +248,7 @@ async def _decisions_for(db: AsyncSession, user: service.CurrentUser,
         return {}
     rows = (await db.execute(text("""
         SELECT x.raw_event_id AS eid, d.id, d.at, d.agent_id, a.name AS agent_name, d.decision, d.outcome,
-               d.draft_id, ad.code AS draft_code, ad.status AS draft_status
+               d.draft_id, d.rationale, ad.code AS draft_code, ad.status AS draft_status
         FROM clean.evidence x
         JOIN agent.decisions d ON d.trigger_unit_id = x.meaning_unit_id AND d.org_id = :o
         JOIN agent.identities a ON a.id = d.agent_id
@@ -261,7 +264,8 @@ async def _decisions_for(db: AsyncSession, user: service.CurrentUser,
         out.setdefault(r.eid, []).append({
             "id": str(r.id), "at": iso(r.at), "agent": {"id": str(r.agent_id), "name": r.agent_name},
             "decision": r.decision, "outcome": r.outcome,
-            "label": _decision_label(r.decision, r.outcome, r.draft_status if r.draft_id else None), "draft": draft})
+            "label": _decision_label(r.decision, r.outcome, r.draft_status if r.draft_id else None, r.rationale),
+            "draft": draft})
     return out
 
 

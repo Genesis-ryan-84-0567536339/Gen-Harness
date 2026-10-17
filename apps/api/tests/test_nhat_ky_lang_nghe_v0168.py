@@ -25,7 +25,7 @@ async def _channel(db: Any, org: uuid.UUID, type_: str = "zalo") -> Any:
 
 
 async def _agent_decision(db: Any, org: uuid.UUID, raw_id: uuid.UUID, decision: str = "draft", *, draft: bool = True,
-                          outcome: str = "held") -> dict[str, Any]:
+                          outcome: str = "held", rationale: str | None = None) -> dict[str, Any]:
     """Một agent đã quyết định cho tin `raw_id` (đơn vị ý nghĩa + chứng cứ + bản nháp thật nếu cần)."""
     unit = (await db.execute(text("""
         INSERT INTO clean.meaning_units (org_id, observed_at, event_type, conclusion, entities, confidence, run_id)
@@ -46,9 +46,11 @@ async def _agent_decision(db: Any, org: uuid.UUID, raw_id: uuid.UUID, decision: 
             VALUES (:o, 'DR-0001', 'message', :a, '{"text": "Dạ em gửi báo giá"}'::jsonb, 4, 'pending')
             RETURNING id"""), {"o": org, "a": agent})).scalar_one()
     did = (await db.execute(text("""
-        INSERT INTO agent.decisions (org_id, agent_id, trigger_ref, trigger_unit_id, decision, outcome, draft_id)
-        VALUES (:o, :a, CAST(:tr AS jsonb), :u, :d, :oc, :dr) RETURNING id"""),
+        INSERT INTO agent.decisions (org_id, agent_id, trigger_ref, trigger_unit_id, decision, outcome, draft_id,
+                                     rationale)
+        VALUES (:o, :a, CAST(:tr AS jsonb), :u, :d, :oc, :dr, :why) RETURNING id"""),
                             {"o": org, "a": agent, "u": unit, "d": decision, "oc": outcome, "dr": draft_id,
+                             "why": rationale,
                              "tr": orjson.dumps({"type": "meaning_unit", "id": str(unit)}).decode()})).scalar_one()
     await db.commit()
     return {"unit": unit, "agent": agent, "draft": draft_id, "decision": did}
@@ -133,6 +135,23 @@ async def test_message_shows_screening_and_agent_decision_with_draft_link(owner_
     await db.execute(text("UPDATE agent.decisions SET decision = 'silent', outcome = 'none', draft_id = NULL"))
     await db.commit()
     assert (await _log(owner_api, "?acted=true"))["items"] == []
+
+
+async def test_blocked_silent_decision_names_the_real_reason(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    """Review Opus P2-2: nhóm Lắng nghe im lặng chặn trả lời ⇒ nhãn nói đúng «nhóm Lắng nghe im lặng», không đổ cho
+    «mức tự trị không cho phép»; quyết định bị chặn vì mức tự trị vẫn giữ nhãn cũ."""
+    from gh.biz.duty.engine import SILENT_GROUP_REASON
+    org = await org_id(db)
+    await listen(db, org, "g1", mode="silent")
+    [raw] = await put(sessionmaker(), org, msg("Báo giá container nhé", mentions=True))
+    await _agent_decision(db, org, raw, "silent", draft=False, outcome="blocked", rationale=SILENT_GROUP_REASON)
+    item = next(i for i in (await _log(owner_api))["items"] if i["kind"] == "message" and i["id"] == str(raw))
+    [dec] = item["decisions"]
+    assert dec["label"] == "Im lặng (nhóm Lắng nghe im lặng — không bao giờ trả lời, kể cả khi được tag)"
+    await db.execute(text("UPDATE agent.decisions SET rationale = 'mức 1 (chỉ đọc) không gợi ý hay soạn tin'"))
+    await db.commit()
+    item = next(i for i in (await _log(owner_api))["items"] if i["id"] == str(raw))
+    assert item["decisions"][0]["label"] == "Im lặng (mức tự trị không cho phép)"
 
 
 async def test_why_nothing_happened_notes(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
