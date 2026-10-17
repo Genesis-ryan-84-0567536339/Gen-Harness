@@ -230,6 +230,56 @@ async def test_requeued_error_is_processed_when_model_is_good(app, db, redis) ->
     assert st.clean >= 1
 
 
+async def test_whole_run_crashes_are_counted_and_end_in_error(app, db, redis, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """P3 review v0.1.64: cả lượt sập (attempts hoàn lại) ⇒ trước đây thử lại vô hạn. Nay đếm số lần sập trong detail,
+    đủ MAX_CRASHES ⇒ `error` (vẫn được bộ lập lịch nhận lại có giới hạn, hiện ở dải pipeline)."""
+    from gh.refinery import runner
+
+    org = await setup_org(db)
+    sm = sessionmaker()
+    await put(sm, org, msg(BUY))
+
+    async def boom(self, *a, **k):  # type: ignore[no-untyped-def]
+        raise RuntimeError("sập cả lượt")
+
+    monkeypatch.setattr(Refinery, "_apply", boom)
+    ref = Refinery(sm, redis, FakeRouter(lambda m: {"units": [unit(r, "R-01") for r in refs_in(m)], "noise": []}))  # type: ignore[arg-type]
+    for i in range(1, runner.MAX_CRASHES):
+        await ref.run(org, "manual")
+        await db.rollback()
+        r = (await db.execute(text("SELECT state, attempts, detail FROM refinery.event_state"))).one()
+        assert (r.state, r.attempts, r.detail["crashes"]) == ("pending", 0, i)  # chưa đủ ⇒ vẫn thử lại, attempts hoàn
+    st = await ref.run(org, "manual")
+    await db.rollback()
+    r = (await db.execute(text("SELECT state, detail FROM refinery.event_state"))).one()
+    assert r.state == "error" and r.detail["crashes"] == runner.MAX_CRASHES and "sập cả lượt" in r.detail["last_error"]
+    assert st.errors == 1
+    # đã `error` ⇒ lượt sau không nhận lại ngay (không vòng vô hạn)
+    st2 = await ref.run(org, "manual")
+    assert st2.total == 0
+
+
+async def test_scheduler_stuck_recovery_counts_crashes_too(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """Lượt chết giữa chừng (worker bị giết) liên tục vì cùng một tin ⇒ cũng bị đếm, không hồi sinh vô hạn."""
+    from gh.refinery import runner
+
+    org = await setup_org(db)
+    sm = sessionmaker()
+    await put(sm, org, msg(BUY))
+    sched = Scheduler(sm, redis, Refinery(sm, redis, FakeRouter(down=True)))  # type: ignore[arg-type]
+    for i in range(1, runner.MAX_CRASHES + 1):
+        run_id = await sched.refinery.start_run(org, "manual")
+        await db.execute(text("""UPDATE refinery.event_state SET state = 'processing', run_id = :r, attempts = 1
+                                 WHERE state = 'pending'"""), {"r": run_id})
+        await db.execute(text("UPDATE refinery.runs SET status = 'failed' WHERE id = :r"), {"r": run_id})
+        await db.commit()
+        await sched.tick(wait=True)
+        await db.rollback()
+        r = (await db.execute(text("SELECT state, attempts, detail FROM refinery.event_state"))).one()
+        assert r.detail["crashes"] == i and r.attempts == 0
+        assert r.state == ("error" if i == runner.MAX_CRASHES else "pending")
+
+
 # ─── P2: tiêu đề cảnh báo thân thiện ─────────────────────────────────────────────────────────────────────
 
 def test_alert_title_is_vietnamese_and_has_no_internal_codes() -> None:

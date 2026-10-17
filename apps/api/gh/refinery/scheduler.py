@@ -20,7 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from gh.config import get_settings
-from gh.refinery.runner import Refinery, load_schedule
+from gh.refinery.runner import CRASH_SET, MAX_CRASHES, Refinery, load_schedule
 
 log = logging.getLogger("gh.refinery.scheduler")
 
@@ -129,11 +129,12 @@ class Scheduler:
         results: list[Any] = []
         async with self.sm() as db:
             # Tin kẹt: lượt chết giữa chừng (worker bị giết) → trả về pending.
-            await db.execute(text("""
-                UPDATE refinery.event_state s SET state = 'pending', attempts = GREATEST(s.attempts - 1, 0)
+            await db.execute(text(f"""
+                UPDATE refinery.event_state s SET {CRASH_SET}
                 FROM refinery.runs r WHERE s.run_id = r.id AND s.state = 'processing' AND s.org_id = :o
-                  AND (r.status <> 'running' OR r.started_at < :cut)"""),
-                {"o": org_id, "cut": datetime.now(UTC) - STUCK_AFTER})
+                  AND (r.status <> 'running' OR r.started_at < :cut)"""),  # noqa: S608 — CRASH_SET là hằng
+                {"o": org_id, "cut": datetime.now(UTC) - STUCK_AFTER, "maxc": MAX_CRASHES,
+                 "why": "Lượt xử lý bị ngắt giữa chừng"})
             await requeue_errors(db, org_id)
             await db.execute(text("""UPDATE refinery.runs SET status = 'failed', finished_at = now(),
                                      error = 'Lượt bị ngắt giữa chừng' WHERE org_id = :o AND status = 'running'

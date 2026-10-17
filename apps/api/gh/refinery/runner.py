@@ -40,6 +40,17 @@ log = logging.getLogger("gh.refinery")
 
 AGENT_KEY = "core.refinery"
 MAX_ATTEMPTS = 3
+#: Review P3 v0.1.64: cả lượt sập (hoặc lượt bị giết giữa chừng) hoàn lại `attempts` nên một tin "độc" làm sập lượt thì
+#: được nhận lại vô hạn. Mỗi lần sập cộng `detail.crashes`; đủ chừng này lần ⇒ `error` (bộ lập lịch vẫn nhận lại có
+#: giới hạn `MAX_ERROR_RETRIES`, dải pipeline hiện số tin lỗi).
+MAX_CRASHES = 3
+#: Phần SET dùng chung cho UPDATE `refinery.event_state s` của tin đang `processing` mà lượt xử lý đã sập/chết:
+#: hoàn lại lần thử, cộng bộ đếm sập, quá hạn ⇒ `error`. Tham số: :maxc, :why.
+CRASH_SET = """state = CASE WHEN COALESCE((s.detail ->> 'crashes')::int, 0) + 1 >= :maxc
+                            THEN 'error' ELSE 'pending' END,
+               attempts = GREATEST(s.attempts - 1, 0), updated_at = now(),
+               detail = s.detail || jsonb_build_object('crashes', COALESCE((s.detail ->> 'crashes')::int, 0) + 1,
+                                                       'last_error', CAST(:why AS text))"""
 #: J2: tổng thời gian tối đa hỏi Jev cho CẢ lô trước khi trích xuất (giây). Quá hạn ⇒ coi như Jev lỗi (thận trọng:
 #: chỉ bỏ tin trùng hẳn) — bước tối ưu chi phí không được ăn hết `JOB_TIMEOUT` của job sàng lọc.
 PREFILTER_JEV_BUDGET_S = 20.0
@@ -277,10 +288,15 @@ class Refinery:
             log.exception("Lượt sàng lọc %s lỗi", run_id)
             st.status, st.error = "failed", str(exc)[:500]
             async with self.sm() as db:
-                # Lỗi hạ tầng của cả lượt: hoàn lại lần thử đã tính lúc nhận (chỉ JSON sai định dạng mới tính — F055).
-                await db.execute(text("""UPDATE refinery.event_state SET state = 'pending',
-                                                attempts = GREATEST(attempts - 1, 0)
-                                         WHERE run_id = :r AND state = 'processing'"""), {"r": run_id})
+                # Lỗi hạ tầng của cả lượt: hoàn lại lần thử đã tính lúc nhận (chỉ JSON sai định dạng mới tính — F055),
+                # nhưng ĐẾM số lần sập: đủ MAX_CRASHES ⇒ `error`, không thử lại vô hạn.
+                crashed = (await db.execute(text(f"""UPDATE refinery.event_state s SET {CRASH_SET}
+                                                    WHERE s.run_id = :r AND s.state = 'processing'
+                                                    RETURNING s.state"""),  # noqa: S608 — CRASH_SET là hằng
+                                            {"r": run_id, "maxc": MAX_CRASHES, "why": str(exc)[:300]})).scalars().all()
+                n_err = sum(1 for x in crashed if x == "error")
+                st.errors += n_err
+                st.processed += n_err
                 await db.commit()
         async with self.sm() as db:
             await db.execute(text("""
