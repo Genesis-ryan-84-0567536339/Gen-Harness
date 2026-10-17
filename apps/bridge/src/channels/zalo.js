@@ -337,29 +337,37 @@ export class ZaloAdapter extends EventEmitter {
     const all = await api.getAllGroups();
     const ids = Object.keys(all?.gridVerMap || {});
     const groups = [];
-    let complete = true;
+    // Nền tảng trả lỗi (có thể là hãm tốc) ⇒ DỪNG cả lượt, không hỏi tiếp: hỏi dồn khi đang bị từ chối chỉ làm tệ thêm.
+    // Lõi nhận phần đã quét kèm `groups_complete=false` (không coi nhóm vắng là "đã rời"); bridge lùi lịch quét kế tiếp.
+    let halted = false;
+    let missing = false; // nền tảng không trả thông tin của một nhóm (không phải lỗi): chưa đủ nhưng không cần dừng
     let first = true;
     for (const part of chunk(ids, 20)) {
+      if (halted) break;
       if (!first) await this.#gap();
       first = false;
       let info;
       try { info = await api.getGroupInfo(part); } catch (err) {
-        this.log.warn('zalo: getGroupInfo lỗi', { error: errorCode(err) });
-        complete = false;
-        continue;
+        this.log.warn('zalo: getGroupInfo lỗi — dừng lượt quét', { error: errorCode(err) });
+        halted = true;
+        break;
       }
       for (const id of part) {
         const g = info?.gridInfoMap?.[id];
-        if (!g) { complete = false; continue; }
+        if (!g) { missing = true; continue; }
         const memberIds = (Array.isArray(g.memberIds) && g.memberIds.length
           ? g.memberIds : (g.memVerList || []).map((s) => String(s).split('_')[0])).map(String);
         const profiles = {};
         for (const ids2 of chunk(memberIds, 100)) {
+          if (halted) break;
           await this.#gap();
           try {
             const r = await api.getGroupMembersInfo(ids2);
             Object.assign(profiles, r?.profiles || {});
-          } catch { break; } // tên thành viên không bắt buộc
+          } catch (err) { // tên thành viên không bắt buộc, nhưng nền tảng đã lỗi ⇒ không hỏi thêm ở lượt này
+            this.log.warn('zalo: getGroupMembersInfo lỗi — dừng lượt quét', { error: errorCode(err) });
+            halted = true;
+          }
         }
         const name = g.name || '';
         this.groupNames.set(String(id), name);
@@ -380,7 +388,7 @@ export class ZaloAdapter extends EventEmitter {
         });
       }
     }
-    this.lastSyncComplete = complete;
+    this.lastSyncComplete = !halted && !missing;
     return groups;
   }
 

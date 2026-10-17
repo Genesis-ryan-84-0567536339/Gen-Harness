@@ -13,6 +13,8 @@ export const CREDENTIAL_COALESCE_MS = 5000;
 export const DIRECTORY_MS = 2 * 60 * 60 * 1000;
 export const DISCOVER_DELAY_MS = 5000;
 export const DISCOVER_MIN_GAP_MS = 10 * 60 * 1000;
+// Lượt quét lỗi/thiếu (nền tảng từ chối, có thể là hãm tốc) ⇒ lùi lịch gấp đôi chu kỳ mỗi lần liên tiếp, tối đa 8 giờ.
+export const DIRECTORY_MAX_BACKOFF_MS = 8 * 60 * 60 * 1000;
 
 const keyOf = (channel, sessionId) => `${channel}:${sessionId}`;
 
@@ -69,7 +71,7 @@ export class SessionManager {
   }
 
   #teardown(s) {
-    clearInterval(s.dirTimer);
+    clearTimeout(s.dirTimer);
     clearTimeout(s.credTimer);
     clearTimeout(s.discoverTimer);
     s.dirTimer = null;
@@ -142,6 +144,7 @@ export class SessionManager {
       key, channel, sessionId, adapter, state: 'starting', orgId: ctx.orgId, correlationId: ctx.correlationId,
       queued: 0, lastCredAt: 0, credTimer: null, dirTimer: null, inbound: 0, dropped: 0,
       knownGroups: new Set(), discoverTimer: null, syncing: null, lastSyncAt: 0,
+      syncFailures: 0, nextSyncDelayMs: this.directoryMs,
     };
     this.sessions.set(key, s);
     this.#wire(s);
@@ -183,19 +186,17 @@ export class SessionManager {
       }
       s.state = 'active';
       s.lastCredAt = this.now();
-      clearInterval(s.dirTimer); // nối lại sau mất mạng: không để lại bộ đếm cũ
+      clearTimeout(s.dirTimer); // nối lại sau mất mạng: không để lại bộ đếm cũ
       this.log.info('phiên hoạt động', base);
       this.#publish(STREAMS.status, 'session.active', { ...base, account, credential: blob }, s);
-      this.syncDirectory(s);
-      s.dirTimer = setInterval(() => this.syncDirectory(s), this.directoryMs);
-      s.dirTimer.unref?.();
+      this.syncDirectory(s); // xong lượt này (kể cả lỗi) sẽ tự hẹn lượt kế tiếp
     });
     // Mất mạng/máy chủ nền tảng chưa tới: phiên vẫn còn (credential giữ nguyên), adapter tự thử lại. Báo lõi để thẻ kênh
     // nói đúng "đang nối lại" thay vì giữ "Đang kết nối"; ngừng heartbeat cho tới khi nối lại (session.active).
     adapter.on('retrying', ({ error } = {}) => {
       if (s.state === 'ended') return;
       s.state = 'retrying';
-      clearInterval(s.dirTimer);
+      clearTimeout(s.dirTimer);
       clearTimeout(s.credTimer);
       clearTimeout(s.discoverTimer);
       s.dirTimer = null;
@@ -298,23 +299,40 @@ export class SessionManager {
   syncDirectory(s) {
     if (s.state !== 'active') return Promise.resolve();
     if (s.syncing) return s.syncing;
-    s.syncing = this.#syncDirectory(s).finally(() => { s.syncing = null; });
+    s.syncing = this.#syncDirectory(s).finally(() => {
+      s.syncing = null;
+      this.#scheduleSync(s);
+    });
     return s.syncing;
   }
 
+  /** Hẹn lượt quét định kỳ kế tiếp: chu kỳ gốc khi lượt trước đủ, lùi gấp đôi mỗi lần lỗi liên tiếp (tối đa 8 giờ). */
+  #scheduleSync(s) {
+    clearTimeout(s.dirTimer);
+    s.dirTimer = null;
+    if (s.state !== 'active') return;
+    s.nextSyncDelayMs = Math.min(this.directoryMs * 2 ** s.syncFailures, Math.max(DIRECTORY_MAX_BACKOFF_MS, this.directoryMs));
+    s.dirTimer = setTimeout(() => { s.dirTimer = null; this.syncDirectory(s); }, s.nextSyncDelayMs);
+    s.dirTimer.unref?.();
+  }
+
   async #syncDirectory(s) {
+    let ok = false;
     try {
       const groups = await s.adapter.syncGroups();
       if (s.state !== 'active') return;
       s.lastSyncAt = this.now();
       s.knownGroups = new Set(groups.map((g) => String(g.external_id)));
       // `groups_complete`: lượt quét không lỗi và có nhóm ⇒ lõi mới được coi nhóm vắng là "đã rời".
-      const groupsComplete = groups.length > 0 && s.adapter.lastSyncComplete !== false;
+      ok = s.adapter.lastSyncComplete !== false;
+      const groupsComplete = groups.length > 0 && ok;
       await this.#publish(STREAMS.directory, 'groups',
         { channel: s.channel, session_id: s.sessionId, groups, groups_complete: groupsComplete }, s);
-      this.log.info('đồng bộ danh bạ', { channel: s.channel, session_id: s.sessionId, groups: groups.length });
+      this.log.info('đồng bộ danh bạ', { channel: s.channel, session_id: s.sessionId, groups: groups.length, complete: ok });
     } catch (err) {
       this.log.warn('đồng bộ danh bạ lỗi', { channel: s.channel, session_id: s.sessionId, error: errorCode(err) });
+    } finally {
+      s.syncFailures = ok ? 0 : s.syncFailures + 1;
     }
   }
 

@@ -149,3 +149,66 @@ test('WhatsApp: tin từ nhóm lạ cũng báo group.discovered (kèm tên nếu
   assert.equal(bus.of(STREAMS.inbound).length, 0);
   mgr.shutdown();
 });
+
+// ── P2-1 (review v0.1.65): nền tảng trả lỗi ⇒ DỪNG cả lượt (không hỏi tiếp), đánh dấu chưa đủ, lùi lịch ──
+
+const manyGroups = (n) => Object.fromEntries(Array.from({ length: n }, (_, i) => [
+  `G${i}`, { name: `N${i}`, totalMember: 1, memVerList: [`${i}_0`] },
+]));
+
+test('Zalo: getGroupInfo lỗi ở lô đầu ⇒ DỪNG lượt, không hỏi lô sau; lastSyncComplete = false', async () => {
+  const api = makeZaloApi({ groups: manyGroups(45) }); // 3 lô (20 + 20 + 5)
+  let calls = 0;
+  api.getGroupInfo = async () => { calls += 1; throw new Error('429'); };
+  const a = new ZaloAdapter({ lib: makeZaloLib({ api }).lib, sessionId: 's1', directoryGapMs: 0 });
+  a.api = api;
+  const groups = await a.syncGroups();
+  assert.equal(calls, 1);
+  assert.deepEqual(groups, []);
+  assert.equal(a.lastSyncComplete, false);
+});
+
+test('Zalo: lô sau lỗi ⇒ giữ nhóm của lô trước, KHÔNG hỏi lô thứ ba', async () => {
+  const api = makeZaloApi({ groups: manyGroups(45) });
+  const real = api.getGroupInfo;
+  let calls = 0;
+  api.getGroupInfo = async (ids) => { calls += 1; if (calls === 2) throw new Error('mạng'); return real(ids); };
+  const a = new ZaloAdapter({ lib: makeZaloLib({ api }).lib, sessionId: 's1', directoryGapMs: 0 });
+  a.api = api;
+  const groups = await a.syncGroups();
+  assert.equal(calls, 2);
+  assert.equal(groups.length, 20);
+  assert.equal(a.lastSyncComplete, false);
+});
+
+test('Zalo: getGroupMembersInfo lỗi ⇒ DỪNG lượt (không hỏi thành viên của nhóm sau), chưa đủ', async () => {
+  const api = makeZaloApi({ groups: manyGroups(5) });
+  let calls = 0;
+  api.getGroupMembersInfo = async () => { calls += 1; throw new Error('429'); };
+  const a = new ZaloAdapter({ lib: makeZaloLib({ api }).lib, sessionId: 's1', directoryGapMs: 0 });
+  a.api = api;
+  await a.syncGroups();
+  assert.equal(calls, 1);
+  assert.equal(a.lastSyncComplete, false);
+});
+
+test('lượt quét lỗi ⇒ lùi lịch gấp đôi chu kỳ mỗi lần (tối đa 8 giờ), lượt đủ ⇒ về chu kỳ gốc', async () => {
+  const api = makeZaloApi({ groups: GROUPS });
+  const real = api.getAllGroups;
+  let fail = true;
+  api.getAllGroups = async () => { if (fail) throw new Error('429'); return real(); };
+  const env = await loginZalo(api, { directoryMs: 2 * 60 * 60 * 1000 });
+  const s = env.mgr.sessions.get('zalo:s1');
+  await waitFor(() => s.syncFailures === 1);
+  assert.equal(s.nextSyncDelayMs, 4 * 60 * 60 * 1000);
+  await env.mgr.syncDirectory(s, 'manual');
+  assert.equal(s.syncFailures, 2);
+  assert.equal(s.nextSyncDelayMs, 8 * 60 * 60 * 1000);
+  await env.mgr.syncDirectory(s, 'manual');
+  assert.equal(s.nextSyncDelayMs, 8 * 60 * 60 * 1000); // trần 8 giờ
+  fail = false;
+  await env.mgr.syncDirectory(s, 'manual');
+  assert.equal(s.syncFailures, 0);
+  assert.equal(s.nextSyncDelayMs, 2 * 60 * 60 * 1000);
+  env.mgr.shutdown();
+});
