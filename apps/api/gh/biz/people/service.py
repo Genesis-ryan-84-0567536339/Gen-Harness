@@ -10,6 +10,8 @@ F2 §6 gọi 4 board bằng tên khác — `BOARD_PERSON_TYPE` ánh xạ qua l�
 import uuid
 from typing import Any
 
+from gh.data.common import NO_REPLY_KINDS, outbound_to_sql
+
 TRENDS = ("up", "down", "flat")
 DISPUTE_STATUSES = ("open", "resolved", "rejected")
 
@@ -47,20 +49,26 @@ USER_ROLE_JOIN = """LEFT JOIN LATERAL (SELECT r2.code FROM core.user_roles ur2 J
                                         ON r2.id = ur2.role_id WHERE ur2.user_id = {alias}.id LIMIT 1) {out} ON true"""
 
 
-# ─── ghép "tin đến → tin đi cùng luồng" ─────────────────────────────────────────
+# ─── ghép "tin đến → tin đi cho đúng người" ────────────────────────────────────────────────────────────────────
 #
-# Cùng cách `gh.biz.queue.jobs._scan_slow_response` đã ghép (kênh + nhóm giống nhau, `direction`) để sinh cảnh
-# báo `slow_response`: một luồng là (channel_id, group_id) — `group_id IS NOT DISTINCT FROM` để tin 1-1
-# (`group_id IS NULL`) cũng ghép được với chính nó. Mỗi tin đến ghép với tin đi **sớm nhất** sau nó trên cùng
-# luồng (LATERAL); không có tin đi nào sau → NULL (chưa trả lời — "khách bị bỏ rơi").
-PAIR_CTE = """
+# Cùng cách `gh.biz.queue.jobs._scan_slow_response` đã ghép (v0.1.67, F050). Nhóm: một luồng là (channel_id, group_id).
+# Tin 1-1 (`group_id IS NULL`): KHÔNG ghép theo "cùng kênh" — người gửi tin đi là tài khoản của Sếp, nên tin riêng
+# cho khách A từng được tính là đã trả lời cả khách B. Tin đi 1-1 chỉ ghép khi người nhận (payload) là đúng khách
+# này (`gh.data.common.outbound_to_sql`). Tin vào là reaction / nhãn dán / tin hệ thống thì không cần trả lời nên
+# không vào mẫu số. Mỗi tin đến ghép với tin đi **sớm nhất** sau nó (LATERAL); không có ⇒ NULL (chưa trả lời).
+PAIR_CTE = f"""
 WITH inbound AS (
-  SELECT e.id, e.channel_id, e.group_id, e.occurred_at, cp.id AS customer_id
+  SELECT e.id, e.channel_id, e.group_id, e.occurred_at, cp.id AS customer_id,
+         ARRAY(SELECT x.id FROM core.person_identities x
+               WHERE x.person_id = cpi.person_id AND x.channel_id = e.channel_id) AS ids,
+         ARRAY(SELECT NULLIF(split_part(x.external_id, '@', 1), '') FROM core.person_identities x
+               WHERE x.person_id = cpi.person_id AND x.channel_id = e.channel_id) AS ext
   FROM raw.events e
   JOIN core.channels ch ON ch.id = e.channel_id
   LEFT JOIN core.person_identities cpi ON cpi.id = e.sender_identity_id
   LEFT JOIN core.persons cp ON cp.id = cpi.person_id AND cp.deleted_at IS NULL AND cp.merged_into_id IS NULL
   WHERE ch.org_id = :o AND e.direction = 'inbound' AND e.occurred_at >= :df AND e.occurred_at <= :dt
+    AND e.kind <> ALL(ARRAY{list(NO_REPLY_KINDS)!r}::text[])
 ),
 paired AS (
   SELECT i.id, i.occurred_at AS asked_at, i.customer_id, o.occurred_at AS replied_at, o.staff_id
@@ -70,8 +78,9 @@ paired AS (
     FROM raw.events e2
     LEFT JOIN core.person_identities spi ON spi.id = e2.sender_identity_id
     LEFT JOIN core.persons sp ON sp.id = spi.person_id AND sp.person_type = 'staff'
-    WHERE e2.channel_id = i.channel_id AND e2.group_id IS NOT DISTINCT FROM i.group_id
-      AND e2.direction = 'outbound' AND e2.occurred_at > i.occurred_at
+    WHERE e2.channel_id = i.channel_id AND e2.direction = 'outbound' AND e2.occurred_at > i.occurred_at
+      AND CASE WHEN i.group_id IS NOT NULL THEN e2.group_id = i.group_id
+               ELSE e2.group_id IS NULL AND {outbound_to_sql("e2", "i.ids", "i.ext")} END
     ORDER BY e2.occurred_at LIMIT 1
   ) o ON true
 )
