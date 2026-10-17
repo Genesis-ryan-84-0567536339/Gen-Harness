@@ -171,19 +171,17 @@ describe('Trang Kết nối', () => {
     renderPage('owner');
     const brain = await card('Bộ não AI');
     await expectOnePillOneAction(brain, 'running');
+    // v0.1.68 (F029): Owner: nút chính "Thêm / kiểm tra nguồn AI" → Thiết lập nguồn AI; tab Cài đặt chỉ là liên kết phụ.
+    expect(within(brain).getByRole('link', { name: /Thêm \/ kiểm tra nguồn AI/ })).toHaveAttribute('href', '/setup?buoc=nguon-ai');
     expect(within(brain).getByRole('link', { name: /Mở Bộ não AI/ })).toHaveAttribute('href', '/system?tab=brain');
-    expect(within(brain).getByRole('link', { name: 'Hướng dẫn' })).toHaveAttribute('href', '/setup?buoc=nguon-ai');
 
     const zalo = await card('Kênh Zalo');
     await expectOnePillOneAction(zalo, 'needs_boss');
     expect(within(zalo).getByText('Cần Sếp xử lý')).toBeInTheDocument();
     await expectOnePillOneAction(await card('Kênh WhatsApp'), 'running');
-    const tele = await card('Kênh Telegram');
-    await expectOnePillOneAction(tele, 'not_connected');
-    // Telegram chưa có trong bản này — không còn dẫn tới /plugins.
-    expect(within(tele).queryByRole('link')).toBeNull();
-    expect(tele.querySelector('a[href="/plugins"]')).toBeNull();
-    expect(within(tele).getByText('Chưa có trong bản này')).toBeInTheDocument();
+    // v0.1.68 (F060/F135): thẻ kênh "Telegram — Chưa có trong bản này" đã ẩn (đã có thẻ Telegram thật bên dưới).
+    expect(screen.queryByRole('article', { name: 'Kênh Telegram' })).toBeNull();
+    expect(screen.queryByText('Chưa có trong bản này')).toBeNull();
 
     const fb = await card('Facebook');
     await expectOnePillOneAction(fb, 'not_connected');
@@ -194,8 +192,8 @@ describe('Trang Kết nối', () => {
     expect(within(mcp).getByText('1 máy chủ đang bật')).toBeInTheDocument();
     expect(within(mcp).getByRole('link', { name: /Mở MCP Hub/ })).toHaveAttribute('href', '/mcp');
 
-    // Thứ tự trên trang: Bộ não AI · Zalo · WhatsApp · Telegram · Facebook · Gen-hub · MCP.
-    const order = ['Bộ não AI', 'Kênh Zalo', 'Kênh WhatsApp', 'Kênh Telegram', 'Facebook', 'Gen-hub', 'MCP'];
+    // Thứ tự trên trang: Bộ não AI · Zalo · WhatsApp · (thẻ Telegram thật) · Facebook · Gen-hub · MCP.
+    const order = ['Bộ não AI', 'Kênh Zalo', 'Kênh WhatsApp', 'Facebook', 'Gen-hub', 'MCP'];
     const all = Array.from(document.querySelectorAll<HTMLElement>('section[aria-label], article[aria-label]'))
       .map((e) => e.getAttribute('aria-label'))
       .filter((l): l is string => !!l && order.includes(l));

@@ -9,7 +9,7 @@
  * - agy_call / agy_switch / claude_call: theo hồ sơ CLI của `mock-phase2` (`account` = email hồ sơ đang dùng — CHỈ
  *   trong phản hồi `run`; `GET` như `latest()` thật chỉ có `detail.account_masked`).
  * - agy_login / claude_login: ghi trong LUỒNG đăng nhập CLI của `mock-phase2` (như `_boss_check` thật), không suy khi GET.
- * - `runs` = số bản ghi (cả lỗi); `switch_passes` = số lần đổi ĐẠT sang tài khoản khác lượt trước (như máy chủ).
+ * - `runs` = số bản ghi (cả lỗi).
  * - Lỗi tạm (SOCIAL_BUSY khi đang đọc) trả `transient: true`, không ghi.
  * - jev: theo nguồn `system_one` của `mock-phase2` (không có → JEV_NOT_CONFIGURED).
  * - claude_call đạt mà claude_login chưa đạt (phiên có từ trước v0.1.39) → ghi claude_login 'pass'
@@ -18,7 +18,7 @@
  *   khác tuỳ chọn. `ai` đạt khi bấm Kiểm tra (`POST /boss-checks/ai_source/run`: gọi thử nguồn AI đầu chuỗi sẵn sàng — nhà cung cấp bật có
  *   model và gọi thử OK, hoặc hồ sơ Google/Claude đang dùng; không có → AI_NO_SOURCE) HOẶC Claude / Google đã gọi thử đạt
  *   (`results.ai_source` giả, `detail.via` = 'claude_call' | 'agy_call', `runs` 0 — như máy chủ). Hook `seedAi {}` ghi 'pass'. Dòng agy KHÔNG còn
- *   đòi đổi qua lại hai tài khoản (bỏ `agy_switch` khỏi `checks`; `switch_passes` vẫn trả để tương thích).
+ *   đòi đổi qua lại hai tài khoản (bỏ `agy_switch` khỏi `checks`).
  * - telegram (v0.1.44, dòng 6): Gửi thử của `mock-telegram` (chưa cấu hình →
  *   TELEGRAM_NOT_CONFIGURED; TELEGRAM_RATE_LIMITED tạm, không ghi); phản hồi `run` kèm `host_requested`.
  * - remote_access (v0.1.46, F-21, dòng 7; KHÔNG PIN): quyết theo hostname của header Origin
@@ -92,8 +92,6 @@ const ROWS: Array<Omit<BossRow, 'done'>> = [
 
 export function createMock(opts: Opts) {
   const results = Object.fromEntries(KEYS.map((k) => [k, null])) as Record<BossCheckKey, BossCheck | null>;
-  /** Số lần đổi tài khoản THẬT đạt (hồ sơ trước khi đổi ≠ hồ sơ đích; dòng 3 xong khi ≥ 2) — như `switch_passes`. */
-  let switchPasses = 0;
   let fbStartedAt = 0;
 
   const now = () => new Date().toISOString();
@@ -170,7 +168,7 @@ export function createMock(opts: Opts) {
       9: pass('kho_write'),
     };
     const rows = ROWS.map((r) => ({ ...r, done: done[r.row] }));
-    return { rows, results: shown, required_done: rows.filter((r) => !r.optional && r.done).length, required_total: ROWS.filter((r) => !r.optional).length, switch_passes: switchPasses };
+    return { rows, results: shown, required_done: rows.filter((r) => !r.optional && r.done).length, required_total: ROWS.filter((r) => !r.optional).length };
   };
 
   const run = (key: BossCheckKey, body: { profile_id?: string; account_id?: string }): BossCheck | null => {
@@ -199,7 +197,6 @@ export function createMock(opts: Opts) {
         if (!p) return null;
         const from = activeOf('antigravity_cli')?.id ?? null;
         opts.activateCli(p.id);
-        if (from !== p.id) switchPasses += 1;
         return record('agy_switch', 'pass', {
           account: p.email,
           detail: { expected_masked: mask(p.email), account_masked: mask(p.email), account_match: true, target_profile: p.id, from_profile: from },
@@ -218,7 +215,7 @@ export function createMock(opts: Opts) {
         const cli = activeOf('claude_code_cli') ?? activeOf('antigravity_cli');
         if (api) return record('ai_source', 'pass', { detail: { latency_ms: 120, probe_model: api.models[0]?.model_name ?? null, models_count: api.models.length } });
         if (cli) return record('ai_source', 'pass', { detail: { latency_ms: 450, account_masked: mask(cli.email) } });
-        return fail('ai_source', 'AI_NO_SOURCE', 'Chưa có nguồn AI nào — thêm khoá API hoặc đăng nhập Google / Claude Code ở Kết nối › Bộ não AI rồi bấm Kiểm tra');
+        return fail('ai_source', 'AI_NO_SOURCE', 'Chưa có nguồn AI nào — thêm khoá API hoặc đăng nhập Google / Claude Code ở màn Thiết lập nguồn AI rồi bấm Kiểm tra');
       }
       case 'telegram':
         return recordTelegram(opts.telegramTest());

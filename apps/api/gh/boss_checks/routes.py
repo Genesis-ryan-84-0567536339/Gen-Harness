@@ -329,7 +329,7 @@ async def _run_switch(request: Request, db: AsyncSession, user: service.CurrentU
 
     # Đổi tài khoản rồi gọi thử THẬT — kiểm hạn mức trước để không đổi mà không kiểm được.
     await _probe_budget(request.app.state.redis, user.org_id)
-    # Hồ sơ đang hoạt động TRƯỚC khi đổi: "đổi" sang chính nó không phải lần đổi thật (`boss.switch_passes`).
+    # Hồ sơ đang hoạt động TRƯỚC khi đổi (`from_profile`): "đổi" sang chính nó không phải lần đổi thật (F-76).
     before = (await db.execute(text("""SELECT c.id FROM agent.cli_profiles c
                                        JOIN agent.providers p ON p.id = c.provider_id
                                        WHERE c.org_id = :o AND p.kind = :k AND c.is_active LIMIT 1"""),

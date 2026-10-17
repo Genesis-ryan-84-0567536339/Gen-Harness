@@ -219,7 +219,7 @@ test.describe('Thiết lập một màn — đã xong thiết lập (v0.1.59)', 
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/connections');
     const brain = page.getByRole('region', { name: 'Bộ não AI' });
-    await expect(brain.getByRole('link', { name: 'Hướng dẫn' })).toHaveAttribute('href', AI_SOURCE_PATH);
+    await expect(brain.getByRole('link', { name: /Thêm \/ kiểm tra nguồn AI/ })).toHaveAttribute('href', AI_SOURCE_PATH);
   });
 });
 

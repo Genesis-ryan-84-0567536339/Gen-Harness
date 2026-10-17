@@ -11,7 +11,8 @@ import { InlineError, Panel } from '../common';
 
 
 /**
- * "Việc thiết lập tiếp": các việc tuỳ chọn 5–11 (+ 13 Facebook, 14 Gen-hub từ v0.1.39) chưa xong. Mỗi mục mở thẳng
+ * "Việc thiết lập tiếp": (v0.1.68: TẤT CẢ đều không bắt buộc — số việc BẮT BUỘC chỉ đếm ở "Đã đạt x/N" của Việc Sếp cần làm)
+ * các việc tuỳ chọn 5–11 (+ 13 Facebook, 14 Gen-hub từ v0.1.39) chưa xong. Mỗi mục mở thẳng
  * form/màn làm việc đó (`/guide/:n` hoặc `doTo`), đầu thẻ dẫn tới trang Hướng dẫn thiết lập. Xong hay chưa do API suy từ dữ liệu thật (`GET /setup/follow-up`)
  * — làm xong ở form hướng dẫn hay ở màn Console thì mục cũng tự biến mất, không cần bấm tay.
  *
@@ -35,7 +36,7 @@ export function SetupFollowUp() {
   return (
     <Panel
       title="Việc thiết lập tiếp"
-      kicker={`${items.length} việc thiết lập còn lại — làm khi sẵn sàng, xong sẽ tự biến mất`}
+      kicker={`${items.length} việc tuỳ chọn — không bắt buộc, làm khi sẵn sàng, xong sẽ tự biến mất`}
       label="Việc thiết lập tiếp"
       bodyClass="ov-followup"
       aside={

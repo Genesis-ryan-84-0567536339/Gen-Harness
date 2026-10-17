@@ -52,7 +52,7 @@ function setup(opts: { reply?: BossCheck | null; withRow?: boolean } = {}) {
       const path = new URL(String(url), 'http://x').pathname.replace('/api/v1', '');
       calls.push(`${init?.method ?? 'GET'} ${path}`);
       if (path === '/boss-checks') {
-        return json(200, { rows, results: { ...EMPTY, facebook_reply: opts.reply ?? null }, required_done: 0, required_total: 1, switch_passes: 0 });
+        return json(200, { rows, results: { ...EMPTY, facebook_reply: opts.reply ?? null }, required_done: 0, required_total: 1 });
       }
       if (path === '/social/accounts') return json(200, { items: [] });
       if (path === '/cli/profiles') return json(200, []);

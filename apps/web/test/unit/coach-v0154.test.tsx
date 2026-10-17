@@ -586,7 +586,7 @@ describe('CurriculumCard (Trợ giúp)', () => {
 // ── Tổng quan ───────────────────────────────────────────────────────────────────────────────────────────
 
 describe('Tổng quan', () => {
-  const overview = (done: number, total = 1) => ({ rows: [], results: {}, required_done: done, required_total: total, switch_passes: 0 });
+  const overview = (done: number, total = 1) => ({ rows: [], results: {}, required_done: done, required_total: total });
 
   it('NeedsBossStrip: "Đã đạt x/N việc bắt buộc → Xem" tới /guide/viec-sep khi x<N; đủ N thì không hiện', async () => {
     // N lấy từ máy chủ (không ghi cứng): 0/1 là máy mới sau Thiết lập gọn; 2/3 chứng minh x/N động.

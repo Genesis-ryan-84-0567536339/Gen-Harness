@@ -30,7 +30,6 @@ const BOSS: BossOverview = {
   results: { hub: null, facebook: null, agy_login: null, agy_call: null, agy_switch: null, claude_login: null, claude_call: null, jev: null, telegram: null, remote_access: null },
   required_done: 0,
   required_total: 1,
-  switch_passes: 0,
 };
 
 function renderGuide(done: number[]) {

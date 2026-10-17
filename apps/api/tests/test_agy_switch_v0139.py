@@ -81,7 +81,7 @@ async def test_switch_back_and_forth_calls_with_selected_account(owner_api: Api,
     assert (await _provider(api, AGY))["account_label"] == "binh@example.vn"
 
     ov = (await api.get("/boss-checks")).json()
-    assert next(r for r in ov["rows"] if r["key"] == "agy")["done"] is True and ov["switch_passes"] == 2
+    assert next(r for r in ov["rows"] if r["key"] == "agy")["done"] is True and "switch_passes" not in ov
     # Hồ sơ nào giữ đúng phiên của mình (không bị ghi đè chéo khi đổi qua lại).
     async with admin_sessionmaker()() as db:
         rows = (await db.execute(text("SELECT email, token_enc, is_active FROM agent.cli_profiles"))).all()
@@ -166,7 +166,9 @@ async def test_switch_without_id_token_uses_userinfo_not_mismatch(owner_api: Api
     assert out["status"] == "pass" and out["error_code"] is None, out
     assert out["detail"]["account_match"] is None and out["detail"]["account_masked"] is None
     ov = (await api.get("/boss-checks")).json()
-    assert ov["switch_passes"] == 2
+    # v0.1.68 (F040): bộ đếm không còn — web không đọc, mỗi lần overview thừa truy vấn
+    assert "switch_passes" not in ov
+    assert ov["results"]["agy_switch"]["runs"] == 4
 
 
 async def test_switch_to_active_account_keeps_refreshed_session(owner_api: Api, clis: Any) -> None:  # noqa: F811
@@ -189,8 +191,9 @@ async def test_switch_to_active_account_keeps_refreshed_session(owner_api: Api, 
     assert orjson.loads(path.read_bytes())["access_token"] == "tok-binh-lam-moi"
 
 
-async def test_noop_switch_to_active_account_is_not_counted(owner_api: Api, clis: Any) -> None:  # noqa: F811
-    """F-76: binh đang hoạt động, "đổi" sang binh (không đổi gì) rồi sang an → chỉ MỘT lần đổi thật."""
+async def test_noop_switch_to_active_account_records_from_profile(owner_api: Api, clis: Any) -> None:  # noqa: F811
+    """F-76: binh đang hoạt động, "đổi" sang binh (không đổi gì): bản ghi vẫn nói đúng hồ sơ trước đó
+    (`from_profile`)."""
     api = owner_api
     await _login(api, AGY, "4/an")
     await _login(api, AGY, "4/binh")
@@ -198,13 +201,14 @@ async def test_noop_switch_to_active_account_is_not_counted(owner_api: Api, clis
     an, binh = await _profile_id(api, "an@example.vn"), await _profile_id(api, "binh@example.vn")
     out = await _run(api, "agy_switch", {"profile_id": binh})
     assert out["status"] == "pass" and out["detail"]["from_profile"] == binh, out
-    assert (await api.get("/boss-checks")).json()["switch_passes"] == 0
+    assert "switch_passes" not in (await api.get("/boss-checks")).json()
     out = await _run(api, "agy_switch", {"profile_id": an})
     assert out["status"] == "pass" and out["detail"]["from_profile"] == binh, out
     ov = (await api.get("/boss-checks")).json()
-    assert ov["switch_passes"] == 1 and next(r for r in ov["rows"] if r["key"] == "agy")["done"] is False
+    # Dòng agy chỉ cần agy_call đạt (v0.1.55); không còn bộ đếm đổi qua lại.
+    assert "switch_passes" not in ov and next(r for r in ov["rows"] if r["key"] == "agy")["done"] is False
     await _run(api, "agy_switch", {"profile_id": binh})
-    assert (await api.get("/boss-checks")).json()["switch_passes"] == 2
+    assert (await api.get("/boss-checks")).json()["results"]["agy_switch"]["runs"] == 3
 
 
 def test_scrub_codes_long_code_is_linear_and_masks_all() -> None:

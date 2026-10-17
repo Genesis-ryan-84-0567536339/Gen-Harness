@@ -17,7 +17,7 @@ import { CliCard } from '../system/CliCard';
 import { SocialEntryCard } from '../system/SocialEntryCard';
 import { ConnectionStatusPill } from './ConnectionStatusPill';
 import { TelegramCard } from './TelegramCard';
-import { activeCliState, brainStatus, mcpEnabledCount, mcpStatus, orderChannels } from './connectionsModel';
+import { activeCliState, brainStatus, isKeySource, mcpEnabledCount, mcpStatus, orderChannels, visibleChannels } from './connectionsModel';
 
 /**
  * v0.1.42 (F-7, F-61): Kết nối — một trang, mỗi thứ một thẻ, cùng một kiểu viên trạng thái (Đang chạy · Cần Sếp xử
@@ -88,8 +88,9 @@ function BrainCard() {
   const followUp = useQuery({ queryKey: FOLLOW_UP_KEY, queryFn: ({ signal }) => api.setup.followUp(signal), enabled: isOwner });
   const step4 = Array.isArray(followUp.data) ? followUp.data.find((s) => s.n === 4) : undefined;
   const noModel = !!step4 && !step4.done;
-  const gen = (providers.data ?? []).filter((p) => p.kind !== 'system_one');
-  const enabled = gen.filter((p) => p.enabled).length;
+  // v0.1.68 (F017): "nguồn khoá API" chỉ đếm nguồn dán khoá — tài khoản CLI có thẻ riêng ngay cạnh.
+  const keys = (providers.data ?? []).filter(isKeySource);
+  const enabled = keys.filter((p) => p.enabled).length;
   // Chỉ Owner biết "chưa chọn model" (follow-up) — vai trò khác không có viên, tránh hiện "Đang chạy" sai.
   const status = isOwner && providers.data
     ? brainStatus({ providers: providers.data, cliStatus: [activeCliState(agy.data), activeCliState(claude.data)], noModel })
@@ -103,7 +104,9 @@ function BrainCard() {
         providers.data
           ? noModel
             ? 'Chưa chọn model cho Gen và Sàng lọc'
-            : `${enabled}/${gen.length} nguồn khoá API đang bật · tài khoản CLI ở thẻ riêng`
+            : keys.length
+              ? `${enabled}/${keys.length} nguồn khoá API đang bật · tài khoản CLI ở thẻ riêng`
+              : 'Chưa có nguồn khoá API · tài khoản CLI ở thẻ riêng'
           : 'Model, khoá API và tài khoản CLI'
       }
       aside={status ? <ConnectionStatusPill status={status} /> : undefined}
@@ -115,15 +118,24 @@ function BrainCard() {
         <CardError error={providers.error} onRetry={() => void providers.refetch()} retrying={providers.isFetching} />
       ) : null}
       <div className="conn-card__actions">
-        <Link to="/system?tab=brain" className="gh-btn gh-btn--secondary btn-27" data-main-action>
-          <Icon name="ph ph-brain" size={13} />
-          Mở Bộ não AI
-        </Link>
         {isOwner ? (
-          <Link to={AI_SOURCE_PATH} className="conn-card__guide">
-            Hướng dẫn
+          // v0.1.68 (F029): MỘT đường tới "thêm nguồn AI" — màn Thiết lập nguồn AI (dán khoá / đăng nhập, Kiểm tra, chọn
+          // model). Tab Cài đặt › Bộ não AI chỉ để đọc nên thành liên kết phụ.
+          <>
+            <Link to={AI_SOURCE_PATH} className="gh-btn gh-btn--secondary btn-27" data-main-action>
+              <Icon name="ph ph-plus-circle" size={13} />
+              Thêm / kiểm tra nguồn AI
+            </Link>
+            <Link to="/system?tab=brain" className="conn-card__guide">
+              Mở Bộ não AI
+            </Link>
+          </>
+        ) : (
+          <Link to="/system?tab=brain" className="gh-btn gh-btn--secondary btn-27" data-main-action>
+            <Icon name="ph ph-brain" size={13} />
+            Mở Bộ não AI
           </Link>
-        ) : null}
+        )}
       </div>
     </Panel>
   );
@@ -149,7 +161,8 @@ function ChannelCards({ canManage }: { canManage: boolean }) {
       </div>
     );
   }
-  if (channels.data.length === 0) {
+  const shown = visibleChannels(channels.data);
+  if (shown.length === 0) {
     return (
       <div className="gh-card">
         <EmptyState icon="ph ph-plugs" title="Chưa có kênh nào" description="Bản đang chạy chưa có kênh nhắn tin nào." />
@@ -158,7 +171,7 @@ function ChannelCards({ canManage }: { canManage: boolean }) {
   }
   return (
     <div className="conn-grid" data-gen-target="system.channels.list">
-      {orderChannels(channels.data).map((c) => (
+      {orderChannels(shown).map((c) => (
         <ChannelCard key={c.type} channel={c} canManage={canManage} />
       ))}
     </div>

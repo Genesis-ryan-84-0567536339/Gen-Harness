@@ -138,7 +138,25 @@ export function telegramConnStatus(
   return 'needs_boss';
 }
 
-/** Thứ tự thẻ kênh: Zalo · WhatsApp · Telegram, rồi các kênh khác API trả (giữ thứ tự API). */
+/**
+ * v0.1.68 (F017, F130): nguồn "khoá API" = nguồn sinh chữ dán khoá (Gemini, DeepSeek, tương thích OpenAI…). KHÔNG tính tài
+ * khoản CLI (Google Antigravity, Claude Code — đăng nhập, không có khoá, có thẻ riêng) và Jev / embedding (không sinh chữ).
+ */
+export function isKeySource(p: Pick<Provider, 'kind'>): boolean {
+  const k: string = p.kind;
+  return k !== 'antigravity_cli' && k !== 'claude_code_cli' && k !== 'system_one' && k !== 'embedding';
+}
+
+/**
+ * v0.1.68 (F060, F135): thẻ kênh nhắn tin chỉ hiện kênh có việc để làm ở đây. Telegram đã có thẻ riêng "Báo động & bản tin"
+ * (TelegramCard, nhập token + Gửi thử) — thẻ kênh "Telegram · Chưa có trong bản này" nói ngược lại nên ẩn; LinkedIn mới chỉ
+ * dùng để hợp nhất danh tính (`identity_only`), chưa có đường nhập nên "Cấu hình" mở hộp thoại trống — ẩn tới khi có.
+ */
+export function visibleChannels<T extends Pick<Channel, 'type' | 'state'>>(channels: T[]): T[] {
+  return channels.filter((c) => c.type !== 'telegram' && !(c.type === 'linkedin' && c.state === 'identity_only'));
+}
+
+/** Thứ tự thẻ kênh: Zalo · WhatsApp, rồi các kênh khác API trả (giữ thứ tự API). Telegram có thẻ riêng (`visibleChannels`). */
 export const CHANNEL_ORDER = ['zalo', 'whatsapp', 'telegram'];
 
 export function orderChannels<T extends Pick<Channel, 'type'>>(channels: T[]): T[] {

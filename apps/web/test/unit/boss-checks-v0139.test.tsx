@@ -60,7 +60,7 @@ interface World {
   accounts: SocialAccount[];
   agy: CliProfile[];
   claude: CliProfile[];
-  /** `switch_passes` của máy chủ (số lần đổi ĐẠT) — tự tăng khi `run` trả agy_switch 'pass'. */
+  /** Số lần agy_switch 'pass' (v0.1.68: máy chủ không còn trả `switch_passes`; giữ để dựng bài kiểm cũ). */
   switchPasses: number;
   providers: Array<{ id: string; kind: string; name: string }>;
   run: (key: string, body: Record<string, unknown>) => BossCheck;
@@ -89,7 +89,7 @@ function setup(w: Partial<World> = {}) {
       calls.push({ path, method, body });
       if (path === '/boss-checks' && method === 'GET') {
         world.onList?.(++lists);
-        return json(200, { rows: ROWS, results: world.results, required_done: 0, required_total: 1, switch_passes: world.switchPasses });
+        return json(200, { rows: ROWS, results: world.results, required_done: 0, required_total: 1 });
       }
       const run = /^\/boss-checks\/([a-z_]+)\/run$/.exec(path);
       if (run && method === 'POST') {
@@ -234,7 +234,7 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
     expect(within(agy).queryByRole('button', { name: /^Đổi sang / })).toBeNull();
     expect(within(agy).queryByText(/Đã đổi qua lại/)).toBeNull();
     expect(within(agy).getByText(/Đang dùng: binh@genesis.vn/)).toBeInTheDocument();
-    expect(within(agy).getByRole('link', { name: /Thêm \/ đổi tài khoản ở Kết nối/ })).toHaveAttribute('href', '/connections#brain');
+    expect(within(agy).getByRole('link', { name: /Thêm \/ đổi tài khoản ở Thiết lập nguồn AI/ })).toHaveAttribute('href', '/setup?buoc=nguon-ai');
     expect(calls.some((c) => c.path === '/boss-checks/agy_switch/run')).toBe(false);
     // Có 2 hồ sơ: không còn mời đăng nhập lần đầu.
     expect(within(agy).queryByRole('button', { name: 'Đăng nhập Google' })).toBeNull();
@@ -309,7 +309,7 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
     expect(document.body.textContent).not.toContain('[object Object]');
   });
 
-  it('kết quả agy_switch / switch_passes của máy chủ (bài kiểm cũ) không còn hiện ở dòng Google', async () => {
+  it('kết quả agy_switch của máy chủ (bài kiểm cũ) không còn hiện ở dòng Google', async () => {
     setup({
       agy: [BINH, AN],
       switchPasses: 1,
@@ -375,8 +375,8 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
     const agy = await screen.findByRole('region', { name: 'Google (Antigravity)' });
     expect(await within(agy).findByRole('button', { name: 'Đăng nhập lại' })).toBeInTheDocument();
     expect(within(agy).getByText(/Lỗi · Gọi thử vẫn chạy bằng tài khoản khác.*Đăng nhập lại/)).toBeInTheDocument();
-    // v0.1.42 (F-61): tài khoản CLI chỉ ở Kết nối › Bộ não AI.
-    expect(within(agy).getByRole('link', { name: /Kết nối › Bộ não AI/ })).toHaveAttribute('href', '/connections#brain');
+    // v0.1.68 (F029): MỘT đường thêm / đổi tài khoản — màn Thiết lập nguồn AI.
+    for (const l of within(agy).getAllByRole('link', { name: /Thiết lập nguồn AI/ })) expect(l).toHaveAttribute('href', '/setup?buoc=nguon-ai');
     unmount();
     queryClient.clear();
     setup({ agy: [BINH], results: { ...EMPTY, agy_call: check('agy_call', 'fail', { error_code: 'AUTH_EXPIRED' }) } });
