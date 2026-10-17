@@ -257,5 +257,26 @@ class AccessStateBeforeUpgrade(unittest.TestCase):
         self.assertEqual(got, {"PREV_BIND_ADDR": "", "PREV_ACCESS_MODE": ""})
 
 
+class ClaudeSessionAfterUpgrade(unittest.TestCase):
+    """Gốc lỗi E2E release v0.1.65: api không còn tự chuyển phiên Claude từ /var/lib/gh/agy/claude (v0.1.63, review P1-1),
+    nhưng job nâng cấp vẫn đặt tệp giả ở đường dẫn cũ rồi đòi nó sang claude_state ⇒ đỏ ở mọi bản."""
+
+    def test_no_legacy_probe_step_or_migration_assertion(self) -> None:
+        names = [str(st.get("name", "")) for st in _steps()]
+        self.assertFalse([n for n in names if "tệp giả" in n], "không được cài tệp giả ở đường dẫn phiên Claude cũ")
+        for st in _steps():
+            run = str(st.get("run", ""))
+            self.assertNotIn("grep -q probe", run)
+            self.assertNotIn("/var/lib/gh/agy/claude/.claude/.claude.json", run)
+            self.assertNotIn("claude_probe", str(st))
+
+    def test_after_upgrade_old_path_absent_and_claude_state_present(self) -> None:
+        run = _run_of("Phiên Claude ở claude_state riêng")
+        self.assertIn("test ! -e /var/lib/gh/agy/claude", run)
+        self.assertIn("test -d /var/lib/gh/claude/.claude", run)
+        self.assertIn("agy_canary --offline", run)
+        self.assertNotIn("if", _steps()[_step_index("Phiên Claude ở claude_state riêng")], "bước phải chạy vô điều kiện")
+
+
 if __name__ == "__main__":
     unittest.main()
