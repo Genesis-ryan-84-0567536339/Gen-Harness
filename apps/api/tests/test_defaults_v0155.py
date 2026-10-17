@@ -153,6 +153,21 @@ async def test_list_has_every_item_and_nothing_customized_on_a_fresh_install(dap
     assert by["binding:core.briefing"]["label"].endswith("Bản tin Gen")
 
 
+async def test_archived_agent_is_not_listed_in_binding_rows(dapi: Api, db: Any) -> None:
+    """Agent đã Lưu trữ (archived_at) biến khỏi bảng Gán model — kể cả dòng gán còn sót (không hiện "Agent đã xoá")."""
+    org = await org_id(db)
+    live = await _seed_agent(db, org, name="Agent còn dùng")
+    old = await _seed_agent(db, org, name="Agent đã lưu trữ")
+    _, ids = await add_source(db, org, "openai_compat", "alpha", 1, ["alpha-flash"])
+    await bind(db, org, f"agent:{old}", ids["alpha-flash"])   # dòng gán mồ côi (lưu trữ thật đã xoá nó)
+    await db.execute(text("UPDATE agent.identities SET archived_at = now(), is_enabled = false WHERE id = :i"),
+                     {"i": old})
+    await db.commit()
+    keys = {i["key"] for i in (await dapi.get("/defaults")).json()["items"]}
+    assert f"binding:agent:{live}" in keys
+    assert f"binding:agent:{old}" not in keys
+
+
 async def test_customized_is_computed_from_real_data(dapi: Api, db: Any) -> None:
     org = await org_id(db)
     # Giá trị = mặc định ⇒ KHÔNG "Đã đổi"; khác mặc định ⇒ "Đã đổi".

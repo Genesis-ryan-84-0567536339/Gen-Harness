@@ -372,11 +372,13 @@ async def _binding_items(db: AsyncSession, org: uuid.UUID) -> list[Item]:
         FROM agent.bindings b JOIN agent.models m ON m.id = b.model_id JOIN agent.providers p ON p.id = m.provider_id
         WHERE b.org_id = :o"""), {"o": org})).all()
     bound = {r.agent_key: r for r in rows}
-    agents = (await db.execute(text("SELECT id, name FROM agent.identities WHERE org_id = :o ORDER BY created_at"),
-                               {"o": org})).all()
+    agents = (await db.execute(text("SELECT id, name, archived_at FROM agent.identities WHERE org_id = :o "
+                                    "ORDER BY created_at"), {"o": org})).all()
     keys: list[tuple[str, str]] = [(k, v) for k, v in CORE_AGENT_KEYS.items()]
+    # Agent đã Lưu trữ (archived_at) ẩn khỏi bảng Gán model như mọi nơi khác — kể cả dòng gán còn sót (lưu trữ đã gỡ nó)
+    # cũng không hiện lại thành "Agent đã xoá".
     known = {f"agent:{a.id}" for a in agents}
-    keys += [(f"agent:{a.id}", str(a.name)) for a in agents]
+    keys += [(f"agent:{a.id}", str(a.name)) for a in agents if a.archived_at is None]
     # Dòng gán của agent đã bị xoá (không còn trong agent.identities) vẫn nằm trong sổ để "Về mặc định tất cả" dọn được.
     keys += [(k, "Agent đã xoá") for k in sorted(bound) if k.startswith("agent:") and k not in known]
     std, why = await profiles.standard_with_reasons(db, org, [k for k, _ in keys])
