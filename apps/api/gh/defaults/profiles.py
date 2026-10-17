@@ -4,7 +4,8 @@ Cài xong chưa gán model nào mà Gen vẫn trả lời được: bộ định
 chọn model cho từng VAI theo bảng A1 dưới đây — dữ liệu theo (vai × loại nguồn), KHÔNG ghi cứng tên model: nguồn nào
 đang bật thì chọn trong `agent.models` đã bật của nguồn đó theo TẦNG (`gh.providers.catalog.tier_of`: fast / balanced
 / strong). Thiếu tầng thì lấy tầng gần nhất; KHÔNG tự thêm dòng model nào. Dòng `agent.bindings` Owner đã đổi luôn
-thắng hồ sơ.
+thắng hồ sơ; nguồn Owner đã chốt model ("Dùng model này" = `is_default`) giữ model đó (v0.1.66 — hiển thị "Chuẩn: …"
+và chuỗi chạy thật `router._chain` dùng CHUNG hàm `resolve` này, không còn hai bộ chọn).
 
 Luật cứng còn lại (bảng A1 chỉ chọn trong phạm vi đã được phép):
 - việc nền (sàng lọc tin `core.refinery`, trực việc `agent:*`, Bản tin `core.briefing`) chỉ chạy Claude Code CLI khi
@@ -186,7 +187,8 @@ def resolve(providers_rows: Sequence[Any], models_rows: Sequence[Any], agent_key
     - `background`: purpose của lượt gọi là việc nền; các VAI nền (sàng lọc, trực việc, bản tin) luôn bị coi là việc
       nền.
     - `bg_cli_allowed`: CLI Owner đã cho chạy việc nền (chỉ `claude_code_cli`; Antigravity CLI không cần cho phép).
-    - `tier_override`: ép tầng (chat chọn Nhanh / Cân bằng / Kỹ hơn) — vẫn tôn trọng mọi luật trên.
+    - `tier_override`: ép tầng (chat chọn Nhanh / Cân bằng / Kỹ hơn) — vẫn tôn trọng mọi luật trên; ép tầng thì model
+      Owner đã chốt ("Dùng model này") không giữ chỗ đầu (lựa chọn của lượt này thắng).
     - `agy`: quyết định `agy_policy.decide` cho khoá này. Bỏ trống ⇒ tính tĩnh từ khoá với hộp coi như CHƯA CÀI (đóng
       an toàn: vai phải qua hộp bị loại); bên gọi thật truyền `verdict_for` (cần DB: agent ngoại giao + trạng thái
       hộp).
@@ -212,16 +214,35 @@ def resolve(providers_rows: Sequence[Any], models_rows: Sequence[Any], agent_key
         if not provider_allowed(kind, bg=bg, bg_cli_allowed=bg_cli_allowed, agy_ok=agy_ok):
             continue
         wanted = forced or prof.tier
-        picked = pick_model(kind, by_provider.get(str(_g(p, "id")), []), wanted)
-        if picked is None:
-            continue
-        m, actual = picked
+        mine = by_provider.get(str(_g(p, "id")), [])
+        pinned = None if forced else owner_default(mine)
+        if pinned is not None:
+            # Owner đã chốt model của nguồn này: giữ nguyên model + mức Owner đã đặt (hồ sơ không ghi đè), như
+            # `ModelRouter._effort` (nguồn "default" chỉ xét `models.effort`).
+            m, source = pinned, "default"
+            actual = catalog.tier_of(kind, str(_g(m, "model_name", ""))) or prof.tier
+            effort = effort_for(kind, str(_g(m, "model_name")), _g(m, "effort"))
+        else:
+            picked = pick_model(kind, mine, wanted)
+            if picked is None:
+                continue
+            (m, actual), source = picked, "profile"
+            effort = effort_for(kind, str(_g(m, "model_name")), prof.effort)
         out.append({"provider_id": _g(p, "id"), "provider_kind": kind, "provider_name": _g(p, "name"),
                     "model_id": _g(m, "id"), "model_name": str(_g(m, "model_name")), "tier": actual,
-                    "wanted_tier": wanted, "effort": effort_for(kind, str(_g(m, "model_name")), prof.effort),
+                    "wanted_tier": wanted, "effort": effort,
                     "temperature": prof.temperature, "context_tokens": prof.context_tokens, "role": role,
-                    "source": "profile"})
+                    "source": source})
     return out
+
+
+def owner_default(models: Sequence[Any]) -> Any | None:
+    """Model Owner đã chốt ("Dùng model này" = `is_default`) của MỘT nguồn: model đã bật đầu tiên (thứ tự vào: mặc định
+    trước) nếu nó mang cờ `is_default`; không thì None. Cùng luật với phần đầu chuỗi của `ModelRouter._chain`."""
+    for m in models:
+        if _model_ok(m):
+            return m if _g(m, "is_default", False) else None
+    return None
 
 
 REASON_NEED_API = "cần khoá API hoặc đăng nhập Antigravity CLI"
@@ -338,6 +359,24 @@ async def standard_for(db: AsyncSession, org_id: uuid.UUID,
     """Model hồ sơ tiêu chuẩn đang phủ từng khoá agent (ứng viên đầu tiên) — dùng cho "Chuẩn: <model> (tự chọn)" ở
     Bộ não AI / API & Model và mục Về mặc định. Khoá không có nguồn phù hợp ⇒ None."""
     return (await standard_with_reasons(db, org_id, agent_keys))[0]
+
+
+def role_temperature(agent_key: str) -> float | None:
+    """Nhiệt độ của hồ sơ vai (bảng A1; mọi loại nguồn của một vai cùng nhiệt độ). Khoá lạ ⇒ None (bên gọi tự chọn)."""
+    role = role_of(agent_key)
+    temps = {p.temperature for p in PROFILES[role].values()} if role else set()
+    return temps.pop() if len(temps) == 1 else None
+
+
+async def owner_pinned(db: AsyncSession, org_id: uuid.UUID, agent_key: str) -> bool:
+    """Sếp đã GHIM model cho khoá này? — dòng `agent.bindings`, hoặc nguồn chạy đầu tiên đang giữ model Sếp đã chốt
+    ("Dùng model này"). Khi đã ghim, bên gọi KHÔNG tự ép tầng (J3 của Gen) vì ép tầng đẩy model của Sếp xuống cuối chuỗi
+    (v0.1.66, F006)."""
+    if (await db.execute(text("SELECT 1 FROM agent.bindings WHERE org_id = :o AND agent_key = :k"),
+                         {"o": org_id, "k": agent_key})).first() is not None:
+        return True
+    std = (await standard_with_reasons(db, org_id, [agent_key]))[0].get(agent_key)
+    return std is not None and std["source"] == "default"
 
 
 def standard_public(c: dict[str, Any] | None) -> dict[str, Any] | None:

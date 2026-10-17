@@ -76,9 +76,30 @@ export const useTestProvider = () => {
 export const useAddModel = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, body }: { id: string; body: { model_name: string; daily_quota?: number; rate_limit_per_min?: number } }) =>
+    mutationFn: ({ id, body }: { id: string; body: { model_name: string; daily_quota?: number | null; rate_limit_per_min?: number | null; enabled?: boolean } }) =>
       api.providers.addModel(id, body),
     onSuccess: () => invalidateProviders(qc),
+  });
+};
+
+/** v0.1.66 (F008): xoá khoá dán sai — khoá đó rời vòng xoay, không phải xoá cả nhà cung cấp. */
+export const useRemoveProviderKey = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, keyId }: { id: string; keyId: string }) => api.providers.removeKey(id, keyId),
+    onSuccess: () => invalidateProviders(qc),
+  });
+};
+
+/** v0.1.66 (F008): gỡ model thêm nhầm — dòng gán trỏ vào nó cũng bị gỡ nên bảng "Chuẩn" đổi theo. */
+export const useRemoveProviderModel = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, modelId }: { id: string; modelId: string }) => api.providers.removeModel(id, modelId),
+    onSuccess: () => {
+      invalidateProviders(qc);
+      void qc.invalidateQueries({ queryKey: qkApi.bindings });
+    },
   });
 };
 

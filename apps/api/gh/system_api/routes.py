@@ -460,6 +460,9 @@ class ModelIn(BaseModel):
     # v0.1.32: mức suy nghĩ tách khỏi tên model (agy `--effort low|medium|high`; claude thêm xhigh, max).
     # None = để CLI tự chọn (không gửi --effort).
     effort: Literal["low", "medium", "high", "xhigh", "max"] | None = None
+    # Review v0.1.66 (P2-2): "Tắt model" / "Bật model" — ngừng dùng mà giữ lịch sử chi phí.
+    # Không gửi ⇒ giữ trạng thái đang có.
+    enabled: bool | None = None
 
 
 async def _add_key(db: AsyncSession, provider_id: uuid.UUID, kind: str, secret: str) -> None:
@@ -789,11 +792,18 @@ async def add_model(pid: uuid.UUID, body: ModelIn, request: Request, user: servi
     p = await _provider(db, user.org_id, pid)
     # v0.1.32: tên biến thể cũ của agy ("gemini-3.8-flash-high") → model gốc + mức suy nghĩ.
     name, var_effort = catalog.split_variant(p.kind, body.model_name.strip())
-    prev = (await db.execute(text("SELECT effort FROM agent.models WHERE provider_id = :p AND model_name = :m"),
+    prev = (await db.execute(text("""SELECT effort, daily_quota, rate_limit_per_min FROM agent.models
+                                     WHERE provider_id = :p AND model_name = :m"""),
                              {"p": pid, "m": name})).one_or_none()
     # Không gửi `effort` (vd chỉ sửa hạn mức) → giữ mức đã lưu.
     effort = body.effort if "effort" in body.model_fields_set else (var_effort or (prev.effort if prev else None))
     effort = effort or var_effort
+    # v0.1.66 (F009): hạn mức nay sửa được trên giao diện ⇒ KHÔNG gửi trường nào (vd "Dùng model này") thì giữ hạn
+    # mức đã lưu; gửi null = bỏ hạn mức.
+    daily_quota = (body.daily_quota if "daily_quota" in body.model_fields_set
+                   else (prev.daily_quota if prev else None))
+    rate_limit = (body.rate_limit_per_min if "rate_limit_per_min" in body.model_fields_set
+                  else (prev.rate_limit_per_min if prev else None))
     if p.kind == "antigravity_cli" and not AGY_MODEL_RE.fullmatch(name):
         # F-22: đúng regex AgyClient dùng cho `--model=<tên>` (không bao giờ thành một cờ).
         raise field_errors({"model_name": "Tên model chỉ gồm chữ, số và . _ : - (tối đa 80 ký tự)"})
@@ -823,10 +833,16 @@ async def add_model(pid: uuid.UUID, body: ModelIn, request: Request, user: servi
                            errors={"model_name": probe["error"]}, technical=probe.get("error_detail"),
                            available=probe.get("available") or [])
     await db.execute(text("""
-        INSERT INTO agent.models (provider_id, model_name, effort, daily_quota, rate_limit_per_min)
-        VALUES (:p, :m, :e, :q, :r)
-        ON CONFLICT (provider_id, model_name) DO UPDATE SET effort = :e, daily_quota = :q, rate_limit_per_min = :r"""),
-        {"p": pid, "m": name, "e": effort, "q": body.daily_quota, "r": body.rate_limit_per_min})
+        INSERT INTO agent.models (provider_id, model_name, effort, daily_quota, rate_limit_per_min, is_enabled)
+        VALUES (:p, :m, :e, :q, :r, COALESCE(CAST(:en AS boolean), true))
+        ON CONFLICT (provider_id, model_name) DO UPDATE
+          SET effort = :e, daily_quota = :q, rate_limit_per_min = :r,
+              is_enabled = COALESCE(CAST(:en AS boolean), agent.models.is_enabled)"""),
+        {"p": pid, "m": name, "e": effort, "q": daily_quota, "r": rate_limit, "en": body.enabled})
+    if body.enabled is False:
+        # Model đã tắt không thể là model Sếp đã chốt ("Dùng model này") — chuỗi bỏ qua model tắt.
+        await db.execute(text("UPDATE agent.models SET is_default = false WHERE provider_id = :p AND model_name = :m"),
+                         {"p": pid, "m": name})
     if body.make_default:
         await db.execute(text("UPDATE agent.models SET is_default = false WHERE provider_id = :p AND is_default"),
                          {"p": pid})
@@ -839,6 +855,48 @@ async def add_model(pid: uuid.UUID, body: ModelIn, request: Request, user: servi
     # v0.1.59: có model mới ⇒ thẻ "Hôm nay của Sếp" đọc lại ngay (không chờ cache 60 giây).
     await coach_cache.commit_and_invalidate(db, request.app.state.redis, user.org_id)
     return out
+
+
+@router.delete("/providers/{pid}/models/{mid}", status_code=204)
+async def delete_model(pid: uuid.UUID, mid: uuid.UUID, request: Request, user: service.CurrentUser = Depends(MANAGE),
+                       db: AsyncSession = DB) -> Response:
+    """v0.1.66 (F008): gỡ một model đã thêm nhầm. Gỡ luôn dòng gán model trỏ vào nó (vai đó quay về model chuẩn).
+    Model còn lượt gọi trong 30 ngày ⇒ 409 `MODEL_HAS_CALLS` (gỡ sẽ xoá dây chuyền bảng giá, chi phí lịch sử tụt về 0) —
+    dùng "Tắt model" (`POST /providers/{id}/models` với `enabled: false`)."""
+    p = await _provider(db, user.org_id, pid)
+    row = (await db.execute(text("""SELECT model_name FROM agent.models WHERE id = :m AND provider_id = :p"""),
+                            {"m": mid, "p": pid})).one_or_none()
+    if row is None:
+        raise not_found("Model")
+    # Review v0.1.66 (P2-2): xoá model kéo theo `agent.model_prices` (ON DELETE CASCADE) mà chi phí tính lúc đọc từ
+    # bảng giá ⇒ chi phí hôm nay / 7 ngày tụt về 0, trần chi phí không kêu, không đảo ngược. Model còn lượt gọi trong
+    # 30 ngày ⇒ không cho gỡ (chỉ "Tắt model": ngừng dùng, giữ lịch sử).
+    left = (await db.execute(text("SELECT count(*) FROM agent.models WHERE provider_id = :p"), {"p": pid})).scalar_one()
+    if left <= 1 and p.kind == "system_one":
+        # Jev không có danh sách model để chọn lại — gỡ model cuối là mất nguồn (muốn ngừng dùng ⇒ tắt nguồn Jev).
+        raise conflict("LAST_MODEL", f"{p.name} chỉ có một model và không có danh sách để chọn lại — không gỡ được. "
+                                     "Muốn ngừng dùng Jev, hãy tắt nguồn này.")
+    if left <= 1 and p.kind in CLI_KINDS:
+        # `_heal_agy` tự thêm lại model khi nguồn CLI không còn dòng nào ⇒ gỡ hết chỉ là vô ích và gây khó hiểu.
+        raise conflict("LAST_MODEL", f"{p.name} cần ít nhất một model — gỡ hết thì hệ thống tự thêm lại. "
+                                     "Muốn ngừng dùng model này, bấm “Tắt model” hoặc chọn model khác bằng "
+                                     "“Dùng model này”.")
+    used = (await db.execute(text("""SELECT EXISTS (SELECT 1 FROM agent.model_calls
+                                     WHERE org_id = :o AND model_id = :m AND at >= now() - interval '30 days')"""),
+                             {"o": user.org_id, "m": mid})).scalar_one()
+    if used:
+        raise conflict("MODEL_HAS_CALLS",
+                       f"Model “{row.model_name}” đã có lượt gọi trong 30 ngày qua — gỡ đi sẽ mất lịch sử chi phí. "
+                       "Bấm “Tắt model” để ngừng dùng mà vẫn giữ lịch sử.")
+    unbound = list((await db.execute(text("""DELETE FROM agent.bindings WHERE org_id = :o AND model_id = :m
+                                             RETURNING agent_key"""), {"o": user.org_id, "m": mid})).scalars().all())
+    await db.execute(text("DELETE FROM agent.models WHERE id = :m"), {"m": mid})
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action="provider.model_deleted", target_type="provider", target_id=str(pid),
+                           target_label=p.name, detail={"model_name": row.model_name, "unbound": sorted(unbound)},
+                           ip=user.ip)
+    await coach_cache.commit_and_invalidate(db, request.app.state.redis, user.org_id)   # thẻ "Hôm nay" đọc lại ngay
+    return Response(status_code=204)
 
 
 @router.post("/providers/{pid}/test")
@@ -914,14 +972,20 @@ async def diagnose_provider(pid: uuid.UUID, request: Request, user: service.Curr
 @router.get("/providers/credentials")
 async def credentials(request: Request, user: service.CurrentUser = Depends(READ),
                       db: AsyncSession = DB) -> list[dict[str, Any]]:
-    """Dòng thẻ "Khoá & phiên" (thiết kế `creds`): khoá API theo nhà cung cấp + khoá phiên QR theo kênh."""
+    """Dòng thẻ "Khoá & phiên" (thiết kế `creds`): khoá API theo nhà cung cấp + phiên đăng nhập CLI.
+
+    v0.1.66 (F134): KHÔNG còn dòng "khoá phiên QR" của Zalo / WhatsApp — kênh có thẻ riêng ở Kết nối, hiện lại trong thẻ
+    tài khoản Google làm Sếp tưởng có hai lỗi."""
     out: list[dict[str, Any]] = []
     for p in await provider_payloads(db, request.app.state.redis, user.org_id):
         if p["kind"] in CLI_KINDS:
-            state = {"ok": "ok", "expiring": "warn"}.get(p["auth_state"], "bad")
+            # v0.1.66 (F015): CÙNG nhãn với `providerStatus` của web — lần Kiểm tra lỗi (vd model bị từ chối) là
+            # "Lỗi kết nối" chứ không bảo đăng nhập lại; chỉ phiên hết hạn / chưa đăng nhập mới nói chuyện đăng nhập.
+            state, label = {"ok": ("ok", "Hoạt động"), "expiring": ("warn", "Sắp hết hạn"),
+                            "error": ("bad", "Lỗi kết nối"), "expired": ("bad", "Hết hạn")
+                            }.get(p["auth_state"], ("bad", "Chưa đăng nhập"))
             out.append({"icon": "terminal-window", "name": f"{p['name']} — phiên CLI",
-                        "meta": p["account_label"] or "chưa đăng nhập", "state": state,
-                        "state_label": {"ok": "Hoạt động", "warn": "Sắp hết hạn"}.get(state, "Cần đăng nhập")})
+                        "meta": p["account_label"] or "chưa đăng nhập", "state": state, "state_label": label})
             continue
         n = len(p["keys"])
         low = [m for m in p["models"] if m["left_pct"] is not None and m["left_pct"] < 20]
@@ -938,16 +1002,6 @@ async def credentials(request: Request, user: service.CurrentUser = Depends(READ
                  else "Không dùng được") if state == "bad" else \
             ("Sắp cạn" if low else "Đang nghỉ" if cooling else "Chưa kiểm tra") if state == "warn" else "Hoạt động"
         out.append({"icon": "key", "name": name, "meta": meta, "state": state, "state_label": label})
-    for t in QR_CHANNELS:
-        card = await channel_card(db, request.app.state.redis, user.org_id, t)
-        if card["state"] == "not_installed":
-            continue
-        ok = card["state"] == "active"
-        meta = f"gắn thiết bị {card['account_label']}" if ok and card["account_label"] else (
-            f"hết hạn {card['ended_at'][11:16]} UTC" if card.get("ended_at") else "chưa đăng nhập")
-        out.append({"icon": "qr-code", "name": f"{card['name']} — khoá phiên QR", "meta": meta,
-                    "state": "ok" if ok else "bad", "state_label": "Hoạt động" if ok else (
-                        "Hết hạn" if card["state"] == "expired" else "Chưa đăng nhập")})
     return out
 
 
@@ -1054,10 +1108,10 @@ async def cli_delete(profile_id: uuid.UUID, request: Request, user: service.Curr
 # Quy tắc chuyển hướng (ARCHITECTURE §11, thiết kế `failoverRules`) — cố định trong `gh.providers.router`, không
 # có tham số nào Owner chỉnh được ở đây nên chỉ có GET (đọc để hiển thị, không PATCH).
 FAILOVER_RULES: tuple[dict[str, str], ...] = (
-    {"key": "hết hạn mức", "value": "chuyển xuống nhà cung cấp kế tiếp trong chuỗi"},
+    {"key": "hết hạn mức", "value": "chuyển xuống nhà cung cấp kế tiếp trong chuỗi (hạn mức Sếp đặt ở từng model)"},
     {"key": "ngắt mạch", "value": "giữ nguyên hội thoại, thử lại sau 60 giây"},
     {"key": "hết chuỗi", "value": "xếp hàng và báo Sếp qua hàng đợi cần xử lý"},
-    {"key": "ngưỡng cảnh báo", "value": "còn dưới 20% hạn mức trên bất kỳ model nào"},
+    {"key": "ngưỡng cảnh báo", "value": "còn dưới 20% hạn mức ngày trên model nào Sếp đã đặt hạn mức"},
 )
 
 

@@ -701,7 +701,7 @@ export function createPhase2(opts: Phase2Options) {
   const CC_SRC = '`claude --help` 2.1.285 + https://code.claude.com/docs/en/model-config (đọc 2026-10-01)';
   const MODEL_GROUPS: Record<string, Array<{ label: string; models: ReturnType<typeof opt>[] }>> = {
     antigravity_cli: [
-      { label: 'Gemini', models: [opt('gemini-3.8-flash', 'Gemini 3.8 Flash', 'Gemini', 'fast', 'cli', ['low', 'medium', 'high'], { default_effort: 'high' }), opt('gemini-3.1-pro', 'Gemini 3.1 Pro', 'Gemini', 'strong', 'cli', ['low', 'high'])] },
+      { label: 'Gemini', models: [opt('gemini-3.8-flash', 'Gemini 3.8 Flash', 'Gemini', 'balanced', 'cli', ['low', 'medium', 'high'], { default_effort: 'high' }), opt('gemini-3.1-pro', 'Gemini 3.1 Pro', 'Gemini', 'strong', 'cli', ['low', 'high'])] },
       { label: 'Claude (qua Antigravity)', models: [opt('claude-sonnet-4-6-thinking', 'Claude Sonnet 4.6 (Thinking)', 'Claude (qua Antigravity)', 'balanced')] },
     ],
     claude_code_cli: [
@@ -721,14 +721,7 @@ export function createPhase2(opts: Phase2Options) {
         out.push({ icon: 'ph ph-key', name: p.name, meta: k ? `${k.label}${k.quota_left_pct != null ? ` · còn ${k.quota_left_pct}% hạn mức` : ''}` : 'chưa có khoá', state: p.auth_state === 'ok' && !low ? 'ok' : p.auth_state === 'error' || p.auth_state === 'expired' ? 'bad' : 'warn', state_label: p.auth_state === 'ok' && !low ? 'Hoạt động' : p.auth_state === 'unconfigured' ? 'Chưa kiểm tra' : 'Sắp cạn' });
       }
     }
-    for (const c of channels) {
-      if (c.type !== 'zalo' && c.type !== 'whatsapp') continue;
-      if (c.state === 'active') out.push({ icon: 'ph ph-qr-code', name: `${c.name} — khoá phiên QR`, meta: `gắn thiết bị ${c.account_label ?? 'điện thoại của Sếp'}`, state: 'ok', state_label: 'Hoạt động' });
-      else if (c.state === 'expired' || c.state === 'error') {
-        const hm = c.last_heartbeat_at ? new Date(new Date(c.last_heartbeat_at).getTime() + TZ_OFFSET_MS).toISOString().slice(11, 16) : '';
-        out.push({ icon: 'ph ph-qr-code', name: `${c.name} — khoá phiên QR`, meta: `hết hạn ${hm} hôm nay`, state: 'bad', state_label: 'Hết hạn' });
-      }
-    }
+    // v0.1.66 (F134): máy chủ không còn trả dòng "khoá phiên QR" của Zalo / WhatsApp (kênh có thẻ riêng ở Kết nối).
     return out;
   };
 
@@ -1324,6 +1317,11 @@ export function createPhase2(opts: Phase2Options) {
         if (ok && (pv.kind === 'antigravity_cli' || pv.kind === 'claude_code_cli') && !pv.models.length) {
           const probe = (result as { probe_model?: string }).probe_model ?? models[0];
           if (probe) pv.models.push({ id: randomUUID(), model_name: probe, daily_quota: null, used_today: 0 });
+          // v0.1.66 (F132): Antigravity lưu sẵn cả các model `agy models` liệt kê thật (source 'cli'); Claude Code chỉ model thăm dò.
+          if (pv.kind === 'antigravity_cli')
+            for (const g of groups ?? [])
+              for (const x of g.models)
+                if (x.source === 'cli' && !pv.models.some((y) => y.model_name === x.id)) pv.models.push({ id: randomUUID(), model_name: x.id, daily_quota: null, used_today: 0 });
         }
         reply(200, result);
         return true;
@@ -1361,6 +1359,14 @@ export function createPhase2(opts: Phase2Options) {
         providers.splice(providers.indexOf(pv), 1);
         return reply(204);
       }
+      // v0.1.66 (F008): gỡ một model đã thêm nhầm — như máy chủ: 204, gỡ luôn dòng gán trỏ vào nó; không thuộc nguồn ⇒ 404.
+      if (seg[2] === 'models' && seg.length === 4 && m === 'DELETE') {
+        if (!need('system.manage')) return true;
+        const mi = pv.models.findIndex((x) => x.id === seg[3]);
+        if (mi < 0) return problem(404, 'NOT_FOUND', 'Không tồn tại');
+        pv.models.splice(mi, 1);
+        return reply(204);
+      }
       if (seg[2] === 'models' && m === 'POST') {
         if (!need('system.manage')) return true;
         const name = String(body.model_name ?? '').trim();
@@ -1383,8 +1389,14 @@ export function createPhase2(opts: Phase2Options) {
               technical: `ModelRejected: invalid --effort "${effort}" (valid: ${known.efforts.join(', ')})`,
             });
         }
-        if (!exists) pv.models.push({ id: randomUUID(), model_name: name, effort, daily_quota: typeof body.daily_quota === 'number' ? body.daily_quota : null, used_today: 0 });
-        else if ('effort' in body) exists.effort = effort;
+        const quota = (v: unknown) => (typeof v === 'number' ? v : null);
+        if (!exists) pv.models.push({ id: randomUUID(), model_name: name, effort, daily_quota: quota(body.daily_quota), rate_limit_per_min: quota(body.rate_limit_per_min), used_today: 0 });
+        else {
+          if ('effort' in body) exists.effort = effort;
+          // v0.1.66 (F009): như máy chủ — không gửi trường hạn mức thì giữ hạn mức đã lưu; gửi null thì bỏ.
+          if ('daily_quota' in body) exists.daily_quota = quota(body.daily_quota);
+          if ('rate_limit_per_min' in body) exists.rate_limit_per_min = quota(body.rate_limit_per_min);
+        }
         if (body.make_default === true) pv.models.forEach((x) => (x.is_default = x.model_name === name));
         return reply(cliGroups ? 201 : 200, stripSecret(pv));
       }

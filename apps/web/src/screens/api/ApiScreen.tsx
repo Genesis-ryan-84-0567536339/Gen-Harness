@@ -20,13 +20,14 @@ import {
   bindingEffortText,
   bindingModelText,
   bindingParamsText,
+  chainModelText,
   choiceText,
+  DEFAULT_CONTEXT_TOKENS,
   effortOptionText,
   findPreset,
-  fmtContextTokens,
   fmtQuota,
-  fmtTemperature,
   isCliKind,
+  parseQuotaInput,
   providerStatus,
   supportedEfforts,
 } from './apiModel';
@@ -38,6 +39,8 @@ import {
   useFailoverRules,
   useRemoveBinding,
   useRemoveProvider,
+  useRemoveProviderKey,
+  useRemoveProviderModel,
   useReorderChain,
   useSetBinding,
   useSetProviderEnabled,
@@ -73,8 +76,15 @@ export function ApiScreen() {
     );
   }, [addParam, canManage, setParams]);
 
+  // v0.1.66 (F019): nút đầu trang chỉ kiểm các nguồn khoá API (nguồn CLI có nút "Kiểm tra kết nối" riêng, mỗi lần là một lượt
+  // gọi model thật). Không có nguồn khoá API nào ⇒ nút tắt kèm lý do, không bao giờ báo xanh "0 / 0".
+  const apiSources = (providers.data ?? []).filter((p) => !isCliKind(p.kind) && p.kind !== 'system_one');
   const testAllConnections = async () => {
-    const list = (providers.data ?? []).filter((p) => !isCliKind(p.kind) && p.kind !== 'system_one');
+    const list = apiSources;
+    if (list.length === 0) {
+      toast('Chưa có nguồn khoá API nào để kiểm — nguồn Antigravity / Claude Code kiểm ở nút trên từng thẻ.', 'warn');
+      return;
+    }
     let ok = 0;
     for (const p of list) {
       try {
@@ -89,7 +99,15 @@ export function ApiScreen() {
 
   const actions = (
     <>
-      <Button variant="secondary" icon="ph ph-pulse" className="btn-30" loading={testAll.isPending} onClick={() => void testAllConnections()} disabled={!providers.data?.length}>
+      <Button
+        variant="secondary"
+        icon="ph ph-pulse"
+        className="btn-30"
+        loading={testAll.isPending}
+        onClick={() => void testAllConnections()}
+        disabled={apiSources.length === 0}
+        title={apiSources.length === 0 ? 'Chưa có nguồn khoá API nào — nguồn Antigravity / Claude Code kiểm ở nút trên từng thẻ' : 'Kiểm tra mọi nguồn khoá API'}
+      >
         Kiểm tra kết nối
       </Button>
       {canManage ? (
@@ -129,10 +147,9 @@ export function ApiScreen() {
 
       {/* v0.1.55: nhiệt độ, ngữ cảnh, bộ quy tắc và hạn mức model là việc hiếm — gom vào "Nâng cao", mặc định đóng. */}
       <details className="brain-advanced" data-testid="api-advanced">
-        <summary>Nâng cao — nhiệt độ, ngữ cảnh, bộ quy tắc và hạn mức model</summary>
+        <summary>Nâng cao — nhiệt độ, ngữ cảnh và hạn mức model</summary>
         <div className="apm-side" style={{ marginTop: 12 }}>
           <AdvancedParamsPanel />
-          <CoreParamsPanel />
           <RateLimitsPanel />
         </div>
       </details>
@@ -234,11 +251,125 @@ function ProviderCard({ provider: p, canManage, onAddKey }: { provider: Provider
         </div>
       ) : null}
       {canManage && p.kind !== 'system_one' ? <ModelPicker provider={p} test={lastResult ?? p.last_test} /> : null}
+      {canManage && p.kind !== 'system_one' ? <ProviderManage provider={p} /> : null}
       {isCliKind(p.kind) ? <CliDiagnose provider={p} /> : null}
       {testErr ? <InlineError detail={errorDetail(testErr)}>{errorText(testErr)}</InlineError> : null}
       {remove.isError ? <InlineError detail={errorDetail(remove.error)}>{errorText(remove.error)}</InlineError> : null}
       {setEnabled.isError ? <InlineError detail={errorDetail(setEnabled.error)}>{errorText(setEnabled.error)}</InlineError> : null}
     </article>
+  );
+}
+
+/**
+ * v0.1.66 (F008, F009): xoá được khoá dán sai và model thêm nhầm; đặt hạn mức ngày / lượt-phút cho từng model (backend đã giữ
+ * hạn mức và cảnh báo "còn dưới 20%", nhưng trước đây không có ô nhập nên không bao giờ chạy).
+ */
+function ProviderManage({ provider: p }: { provider: Provider }) {
+  const removeKey = useRemoveProviderKey();
+  const removeModel = useRemoveProviderModel();
+  const keys = isCliKind(p.kind) ? [] : p.keys;
+  if (!keys.length && !p.models.length) return null;
+  const err = removeKey.error ?? removeModel.error;
+  return (
+    <details className="brain-advanced apm-manage" data-testid={`provider-manage-${p.id}`}>
+      <summary>Quản lý khoá và model</summary>
+      {keys.length ? (
+        <div className="apm-manage__group">
+          <div className="apm-manage__title">Khoá API</div>
+          {keys.map((k) => (
+            <div className="apm-manage__row" key={k.id}>
+              <span className="apm-manage__name mono">{`${k.label} ····${k.last4}`}</span>
+              <Button
+                variant="ghost"
+                className="btn-22"
+                icon="ph ph-trash"
+                aria-label={`Xoá khoá ${k.label}`}
+                loading={removeKey.isPending && removeKey.variables?.keyId === k.id}
+                onClick={() => {
+                  if (window.confirm(`Xoá khoá ${k.label} (····${k.last4}) của "${p.name}"? Khoá này rời vòng xoay ngay.`)) removeKey.mutate({ id: p.id, keyId: k.id });
+                }}
+              >
+                Xoá khoá
+              </Button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {p.models.length ? (
+        <div className="apm-manage__group">
+          <div className="apm-manage__title">Model và hạn mức</div>
+          {p.models.map((m) => (
+            <ModelLimitRow key={`${m.id}-${m.daily_quota ?? ''}-${m.rate_limit_per_min ?? ''}`} provider={p} model={m} onRemove={() => removeModel.mutate({ id: p.id, modelId: m.id })} removing={removeModel.isPending && removeModel.variables?.modelId === m.id} />
+          ))}
+        </div>
+      ) : null}
+      {err ? <InlineError detail={errorDetail(err)}>{errorText(err)}</InlineError> : null}
+    </details>
+  );
+}
+
+function ModelLimitRow({ provider: p, model: m, onRemove, removing }: { provider: Provider; model: Provider['models'][number]; onRemove: () => void; removing: boolean }) {
+  const save = useAddModel();
+  const [daily, setDaily] = useState(m.daily_quota == null ? '' : String(m.daily_quota));
+  const [perMin, setPerMin] = useState(m.rate_limit_per_min == null ? '' : String(m.rate_limit_per_min));
+  const [bad, setBad] = useState(false);
+  const enabled = m.enabled !== false;   // thiếu trường (máy chủ cũ) = đang bật
+  const submit = () => {
+    const d = parseQuotaInput(daily);
+    const r = parseQuotaInput(perMin);
+    if (d === undefined || r === undefined) {
+      setBad(true);
+      return;
+    }
+    setBad(false);
+    save.mutate({ id: p.id, body: { model_name: m.model_name, daily_quota: d, rate_limit_per_min: r } }, { onSuccess: () => toast(`Đã lưu hạn mức của ${m.model_name}.`) });
+  };
+  return (
+    <div className="apm-manage__row apm-manage__row--model">
+      <span className="apm-manage__name mono" title={m.model_name}>
+        {m.model_name}
+        {enabled ? '' : ' (đã tắt)'}
+      </span>
+      <label className="apm-manage__field">
+        <span className="muted-note">Hạn mức/ngày</span>
+        <input className="gh-input" inputMode="numeric" placeholder="không giới hạn" aria-label={`Hạn mức ngày của ${m.model_name}`} value={daily} onChange={(e) => setDaily(e.target.value)} />
+      </label>
+      <label className="apm-manage__field">
+        <span className="muted-note">Lượt/phút</span>
+        <input className="gh-input" inputMode="numeric" placeholder="không giới hạn" aria-label={`Lượt mỗi phút của ${m.model_name}`} value={perMin} onChange={(e) => setPerMin(e.target.value)} />
+      </label>
+      <Button variant="secondary" className="btn-22" loading={save.isPending} aria-label={`Lưu hạn mức của ${m.model_name}`} onClick={submit}>
+        Lưu hạn mức
+      </Button>
+      <Button
+        variant="secondary"
+        className="btn-22"
+        loading={save.isPending && save.variables?.body.enabled !== undefined}
+        aria-label={`${enabled ? 'Tắt' : 'Bật'} model ${m.model_name}`}
+        onClick={() =>
+          save.mutate(
+            { id: p.id, body: { model_name: m.model_name, enabled: !enabled } },
+            { onSuccess: () => toast(enabled ? `Đã tắt ${m.model_name} — lịch sử chi phí vẫn giữ.` : `Đã bật lại ${m.model_name}.`) },
+          )
+        }
+      >
+        {enabled ? 'Tắt model' : 'Bật model'}
+      </Button>
+      <Button
+        variant="ghost"
+        className="btn-22"
+        icon="ph ph-trash"
+        loading={removing}
+        aria-label={`Gỡ model ${m.model_name}`}
+        onClick={() => {
+          if (window.confirm(`Gỡ model "${m.model_name}" khỏi "${p.name}"? Vai nào đang gán model này sẽ quay về model chuẩn.`)) onRemove();
+        }}
+      >
+        Gỡ model
+      </Button>
+      {bad ? <InlineError>Nhập số nguyên từ 1 trở lên, hoặc để trống = không giới hạn.</InlineError> : null}
+      {save.isError ? <InlineError detail={errorDetail(save.error)}>{errorText(save.error)}</InlineError> : null}
+    </div>
   );
 }
 
@@ -372,9 +503,12 @@ function BindingEditDialog({ slot, models, onClose }: { slot: AgentBindingSlot; 
   const savedEffort = slot.binding?.effort ?? '';
   const effortValue: Effort | '' = (effortPick ?? savedEffort) as Effort | '';
   const effort: Effort | '' = effortValue && efforts.includes(effortValue) ? effortValue : '';
-  const [temperature, setTemperature] = useState(String(slot.binding?.temperature ?? 0.3));
-  const [contextTokens, setContextTokens] = useState(String(slot.binding?.context_tokens ?? 8000));
-  const [ruleCodes, setRuleCodes] = useState((slot.binding?.rule_codes ?? []).join(', '));
+  // v0.1.66 (F021): chỉ agent trực việc (`agent:*`) dùng nhiệt độ / ngữ cảnh do Sếp đặt; bốn vai lõi chạy theo hồ sơ chuẩn
+  // (nhiệt độ, ngữ cảnh cố định) và "bộ quy tắc" không vai nào dùng ⇒ hộp chỉ hiện các ô đó cho agent, ô ngữ cảnh mặc định
+  // = 6000 (đúng mặc định máy chủ) để lưu hộp chỉ để đổi model không âm thầm đổi ngữ cảnh của agent.
+  const isAgent = slot.agent_key.startsWith('agent:');
+  const [temperature, setTemperature] = useState(String(slot.binding?.temperature ?? slot.standard?.temperature ?? 0.3));
+  const [contextTokens, setContextTokens] = useState(String(slot.binding?.context_tokens ?? slot.standard?.context_tokens ?? DEFAULT_CONTEXT_TOKENS));
   const submit = () => {
     if (!modelId) return;
     set.mutate(
@@ -384,10 +518,7 @@ function BindingEditDialog({ slot, models, onClose }: { slot: AgentBindingSlot; 
           model_id: modelId,
           temperature: Number(temperature),
           context_tokens: Number(contextTokens),
-          rule_codes: ruleCodes
-            .split(',')
-            .map((s) => s.trim())
-            .filter(Boolean),
+          rule_codes: slot.binding?.rule_codes ?? [],
           effort: effort || null,
         },
       },
@@ -459,12 +590,17 @@ function BindingEditDialog({ slot, models, onClose }: { slot: AgentBindingSlot; 
             Model này không chỉnh mức suy nghĩ — hệ thống tự chọn.
           </p>
         ) : null}
-        <details className="brain-advanced" data-testid="binding-edit-advanced">
-          <summary>Nâng cao — nhiệt độ, ngữ cảnh, bộ quy tắc</summary>
-          <TextField label="Nhiệt độ (0–2)" type="number" step="0.05" min={0} max={2} value={temperature} onChange={(e) => setTemperature(e.target.value)} />
-          <TextField label="Ngữ cảnh (token)" type="number" min={256} value={contextTokens} onChange={(e) => setContextTokens(e.target.value)} />
-          <TextField label="Bộ quy tắc (mã, cách nhau dấu phẩy)" value={ruleCodes} onChange={(e) => setRuleCodes(e.target.value)} placeholder="R-01, R-02" />
-        </details>
+        {isAgent ? (
+          <details className="brain-advanced" data-testid="binding-edit-advanced">
+            <summary>Nâng cao — nhiệt độ, ngữ cảnh</summary>
+            <TextField label="Nhiệt độ (0–2)" type="number" step="0.05" min={0} max={2} value={temperature} onChange={(e) => setTemperature(e.target.value)} />
+            <TextField label="Ngữ cảnh (token)" type="number" min={256} value={contextTokens} onChange={(e) => setContextTokens(e.target.value)} />
+          </details>
+        ) : (
+          <p className="muted-note" data-testid="binding-core-fixed-note">
+            Nhiệt độ và ngữ cảnh của vai này theo hồ sơ chuẩn (cố định) — chỉ agent trực việc chỉnh được.
+          </p>
+        )}
         {set.isError ? <BindingSaveError error={set.error} /> : null}
       </form>
     </Dialog>
@@ -486,52 +622,15 @@ function BindingSaveError({ error }: { error: unknown }) {
   );
 }
 
-function CoreParamsPanel() {
-  const bindings = useBindings();
-  const slot = bindings.data?.items.find((i) => i.agent_key === 'core.refinery');
-  const core = slot?.binding ?? null;
-  const std = core ? null : (slot?.standard ?? null);
-  const rows: Array<[string, string]> = core
-    ? [
-        ['Model', `${core.provider_name} · ${core.model_name}`],
-        ['Nhiệt độ', fmtTemperature(core.temperature)],
-        ['Ngữ cảnh', fmtContextTokens(core.context_tokens)],
-        ['Bộ quy tắc', core.rule_codes.length ? core.rule_codes.join(', ') : '—'],
-      ]
-    : std
-      ? [
-          ['Model', `${std.provider_name} · ${std.model_name} (chuẩn, tự chọn)`],
-          ['Nhiệt độ', fmtTemperature(std.temperature)],
-          ['Ngữ cảnh', fmtContextTokens(std.context_tokens)],
-          ['Bộ quy tắc', '—'],
-        ]
-      : [];
-  return (
-    <Panel title="Tham số sàng lọc" kicker="Dùng cho việc sàng lọc thô → sạch" bodyClass="apm-params" label="Tham số sàng lọc">
-      {bindings.isPending ? (
-        <SkeletonLines rows={4} padding="0" />
-      ) : bindings.isError ? (
-        <CardError error={bindings.error} onRetry={() => void bindings.refetch()} retrying={bindings.isFetching} />
-      ) : !core ? (
-        <EmptyState icon="ph ph-brain" title="Chưa gán model cho việc sàng lọc" description="Gán ở bảng bên trên, dòng Sàng lọc & suy luận chính." />
-      ) : (
-        rows.map(([k, v]) => (
-          <div className="apm-param-row" key={k}>
-            <span className="apm-param-row__key">{k}</span>
-            <div className="apm-param-row__box" title={v}>{v}</div>
-          </div>
-        ))
-      )}
-    </Panel>
-  );
-}
-
-/** v0.1.55 (Nâng cao): nhiệt độ · ngữ cảnh · bộ quy tắc của MỌI vai (Sếp đã gán hoặc hồ sơ chuẩn) — mỗi vai một dòng chữ. */
+/**
+ * v0.1.55 (Nâng cao): nhiệt độ · ngữ cảnh của MỌI vai — mỗi vai một dòng chữ. v0.1.66: không còn thẻ "Tham số sàng lọc" riêng
+ * (trùng thẻ này, và báo "chưa gán model" dù bảng ghi Chuẩn — F018) và không còn "bộ quy tắc" (không vai nào dùng — F021).
+ */
 function AdvancedParamsPanel() {
   const bindings = useBindings();
   const items = bindings.data?.items ?? [];
   return (
-    <Panel title="Tham số theo vai" kicker="Nhiệt độ, ngữ cảnh, bộ quy tắc — chỉnh ở hộp gán model (mục Nâng cao)" bodyClass="apm-params" label="Tham số theo vai">
+    <Panel title="Tham số theo vai" kicker="Nhiệt độ, ngữ cảnh — chỉ agent trực việc chỉnh được (hộp gán model › Nâng cao); vai lõi theo hồ sơ chuẩn" bodyClass="apm-params" label="Tham số theo vai">
       {bindings.isPending ? (
         <SkeletonLines rows={4} padding="0" />
       ) : bindings.isError ? (
@@ -554,7 +653,7 @@ function RateLimitsPanel() {
   const providers = useProviders();
   const rows = (providers.data ?? []).flatMap((p) => p.models.map((m) => ({ key: `${p.id}-${m.id}`, label: `${p.name} · ${m.model_name}`, quota: fmtQuota(m.used_today, m.daily_quota) })));
   return (
-    <Panel title="Giới hạn gọi API" kicker="Bảo vệ hạn mức" bodyClass="apm-rates" label="Giới hạn gọi API">
+    <Panel title="Giới hạn gọi API" kicker="Đặt ở thẻ nhà cung cấp › Quản lý khoá và model" bodyClass="apm-rates" label="Giới hạn gọi API">
       {providers.isPending ? (
         <SkeletonLines rows={4} padding="8px 16px" />
       ) : providers.isError ? (
@@ -624,7 +723,7 @@ function PriorityChainPanel({ canManage }: { canManage: boolean }) {
               <span className="apm-chain-row__rank mono">{i + 1}</span>
               <div className="apm-chain-row__body">
                 <div className="apm-chain-row__name">{p.name}</div>
-                <div className="apm-chain-row__model mono">{p.models[0]?.model_name ?? '—'}</div>
+                <div className="apm-chain-row__model mono">{chainModelText(p)}</div>
               </div>
               <span className="apm-chain-row__state" style={{ color: providerStatus(p).tone }}>
                 {providerStatus(p).label}

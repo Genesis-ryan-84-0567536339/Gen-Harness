@@ -277,7 +277,7 @@ async def test_heal_agy_clears_card_cache_after_adopting_model(owner_api: Api, a
         n = (
             await db.execute(text("SELECT count(*) FROM agent.models WHERE provider_id = :p"), {"p": uuid.UUID(pid)})
         ).scalar_one()
-    assert n == 1
+    assert n == 3          # v0.1.66 (F132): lưu sẵn mọi model agy liệt kê
 
 
 # ─── review v0.1.59: ai_source chỉ ghi cho nguồn đang BẬT; chỉ Owner tích hộ "Việc Sếp cần làm" ─────────────────────

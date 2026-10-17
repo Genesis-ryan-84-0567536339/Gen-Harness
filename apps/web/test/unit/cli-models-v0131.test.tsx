@@ -97,7 +97,8 @@ describe('ModelPicker — ô chọn có nhóm', () => {
     const groups = select.querySelectorAll('optgroup');
     expect([...groups].map((g) => g.label)).toEqual(['Gemini', 'Claude (qua Antigravity)']);
     expect(within(select).getByRole('option', { name: 'Claude Sonnet 4.6 (Thinking) · cân bằng' })).toBeInTheDocument();
-    expect(screen.getByText(/Chưa chọn thì hệ thống dùng gemini-3.8-flash-high/)).toBeInTheDocument();
+    // v0.1.66 (F133): không còn hứa "hệ thống dùng <model thăm dò>" — mỗi vai tự chọn model theo hồ sơ chuẩn.
+    expect(screen.getByText(/Chưa lưu model nào — chọn rồi bấm "Dùng model này"/)).toBeInTheDocument();
 
     await user.selectOptions(select, 'gemini-3.8-flash-low');
     await user.click(screen.getByRole('button', { name: 'Dùng model này' }));

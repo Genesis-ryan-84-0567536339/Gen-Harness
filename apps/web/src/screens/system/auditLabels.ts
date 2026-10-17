@@ -53,6 +53,7 @@ export const ACTION_LABEL: Record<string, string> = {
   'provider.key_added': 'Thêm khoá truy cập nhà cung cấp AI',
   'provider.key_deleted': 'Xoá khoá truy cập nhà cung cấp AI',
   'provider.model_set': 'Chọn mô hình AI',
+  'provider.model_deleted': 'Gỡ mô hình AI',
   'provider.model_rejected': 'Mô hình AI bị từ chối',
   'provider.model_auto': 'Hệ thống tự chọn lại mô hình AI',
   'provider.chain_reordered': 'Đổi thứ tự nhà cung cấp AI dự phòng',

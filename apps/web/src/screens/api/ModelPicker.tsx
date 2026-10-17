@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import type { Effort, ModelGroup, Provider, ProviderTestResult } from '@gen-harness/contracts';
+import type { Effort, ModelGroup, Provider, ProviderModel, ProviderTestResult } from '@gen-harness/contracts';
 import { Button } from '@gen-harness/ui';
 import { api } from '../../lib/api';
 import { errorText } from '../../lib/errorText';
 import { qk2 } from '../../lib/dataQueries';
 import { queryClient } from '../../lib/queryClient';
 import { toast } from '../../lib/toast';
-import { EFFORT_HINT, choiceText, effortOptionText, currentChoice, isCliKind, modelOptionText, offeredGroups, pickEffort, technicalDetail } from './apiModel';
+import { EFFORT_HINT, choiceText, effortOptionText, currentChoice, isCliKind, modelOptionText, pickEffort, pickerGroups, technicalDetail } from './apiModel';
 
 /**
  * v0.1.31 (Boss 01/10: "không thấy model và nhóm model nào để chọn") — ô chọn model THEO NHÓM (Gemini, Claude qua
@@ -19,9 +19,12 @@ import { EFFORT_HINT, choiceText, effortOptionText, currentChoice, isCliKind, mo
  */
 export function ModelPicker({ provider: p, test }: { provider: Provider; test: ProviderTestResult | null | undefined }) {
   const current = currentChoice(p);
-  const groups = useMemo(() => withSaved(offeredGroups(test), current), [test, current?.model, current?.effort]); // eslint-disable-line react-hooks/exhaustive-deps
+  // v0.1.66 (F116): ô chọn KHÔNG biến mất khi Kiểm tra đỏ / chưa kiểm — lấy danh mục dự phòng (chưa xác minh) + model đã lưu.
+  const { groups: offered, live } = useMemo(() => pickerGroups(test), [test]);
+  const groups = useMemo(() => withSaved(offered, p.models), [offered, p.models]);
   const all = useMemo(() => groups.flatMap((g) => g.models), [groups]);
-  const initial = (current && all.some((m) => m.id === current.model) ? current.model : null) ?? test?.probe_model ?? all[0]?.id ?? '';
+  const probe = test?.probe_model && all.some((m) => m.id === test.probe_model) ? test.probe_model : null;
+  const initial = (current && all.some((m) => m.id === current.model) ? current.model : null) ?? probe ?? all[0]?.id ?? '';
   const [model, setModel] = useState(initial);
   const chosen = all.find((m) => m.id === model);
   const [effort, setEffort] = useState<Effort | null>(() => pickEffort(chosen, model === current?.model ? current?.effort : test?.probe_effort));
@@ -44,8 +47,11 @@ export function ModelPicker({ provider: p, test }: { provider: Provider; test: P
     },
   });
   if (!groups.length) return null;
-  const isCurrent = !!current && model === current.model && (effort ?? null) === (current.effort ?? null);
-  const fallback = current ? choiceText(current.model, current.effort) : (test?.probe_model ?? all[0]?.id);
+  // v0.1.66 (F133): "Đang dùng" chỉ khi Sếp ĐÃ chốt model cho nguồn này ("Dùng model này" = `is_default`); chưa chốt thì mỗi
+  // vai tự chọn model + mức theo hồ sơ chuẩn — không nói "Đang dùng … Cao" cho model chỉ là dòng đầu danh sách.
+  const pinned = p.models.find((m) => m.is_default) ?? null;
+  const isCurrent = !!pinned && model === pinned.model_name && (effort ?? null) === (pinned.effort ?? null);
+  const saved = p.models.map((m) => choiceText(m.model_name, m.effort)).join(', ');
   const efforts = chosen?.efforts ?? [];
   const tech = add.isError ? technicalDetail(add.error) : null;
   return (
@@ -96,9 +102,11 @@ export function ModelPicker({ provider: p, test }: { provider: Provider; test: P
       <span className="muted-note">
         {add.isPending && isCliKind(p.kind)
           ? 'Đang gọi thử model này…'
-          : current
-            ? `Đang dùng ${choiceText(current.model, current.effort)}.`
-            : `Chưa chọn thì hệ thống dùng ${fallback}.`}
+          : pinned
+            ? `Đang dùng ${choiceText(pinned.model_name, pinned.effort ?? null)}.`
+            : p.models.length
+              ? `Chưa chốt model cho nguồn này — mỗi vai tự chọn model và mức suy nghĩ theo hồ sơ chuẩn (xem bảng "Gán model cho từng agent"). Đã lưu: ${saved}.`
+              : 'Chưa lưu model nào — chọn rồi bấm "Dùng model này".'}
         {chosen && chosen.label !== chosen.id ? ` Mã: ${chosen.id}.` : ''}
         {efforts.length ? ` Mức suy nghĩ: ${EFFORT_HINT}.` : isCliKind(p.kind) && chosen ? ' Model này không chỉnh mức suy nghĩ — CLI tự chọn.' : ''}
         {chosen?.verified === false
@@ -107,6 +115,12 @@ export function ModelPicker({ provider: p, test }: { provider: Provider; test: P
             ? ' Tên gọi tắt của Claude Code, tự trỏ tới bản mới nhất gói Claude cho dùng.'
             : ''}
       </span>
+      {!live ? (
+        <span className="muted-note" role="note" data-testid={`model-picker-unverified-${p.id}`}>
+          Kiểm tra kết nối chưa xanh nên danh sách này là danh mục dự phòng và model đã lưu (chưa xác minh) — vẫn chọn được; bấm
+          Kiểm tra kết nối để lấy danh sách thật.
+        </span>
+      ) : null}
       {add.isError ? (
         <div className="prov-model__err" role="alert">
           {errorText(add.error)}
@@ -123,24 +137,38 @@ export function ModelPicker({ provider: p, test }: { provider: Provider; test: P
 }
 
 /**
- * Model đã lưu mà danh sách không có (vd máy chủ cũ) vẫn hiện — không bao giờ mất lựa chọn đang dùng. Review v0.1.32: mang
- * theo MỨC đã lưu (đã gọi thử OK lúc lưu) để nút hiện "Đang dùng" và bấm lại không ghi đè mức thành rỗng.
+ * Model đã lưu mà danh sách không có (vd máy chủ cũ, hoặc Kiểm tra đỏ) vẫn hiện — không bao giờ mất lựa chọn đang dùng.
+ * Review v0.1.32: mang theo MỨC đã lưu (đã gọi thử OK lúc lưu) để nút hiện "Đang dùng" và bấm lại không ghi đè mức thành
+ * rỗng. v0.1.66: mọi model đã lưu (không chỉ model đang dùng) được thêm vào nhóm "Đã lưu" khi danh sách thiếu.
  */
-function withSaved(groups: ModelGroup[], saved: { model: string; effort: Effort | null } | null): ModelGroup[] {
-  if (!saved || !groups.length) return groups;
-  const eff = saved.effort;
-  if (groups.some((g) => g.models.some((m) => m.id === saved.model)))
-    return eff
-      ? groups.map((g) => ({
-          ...g,
-          models: g.models.map((m) => (m.id === saved.model && !(m.efforts ?? []).includes(eff) ? { ...m, efforts: sortEfforts([...(m.efforts ?? []), eff]) } : m)),
-        }))
-      : groups;
+function withSaved(groups: ModelGroup[], models: ProviderModel[]): ModelGroup[] {
+  const usable = models.filter((m) => !/embed/i.test(m.model_name));
+  if (!usable.length) return groups;
+  const cur = usable.find((m) => m.is_default) ?? usable[0];
+  const eff = cur.effort ?? null;
+  let out = groups;
+  if (eff && groups.some((g) => g.models.some((m) => m.id === cur.model_name)))
+    out = groups.map((g) => ({
+      ...g,
+      models: g.models.map((m) => (m.id === cur.model_name && !(m.efforts ?? []).includes(eff) ? { ...m, efforts: sortEfforts([...(m.efforts ?? []), eff]) } : m)),
+    }));
+  const known = new Set(out.flatMap((g) => g.models.map((m) => m.id)));
+  const extra = usable.filter((m) => !known.has(m.model_name));
+  if (!extra.length) return out;
   return [
-    ...groups,
+    ...out,
     {
       label: 'Đã lưu',
-      models: [{ id: saved.model, label: saved.model, group: 'Đã lưu', tier: 'balanced', hint: '', source: 'saved', efforts: eff ? [eff] : [], default_effort: eff }],
+      models: extra.map((m) => ({
+        id: m.model_name,
+        label: m.model_name,
+        group: 'Đã lưu',
+        tier: 'balanced' as const,
+        hint: '',
+        source: 'saved' as const,
+        efforts: m.effort ? [m.effort] : [],
+        default_effort: m.effort ?? null,
+      })),
     },
   ];
 }

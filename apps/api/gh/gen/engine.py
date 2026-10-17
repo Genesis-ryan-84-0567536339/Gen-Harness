@@ -57,7 +57,7 @@ from gh.gen.tools import ToolRunner, tools_for
 from gh.gen.validator import Validator
 from gh.hub_link import KHO_LABEL, kho_write, load_kho_label, relabel
 from gh.providers.clients import Message
-from gh.providers.router import ModelRouter, ModelUnavailable
+from gh.providers.router import REASON_NO_KEY, ModelRouter, ModelUnavailable
 
 log = logging.getLogger("gh.gen")
 
@@ -73,6 +73,9 @@ FAILED = "Gen gặp lỗi khi trả lời, {addr} thử lại sau giúp em."
 # v0.1.28 (UX C1): có model nhưng lượt gọi lỗi (mạng, hạn mức…) — không nói "chưa có model".
 MODEL_DOWN = ("Gen chưa gọi được model lúc này (nguồn AI đang lỗi hoặc hết hạn mức). {addr} thử lại sau ít phút, "
               "hoặc xem trạng thái nguồn ở màn API & Model nhé.")
+# v0.1.66 (F010): nguồn khoá API còn model nhưng KHÔNG còn khoá dùng được — cần thêm khoá.
+NO_KEY = ("Gen chưa dùng được model đã chọn vì nguồn AI không còn khoá nào dùng được. {addr} thêm khoá ở màn "
+          "API & Model (hoặc đăng nhập Antigravity CLI) rồi hỏi lại nhé.")
 # Phân loại công cụ theo nguồn nội dung: công cụ chỉ trả số liệu/cấu hình nội bộ — mọi công cụ khác (queue.*, draft.*,
 # profile.*, social.*, hub.kho_*, task.list…) trả nội dung do người ngoài viết (tin khách, mạng xã hội, Kho).
 # v0.1.38 (F-22) từng dùng phân loại này để KHÔNG gửi lượt đã đọc nội dung ngoài cho Antigravity CLI; v0.1.62 gỡ luật
@@ -364,7 +367,8 @@ def tier_available(options: Mapping[str, Any], tier: str) -> bool:
 
 
 def _why_unavailable(tier: str) -> str:
-    return f"mức “{TIER_LABEL.get(tier, tier)}” chưa có nguồn AI nào phục vụ."
+    return (f"mức “{TIER_LABEL.get(tier, tier)}” chưa có nguồn AI nào phục vụ. "
+            "Thêm model thuộc mức này ở màn API & Model để dùng.")
 
 
 def resolve_model_choice(choice: Mapping[str, Any] | None, *,
@@ -387,12 +391,22 @@ def resolve_model_choice(choice: Mapping[str, Any] | None, *,
     return ROUTER_TIER[tier], (str(effort) if effort in efforts else None), None
 
 
-def _tier_kw(router: Any, tier: str | None, effort: str | None, *, owner: bool = True) -> dict[str, Any]:
-    """`tier` / `effort` / `owner` chỉ truyền cho bộ định tuyến NHẬN tham số đó (bộ giả của test cũ không nhận;
-    ModelRouter chưa có tham số này cũng không) — `ModelRouter.generate(tier=, effort=, owner=)` thật luôn nhận.
-    Gói G: `owner=False` (nhân viên hỏi Gen) được truyền để bộ định tuyến không chạy Antigravity CLI; Owner (mặc định)
-    không cần truyền."""
-    want: dict[str, Any] = {k: v for k, v in (("tier", tier), ("effort", effort)) if v}
+async def _owner_pinned(db: AsyncSession, org_id: uuid.UUID) -> bool:
+    """Sếp đã ghim model cho `core.gen`? Tra lỗi ⇒ coi như chưa ghim (J3 chạy như cũ, không làm hỏng lượt)."""
+    try:
+        return await profiles.owner_pinned(db, org_id, AGENT_KEY)
+    except Exception:  # noqa: BLE001 — J3 chỉ là tối ưu chi phí
+        log.warning("Không tra được model Sếp đã ghim cho Gen", exc_info=True)
+        return False
+
+
+def _tier_kw(router: Any, tier: str | None, effort: str | None, *, owner: bool = True,
+             temperature: float | None = None) -> dict[str, Any]:
+    """`tier` / `effort` / `owner` / `temperature` chỉ truyền cho bộ định tuyến NHẬN tham số đó (bộ giả của test cũ
+    không nhận; ModelRouter chưa có tham số này cũng không) — `ModelRouter.generate` thật luôn nhận cả bốn tham số.
+    Gói G: `owner=False` (nhân viên hỏi Gen) được truyền để bộ định tuyến không chạy Antigravity CLI; Owner (mặc
+    định) không cần truyền."""
+    want: dict[str, Any] = {k: v for k, v in (("tier", tier), ("effort", effort), ("temperature", temperature)) if v}
     if not owner:
         want["owner"] = False
     if not want:
@@ -574,7 +588,10 @@ async def _run(turn: Turn, *, app: Any, router: ModelRouter, session_token: str,
     elif intent.value == "data" and decmod.is_simple_question(inp.text):
         async with turn.sm() as db:
             options = await model_options(db, user.org_id, owner=is_owner)
-        if tier_available(options, "fast"):
+            # v0.1.66 (F006): Sếp đã ghim model cho Gen (dòng gán / "Dùng model này") ⇒ J3 không ép tầng — ép tầng đẩy
+            # model Sếp chọn xuống cuối chuỗi, câu ngắn vẫn chạy model khác mà không báo.
+            pinned = await _owner_pinned(db, user.org_id)
+        if tier_available(options, "fast") and not pinned:
             tier, route = ROUTER_TIER["fast"], "fast"
     await _log_decide(turn, intent, route)
     # v0.1.54 (g1-api): chỉ Owner, chỉ khi câu hỏi thuộc kiểu "em cần làm gì?" (so khớp tất định, không gọi model).
@@ -585,7 +602,9 @@ async def _run(turn: Turn, *, app: Any, router: ModelRouter, session_token: str,
     # Antigravity CLI dùng được cho mọi người hỏi và cả lượt đã đọc nội dung bên ngoài (luật F-22 đã gỡ); chỗ chạy theo
     # người hỏi (v0.1.63): Owner trong tiến trình, nhân viên qua hộp riêng. v0.1.55 (G3): tầng
     # / mức suy nghĩ đã chọn (hoặc J3 chọn Nhanh).
-    route_kw: dict[str, Any] = _tier_kw(router, tier, effort, owner=is_owner)
+    # v0.1.66 (F021): nhiệt độ của hồ sơ vai Gen (0,3) đi vào lượt gọi — trước đây `generate` luôn dùng mặc định 0,2.
+    route_kw: dict[str, Any] = _tier_kw(router, tier, effort, owner=is_owner,
+                                        temperature=profiles.role_temperature(AGENT_KEY))
     retried = False
     for _ in range(MAX_ROUNDS):
         try:
@@ -593,13 +612,16 @@ async def _run(turn: Turn, *, app: Any, router: ModelRouter, session_token: str,
                                            json_mode=True, **route_kw)
         except ModelUnavailable as e:
             down = e.no_chain is False
-            msg = MODEL_DOWN if down else NO_MODEL
+            no_key = down and bool(e.reasons) and all(REASON_NO_KEY in r for r in e.reasons)
+            msg = NO_KEY if no_key else MODEL_DOWN if down else NO_MODEL
             await turn.emit({"kind": "say", "text": msg.format(addr=turn.addr)})
             await turn.log("gen.answer", result="failed", target_type="model", reasons=e.reasons[:5])
-            if not down and registry.can_see(user.permissions, "api"):
+            if (not down or no_key) and registry.can_see(user.permissions, "api"):
                 await _ui(turn, validator, envelope.Navigate(type="navigate", screen="api"))
-                await _ui(turn, validator, envelope.Highlight(
-                    type="highlight", target="api.bindings", message="Chọn model cho dòng \"Gen — trợ lý quản trị\""))
+                if not no_key:
+                    await _ui(turn, validator, envelope.Highlight(
+                        type="highlight", target="api.bindings",
+                        message="Chọn model cho dòng \"Gen — trợ lý quản trị\""))
             return
         turn.model, turn.provider = routed.model, routed.provider
         try:

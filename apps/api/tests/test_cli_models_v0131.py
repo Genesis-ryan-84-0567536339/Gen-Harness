@@ -109,7 +109,8 @@ def test_build_groups_with_hints_and_fallback() -> None:
     assert [g["label"] for g in built["model_groups"]] == ["Gemini", "Claude (qua Antigravity)"]
     flash = built["model_groups"][0]["models"][0]
     assert flash["id"] == "gemini-3.8-flash" and flash["efforts"] == ["low"]
-    assert flash["tier"] == "fast" and flash["hint"] == "nhanh, rẻ"
+    # v0.1.66 (F025): MỘT bảng tầng — flash = Cân bằng (như hồ sơ chuẩn), "nhanh, rẻ" chỉ cho flash-lite / haiku…
+    assert flash["tier"] == "balanced" and flash["hint"] == "cân bằng"
     assert built["model_groups"][1]["models"][0]["tier"] == "strong"
     fb = catalog.build("antigravity_cli", [])
     assert fb["models_source"] == "catalog" and "gemini-3.8-flash" in fb["models"]
@@ -155,7 +156,8 @@ async def test_agy_models_grouped_probe_and_validated_choice(owner_api, clis) ->
     # v0.1.58: "Kiểm tra kết nối" xanh khi nguồn chưa có model ⇒ tự lưu model vừa gọi thử được (không đặt mặc định);
     # model Claude không nhận (422) thì KHÔNG được lưu thêm.
     names = [m["model_name"] for m in (await _provider(api, "antigravity_cli"))["models"]]
-    assert names == ["gemini-3.8-flash", "claude-sonnet-4-6-thinking"]
+    # v0.1.66 (F132): lưu sẵn mọi model agy liệt kê thật.
+    assert names == ["gemini-3.8-flash", "gemini-3.1-pro", "claude-sonnet-4-6-thinking"]
     # Sửa hạn mức của model ĐÃ có thì không gọi thử lại.
     r = await api.send("POST", f"/providers/{p['id']}/models",
                        {"model_name": "claude-sonnet-4-6-thinking", "daily_quota": 100})

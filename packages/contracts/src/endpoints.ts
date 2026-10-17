@@ -266,8 +266,11 @@ export function createEndpoints(client: ApiClient) {
       /** v0.1.31: nguồn CLI gọi thử model MỚI trước khi lưu (422 `model_name` khi CLI không nhận); `make_default` = "Dùng model này". */
       addModel: (
         id: string,
-        body: { model_name: string; daily_quota?: number; rate_limit_per_min?: number; make_default?: boolean; effort?: Effort | null },
+        // v0.1.66: hạn mức không gửi ⇒ máy chủ giữ hạn mức đã lưu; gửi `null` ⇒ bỏ hạn mức.
+        body: { model_name: string; daily_quota?: number | null; rate_limit_per_min?: number | null; make_default?: boolean; effort?: Effort | null; enabled?: boolean },
       ) => r<Provider>(`/providers/${enc(id)}/models`, { method: 'POST', body }),
+      /** v0.1.66 (F008): gỡ một model đã thêm nhầm (gỡ luôn dòng gán model trỏ vào nó). 409 `MODEL_HAS_CALLS` khi model còn lượt gọi trong 30 ngày — dùng `addModel(…, { enabled: false })` để tắt. */
+      removeModel: (id: string, mid: string) => r<void>(`/providers/${enc(id)}/models/${enc(mid)}`, { method: 'DELETE' }),
       /** v0.1.32 (chỉ Owner): chẩn đoán nguồn CLI — phiên bản, liệt kê model, một lượt gọi rất ngắn; đầu ra thô đã che. */
       diagnose: (id: string) => r<ProviderDiagnosis>(`/providers/${enc(id)}/diagnose`, { method: 'POST' }),
       credentials: (signal?: AbortSignal) => r<Credential[]>('/providers/credentials', { signal }),

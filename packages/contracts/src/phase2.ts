@@ -493,7 +493,11 @@ export interface ProviderModel {
   id: string;
   model_name: string;
   daily_quota: number | null;
+  /** v0.1.66: giới hạn lượt/phút (null = không giới hạn) — đặt ở thẻ nhà cung cấp, "Quản lý khoá và model". */
+  rate_limit_per_min?: number | null;
   used_today: number;
+  /** Review v0.1.66 (P2-2): model đang bật; `false` = đã "Tắt model" (ngừng dùng, giữ lịch sử chi phí). Thiếu = bật. */
+  enabled?: boolean;
   /** v0.1.31: model mặc định của nguồn ("Dùng model này"). */
   is_default?: boolean;
   /** v0.1.32: mức suy nghĩ đã lưu (nguồn CLI); null = để CLI tự chọn. */
