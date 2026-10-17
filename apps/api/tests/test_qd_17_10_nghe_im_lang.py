@@ -20,7 +20,6 @@ from tests.conftest import Api, verify_pin
 from tests.phase2 import msg, org_id, put
 from tests.test_p3_duty import BUY, agent_drafts, decide, decisions, hook, make_agent, refine, w  # noqa: F401
 
-
 # ─── nhóm mới mặc định silent ────────────────────────────────────────────────────────────────────────────────────
 
 async def test_qd1710_directory_and_discovered_default_silent_for_every_channel(app, db, redis) -> None:  # type: ignore[no-untyped-def]
