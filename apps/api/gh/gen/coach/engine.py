@@ -44,7 +44,7 @@ class Prefs:
     enabled: bool = True
     bell: bool = True
     lessons_per_day: int = 1
-    quiet_start: int = 22
+    quiet_start: int = 21   # QD-20 (Sếp duyệt 10/10): yên lặng 21:00–07:00 (v0.1.54 từng đặt 22 — F121)
     quiet_end: int = 7
     snooze_until: datetime | None = None
     stable_since: datetime | None = None

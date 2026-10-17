@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { ApiError, SCREEN_BY_KEY, type RawItem, type RawQuery, type RawState, type RefineryProgress, type Since } from '@gen-harness/contracts';
+import { ApiError, EVENT_TYPES, NOISE_CODE, SCREEN_BY_KEY, eventTypeLabel, type RawItem, type RawQuery, type RawState, type RefineryProgress, type Since } from '@gen-harness/contracts';
 import { Button, EmptyState, FilterSelect, Icon, Skeleton, type FilterOption } from '@gen-harness/ui';
 import { api } from '../../lib/api';
 import { qk2, usePipeline, useRawByGroup, useRawList, useRuns, useSchedule } from '../../lib/dataQueries';
@@ -39,7 +39,8 @@ const CONF_OPTIONS: FilterOption[] = [
   { value: '0.6', label: '≥ 0,6' },
   { value: '0.8', label: '≥ 0,8' },
 ];
-const KNOWN_LABELS = ['AskedPrice', 'OfferedSupply', 'Complained', 'MentionsCompetitor', 'SentDocument', 'JobSignal', 'PromisedDelivery', 'WentSilent', 'Noise'];
+// v0.1.69 (F062): bộ lọc nhãn liệt kê đủ 15 loại + tin rác, hiện tên tiếng Việt (giá trị gửi lên vẫn là mã).
+const KNOWN_LABELS = [...EVENT_TYPES.map((e) => e.code), NOISE_CODE];
 
 export function RawScreen() {
   const meta = SCREEN_BY_KEY.raw;
@@ -107,7 +108,7 @@ export function RawScreen() {
     const set = new Set(KNOWN_LABELS);
     rows.forEach((r) => r.label && set.add(r.label));
     if (label) set.add(label);
-    return [{ value: '', label: 'Tất cả' }, ...[...set].map((l) => ({ value: l, label: l }))];
+    return [{ value: '', label: 'Tất cả' }, ...[...set].map((l) => ({ value: l, label: eventTypeLabel(l) }))];
   }, [rows, label]);
 
   const exportCsv = useMutation({
@@ -311,7 +312,7 @@ function RawRow({ row, tz, fresh }: { row: RawItem; tz: string; fresh: boolean }
       <td className="td-text min300">
         <div className="clamp2">{row.text}</div>
       </td>
-      <td>{row.label ? <span className="mono-tag" style={row.label === 'Noise' ? { color: N5 } : undefined}>{row.label}</span> : <span className="td-id">—</span>}</td>
+      <td>{row.label ? <span className="mono-tag" style={row.label === NOISE_CODE ? { color: N5 } : undefined}>{eventTypeLabel(row.label)}</span> : <span className="td-id">—</span>}</td>
       <td className="td-conf" style={{ color: confidenceTone(row.confidence) }}>
         {fmtConfidence(row.confidence)}
       </td>

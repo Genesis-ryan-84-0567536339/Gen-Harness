@@ -308,7 +308,7 @@ async def test_reminder_ws_events_only_after_outer_commit(owner_api: Api, monkey
     pushed: list[str] = []
 
     async def fake_publish(redis: Any, batch: Any) -> None:
-        pushed.extend(it["title"] for _, _, it in batch)
+        pushed.extend(it["title"] for _, _, _, it in batch)
 
     async def flaky(db: Any, org: Any, to: Any, **kw: Any) -> Any:
         if "Hỏng" in kw["title"]:

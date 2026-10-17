@@ -241,7 +241,7 @@
       "id": "boss_checks.row.agy",
       "screen": "boss_checks",
       "label": "Dòng 3 \"Google (Antigravity)\"",
-      "description": "Dòng 3 của Việc Sếp cần làm: đăng nhập hai tài khoản Google, gọi thử và đổi qua lại",
+      "description": "Dòng 3 của Việc Sếp cần làm: đăng nhập tài khoản Google rồi bấm Gọi thử",
       "dynamic": null,
       "params": null
     },
@@ -708,7 +708,7 @@
       "id": "mcp.hub_link",
       "screen": "connections",
       "label": "Thẻ \"Gen-hub\"",
-      "description": "Nối Gen-hub để Gen đọc Kho dữ liệu, lịch, mail, việc, Drive (chỉ đọc, chỉ Sếp): địa chỉ, token, hạn token, trạng thái",
+      "description": "Nối Gen-hub để Gen đọc Kho dữ liệu, lịch, mail, việc, Drive (đọc; ghi Kho chỉ khi Sếp Xác nhận + mã PIN; chỉ Sếp thao tác): địa chỉ, token, hạn token, trạng thái",
       "dynamic": null,
       "params": null,
       "permission": "system.manage"

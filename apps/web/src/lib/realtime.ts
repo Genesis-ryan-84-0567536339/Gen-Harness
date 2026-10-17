@@ -395,6 +395,12 @@ export function applyEvent(qc: QueryClient, e: RealtimeEvent): void {
       if (!qc.getQueryData(qk.notifications)) void qc.invalidateQueries({ queryKey: qk.notifications });
       return;
     }
+    case 'notification.resolved': {
+      // v0.1.69: sự cố đóng ⇒ chuông đã đọc / "Đã xử lý". Chuông có thể nằm ngoài 20 mục đầu (danh sách "Xem thêm"), số chưa
+      // đọc cũng đổi ⇒ tải lại cả hai (khoá con `all` nằm dưới `qk.notifications`).
+      void qc.invalidateQueries({ queryKey: qk.notifications });
+      return;
+    }
     default:
       return;
   }

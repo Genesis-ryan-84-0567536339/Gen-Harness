@@ -276,6 +276,44 @@ async def test_budget_bell_once_per_day(owner_api: Api, redis: Any) -> None:
     assert (await _alert()).cleared_at is not None
 
 
+async def _budget_bell_flags() -> list[tuple[bool, bool]]:
+    async with admin_sessionmaker()() as s:
+        return [(r.read, r.resolved) for r in (await s.execute(text("""
+            SELECT read_at IS NOT NULL AS read, resolved_at IS NOT NULL AS resolved FROM core.notifications
+            WHERE kind = 'ai.budget_exceeded' ORDER BY created_at"""))).all()]
+
+
+async def test_budget_bell_new_day_reads_without_resolved_label(owner_api: Api, redis: Any) -> None:
+    """Review P3: sang ngày mới tổng chi về 0 ⇒ sự cố tự hết, KHÔNG phải Sếp xử lý ⇒ chuông được đọc nhưng không gắn
+    "Đã xử lý". Sếp nâng/bỏ trần ngay trong ngày thì mới là "Đã xử lý"."""
+    org = await _org()
+    async with admin_sessionmaker()() as db:
+        (m1,) = await _provider(db, org, "openai_compat", "OpenRouter", ["m1"])
+        await _price(db, org, m1, 10_000, 0)
+        await _call(db, org, m1, "core.gen", _utc(2026, 9, 15, 3), 150_000, 0)  # 1.500 ₫ ngày 15/09
+        await db.commit()
+    await owner_api.send("PUT", "/system/ai-cost/budget", {"daily_budget_vnd": 1_000})
+    await _evaluate(redis, org, _utc(2026, 9, 15, 10))  # 17:00 VN 15/09: vượt trần
+    assert await _budget_bell_flags() == [(False, False)]
+    await _evaluate(redis, org, _utc(2026, 9, 16, 3))  # 10:00 VN 16/09: ngày mới, chưa tiêu gì
+    assert (await _alert()).cleared_at is not None
+    assert await _budget_bell_flags() == [(True, False)]
+
+
+async def test_budget_bell_raised_budget_same_day_is_resolved(owner_api: Api, redis: Any) -> None:
+    org = await _org()
+    async with admin_sessionmaker()() as db:
+        (m1,) = await _provider(db, org, "openai_compat", "OpenRouter", ["m1"])
+        await _price(db, org, m1, 10_000, 0)
+        await _call(db, org, m1, "core.gen", _utc(2026, 9, 15, 3), 150_000, 0)
+        await db.commit()
+    await owner_api.send("PUT", "/system/ai-cost/budget", {"daily_budget_vnd": 1_000})
+    await _evaluate(redis, org, _utc(2026, 9, 15, 10))
+    await owner_api.send("PUT", "/system/ai-cost/budget", {"daily_budget_vnd": 5_000})
+    await _evaluate(redis, org, _utc(2026, 9, 15, 11))
+    assert await _budget_bell_flags() == [(True, True)]
+
+
 def test_actions_labels() -> None:
     assert health.ACTIONS["ai.budget_exceeded"] == "Xem chi phí AI"
     assert health.ACTIONS["ai.background_no_source"] == "Mở Bộ não AI"

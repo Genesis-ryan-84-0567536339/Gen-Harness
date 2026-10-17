@@ -39,7 +39,10 @@ OLD_NOTE = _OLD_NOTE_MATCH.group(1)
 _OLD_NAME_MATCH = re.search(r"Gen đọc (.+?), lịch", OLD_NOTE)
 assert _OLD_NAME_MATCH is not None
 OLD_NAME = _OLD_NAME_MATCH.group(1)
+# Ghi chú ĐÍCH của migration 0035 (còn "(chỉ đọc)"); v0.1.69 (F124, migration 0040) đổi sang `CURRENT_NOTE` bên dưới.
 NEW_NOTE = "Liên kết Gen-hub — Gen đọc Kho dữ liệu, lịch, mail, việc, Drive (chỉ đọc). Quản lý ở thẻ Gen-hub."
+CURRENT_NOTE = ("Liên kết Gen-hub — Gen đọc Kho dữ liệu, lịch, mail, việc, Drive "
+                "(đọc; ghi Kho chỉ khi Sếp Xác nhận + mã PIN). Quản lý ở thẻ Gen-hub.")
 
 _CHECK_PATH = ROOT / ".github" / "scripts" / "check_no_personal_info.py"
 _spec = importlib.util.spec_from_file_location("check_no_personal_info", _CHECK_PATH)
@@ -58,7 +61,7 @@ def _private_patterns() -> list[re.Pattern[str]]:
 def test_kho_label_is_single_generic_name() -> None:
     assert KHO_LABEL == "Kho dữ liệu"
     assert hub.KHO_LABEL is KHO_LABEL
-    assert hub.SERVER_NOTE == NEW_NOTE
+    assert hub.SERVER_NOTE == CURRENT_NOTE
     assert hub.source_of("kho_get") == "Kho dữ liệu qua Gen-hub"
     assert hub.source_of("gmail_search") == "Gmail qua Gen-hub"          # nguồn khác không đổi
 
@@ -113,7 +116,7 @@ def test_general_rules_catch_real_email_and_mcp_host_without_private_patterns(tm
 async def test_new_link_stores_generic_note(owner_api: Api, fake_hub: FakeHub) -> None:  # noqa: F811
     await _configure(owner_api)
     assert OLD_NAME not in await _db_text("SELECT name, note FROM agent.mcp_servers")
-    assert NEW_NOTE in await _db_text("SELECT note FROM agent.mcp_servers WHERE name = 'Gen-hub'")
+    assert CURRENT_NOTE in await _db_text("SELECT note FROM agent.mcp_servers WHERE name = 'Gen-hub'")
 
 
 async def test_migration_0035_updates_old_note_only_and_is_rerunnable(owner_api: Api, db: Any, fresh_db: str) -> None:

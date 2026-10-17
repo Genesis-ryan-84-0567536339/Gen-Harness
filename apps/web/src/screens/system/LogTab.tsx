@@ -73,7 +73,7 @@ export function LogTab() {
   if (!canRead) {
     return (
       <div className="gh-card">
-        <EmptyState icon="ph ph-lock-simple" title="Vai trò của bạn không xem được Nhật ký" description="Nhật ký hành động chỉ hiện với vai trò có quyền xem — Quản lý chỉ thấy nhật ký team mình." />
+        <EmptyState icon="ph ph-lock-simple" title="Vai trò của bạn không xem được Nhật ký" description="Nhật ký hành động chỉ hiện với vai trò có quyền xem — Quản lý chỉ thấy nhật ký các thao tác của chính mình." />
       </div>
     );
   }

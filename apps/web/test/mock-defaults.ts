@@ -41,7 +41,7 @@ function seedRows(): Row[] {
   });
   return [
     mk('gen', 'Gen — vai trò dùng và số ngày giữ hội thoại', 'Gen', 'Gen dùng được cho chỉ Owner · giữ hội thoại 90 ngày', 'Gen dùng được cho vai trò: owner, manager · giữ hội thoại 30 ngày'),
-    mk('coach', 'Gen hướng dẫn — tuỳ chọn của Sếp', 'Gen', 'Gen hướng dẫn bật · chuông bật · 1 bài mỗi ngày · yên lặng 22h–7h', 'Gen hướng dẫn bật · chuông tắt · 2 bài mỗi ngày · yên lặng 22h–7h', { scope: 'user' }),
+    mk('coach', 'Gen hướng dẫn — tuỳ chọn của Sếp', 'Gen', 'Gen hướng dẫn bật · chuông bật · 1 bài mỗi ngày · yên lặng 21h–7h', 'Gen hướng dẫn bật · chuông tắt · 2 bài mỗi ngày · yên lặng 21h–7h', { scope: 'user' }),
     // e2e: bấm "Về mặc định" ở thẻ Lọc tin ngay từ đầu.
     mk('triage', 'Lọc tin', 'Bộ não AI', 'Lọc tin bật · ngưỡng điểm 30 · có dùng Jev', 'Lọc tin bật · ngưỡng điểm 55 · có dùng Jev', { customized: true, current_text: 'Lọc tin bật · ngưỡng điểm 55 · có dùng Jev' }),
     mk('refinery.schedule', 'Lịch sàng lọc tin', 'Bộ não AI', 'Sàng lọc mỗi 15 phút hoặc khi đủ 500 tin · mỗi lô 250 tin · độ tin cậy tối thiểu 0,6', 'Sàng lọc mỗi 5 phút hoặc khi đủ 100 tin · mỗi lô 50 tin · độ tin cậy tối thiểu 0,8'),

@@ -326,6 +326,17 @@ describe('bước 10 — thẻ gợi ý có nút "Để sau"', () => {
 });
 
 describe('bước 11 — sao lưu tự bật hằng ngày 02:00, giữ 7 bản', () => {
+  it.each(['done', 'skipped'] as const)('đã %s ⇒ lịch đã ghi ⇒ "Sao lưu đã tự bật"', (status) => {
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <Step11Backup {...baseProps(11)} status={status} onSaved={vi.fn()} onSkip={() => {}} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(screen.getByTestId('step11-default')).toHaveTextContent('Sao lưu đã tự bật');
+  });
+
   it('ghi chú "đã tự bật"; lịch đổi nằm trong "Đổi lịch" (đóng sẵn); Tiếp tục gửi mặc định daily/02:00/7/local', async () => {
     const user = userEvent.setup();
     const calls = stub((c) => (c.url.endsWith('/setup/steps/11') && c.method === 'PUT' ? json(200, { ...stateAt(12, [1, 2, 3, 4, 11]), backup: { frequency: 'daily', time_of_day: '02:00', retention_count: 7, destination: 'local' } }) : undefined));
@@ -338,8 +349,10 @@ describe('bước 11 — sao lưu tự bật hằng ngày 02:00, giữ 7 bản',
       </QueryClientProvider>,
     );
     const note = screen.getByTestId('step11-default');
-    expect(note).toHaveTextContent('Sao lưu đã tự bật');
-    expect(note).toHaveTextContent('Hằng ngày lúc 02:00, giữ 7 bản gần nhất');
+    // v0.1.69 (F103): chưa bấm Tiếp tục/Để sau thì lịch CHƯA được ghi ⇒ không nói "đã tự bật".
+    expect(note).toHaveTextContent('Sao lưu sẽ tự bật khi Sếp đi tiếp');
+    expect(note).not.toHaveTextContent('Sao lưu đã tự bật');
+    expect(note).toHaveTextContent('Hằng ngày lúc 02:00, giữ 7 bản theo ngày, 4 theo tuần, 12 theo tháng');
     expect(screen.getByText('Đổi lịch (không bắt buộc)').closest('details')).not.toHaveAttribute('open');
     expect(screen.getByLabelText('Giờ chạy (HH:MM)')).toHaveValue('02:00');
     expect(screen.getByRole('button', { name: 'Để sau' })).toBeInTheDocument(); // "Để sau" vẫn ghi lịch mặc định (máy chủ)

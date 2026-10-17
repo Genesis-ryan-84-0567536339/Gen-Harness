@@ -97,7 +97,9 @@ export type UpdateView =
       steps: Array<{ label: string; state: StepState }>;
     };
 
-const RECENT_MS = 24 * 3600 * 1000;
+/** Lỗi cập nhật còn hiện trong 26 giờ (khớp UPDATE_FAILED_RECENT của API): lịch đêm 03:00 + trễ ngẫu nhiên tới 30 phút ⇒ hai lần
+ * thử liền nhau cách tới 24 giờ 30 phút; hạn 24 giờ làm thẻ biến mất rồi hiện lại giữa hai lần. */
+const RECENT_MS = 26 * 3600 * 1000;
 /** Thời gian chín của lịch tự cập nhật đêm (genh `selfupdate.NightlyMinAge`): chỉ cài bản đã là bản chính thức ≥ 24 giờ. */
 export const NIGHTLY_MIN_AGE_MS = 24 * 3600 * 1000;
 

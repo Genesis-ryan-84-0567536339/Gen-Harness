@@ -106,10 +106,10 @@ async def evaluate_alerts(db: AsyncSession, org_id: uuid.UUID, redis: Redis | No
                      "(Sếp tự đăng nhập, tự xử lý xác minh nếu có).",
                 link="/social", fingerprint=r.pause_reason or r.status, redis=redis)
         else:
-            await health.clear(db, org_id, key)
+            await health.clear(db, org_id, key, redis=redis)
     open_keys = (await db.execute(text("""SELECT key FROM ops.health_alerts
                                           WHERE org_id = :o AND cleared_at IS NULL AND key LIKE 'social.session:%'"""),
                                   {"o": org_id})).scalars().all()
     for key in open_keys:
         if key not in bad:
-            await health.clear(db, org_id, key)
+            await health.clear(db, org_id, key, redis=redis)

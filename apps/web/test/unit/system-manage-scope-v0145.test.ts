@@ -17,7 +17,7 @@ describe('system.manage chỉ tính ở phạm vi all', () => {
     expect(scopeOptionsFor('system.manage', 'all').map((o) => o.value)).toEqual(['all', 'none']);
     const legacy = scopeOptionsFor('system.manage', 'team');
     expect(legacy.map((o) => o.value)).toEqual(['all', 'none', 'team']);
-    expect(legacy[2]).toMatchObject({ disabled: true, label: 'Theo team (không có tác dụng)' });
+    expect(legacy[2]).toMatchObject({ disabled: true, label: 'Việc được giao (không có tác dụng)' });
     expect(scopeOptionsFor('queue.read', 'team').map((o) => o.value)).toEqual(['all', 'team', 'assigned', 'none']);
   });
 });

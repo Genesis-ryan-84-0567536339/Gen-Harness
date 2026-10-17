@@ -1364,8 +1364,9 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     }
     if (path === '/notifications' && method === 'GET') {
       const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit') ?? 20)));
+      const offset = Math.max(0, Number(url.searchParams.get('offset') ?? 0));
       const list = notifsOf(user.id);
-      return reply(200, { items: list.slice(0, limit), unread: list.filter((n) => !n.read).length });
+      return reply(200, { items: list.slice(offset, offset + limit), unread: list.filter((n) => !n.read).length, total: list.length });
     }
     if (path === '/notifications/read' && method === 'POST') {
       const ids = Array.isArray(body.ids) ? (body.ids as string[]) : null;

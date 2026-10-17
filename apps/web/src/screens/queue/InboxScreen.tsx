@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { InboxItem, InboxTab } from '@gen-harness/contracts';
+import { EVENT_INTENT_OPTIONS, type InboxItem, type InboxTab } from '@gen-harness/contracts';
 import { Button, Card, Dialog, EmptyState, FilterSelect, Skeleton, Switch, Tabs, Tag, TextField, Tooltip, type TabItem } from '@gen-harness/ui';
 import { WhyButton } from '../core/Evidence';
 import { DataEmptyState } from '../DataEmptyState';
@@ -13,17 +13,8 @@ import { itemTag, itemTagTone, priorityTone, triageBadges } from './queueModel';
 import { LoadMore } from './LoadMore';
 import { useInbox, useInboxAct, useInboxAssign, useInboxSilence } from './queries';
 
-const INTENT_OPTIONS = [
-  { value: '', label: 'Tất cả' },
-  { value: 'AskedPrice', label: 'Hỏi giá' },
-  { value: 'OfferedSupply', label: 'Chào bán' },
-  { value: 'RequestedPartnership', label: 'Đề nghị hợp tác' },
-  { value: 'Complained', label: 'Than phiền' },
-  { value: 'ScheduledMeeting', label: 'Hẹn gặp' },
-  { value: 'SentQuotation', label: 'Đã gửi báo giá' },
-  { value: 'PromisedDelivery', label: 'Cam kết giao hàng' },
-  { value: 'MentionsCompetitor', label: 'Nhắc đối thủ' },
-];
+// v0.1.69 (F062): đủ 15 loại, một bảng chung (contracts `eventTypes.ts`) — trước đây chỉ 8 loại, tự khai ở đây.
+const INTENT_OPTIONS = [...EVENT_INTENT_OPTIONS];
 
 export function InboxScreen() {
   const [tab, setTab] = useUrlState<InboxTab>('tab', 'all');
