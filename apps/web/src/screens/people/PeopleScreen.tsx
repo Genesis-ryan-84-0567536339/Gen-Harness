@@ -25,7 +25,7 @@ import { useClearSuspicious, useOpenDispute, useResolveDispute, useReview, useRe
 export function PeopleScreen() {
   const [board, setBoard] = useUrlState<ReviewBoard>('board', 'employee');
   const q = useReviews({ board, limit: 100 });
-  const canRules = !!findActive(useNavigation().data, 'rules');
+  const canDirectory = !!findActive(useNavigation().data, 'directory');
   const [detailId, setDetailId] = useState<string | null>(null);
 
   const tabs: TabItem<ReviewBoard>[] = REVIEW_BOARD_LIST.map((b) => ({ key: b, label: BOARD_LABEL[b] }));
@@ -58,7 +58,7 @@ export function PeopleScreen() {
               ? `Đánh giá tự động chấm hằng ngày cho nhân viên có trả lời tin trong kỳ 7 ngày gần nhất đã trọn vẹn. ${STAFF_HOWTO}`
               : 'Đánh giá tự động chấm hằng ngày cho người có trả lời tin trong kỳ 7 ngày gần nhất đã trọn vẹn.'
           }
-          actions={board === 'employee' && canRules ? <Link to="/rules">Mở Quy tắc sàng lọc</Link> : null}
+          actions={board === 'employee' && canDirectory ? <Link to="/directory">Mở Khách &amp; Nhóm</Link> : null}
         />
       ) : (
         <div className="ppl-rows">
