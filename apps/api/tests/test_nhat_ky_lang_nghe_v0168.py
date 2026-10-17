@@ -452,6 +452,23 @@ async def test_auditor_sees_group_rows_masked_but_not_direct_unless_assigned(own
     assert any(i["kind"] == "event" and i["event_type"] == "direct_new" for i in items)
 
 
+async def test_search_cannot_probe_masked_numbers_written_in_unicode_digits(owner_api: Api, client, db) -> None:  # type: ignore[no-untyped-def]
+    """Review Opus P3: `mask_text` (Python `\\d`) che cả chữ số toàn chiều rộng / Ả Rập–Ấn Độ; bộ lọc tìm chữ ở
+    PostgreSQL cũng phải bỏ chúng, không thì vai dưới Owner dò được số đã che bằng chính chữ số đó."""
+    org = await org_id(db)
+    await listen(db, org, "g1", mode="silent")
+    full = "０９１２３４５６７８"                      # toàn chiều rộng
+    arab = "٠٩١٢٣٤٥٦٧٨"                              # Ả Rập–Ấn Độ
+    await put(sessionmaker(), org, msg(f"Số tài khoản {full} nhé"), msg(f"Số điện thoại {arab} nhé"))
+    aud = await login_as(client, db, "auditor")
+    shown = " ".join(i["text"] or "" for i in (await _log(aud))["items"] if i["kind"] == "message")
+    assert full not in shown and arab not in shown and "•" in shown
+    assert (await _log(aud, f"?q={full}"))["items"] == []
+    assert (await _log(aud, f"?q={arab}"))["items"] == []
+    assert len((await _log(aud, "?q=Số tài khoản"))["items"]) == 1               # chữ thường vẫn tìm được
+    assert len((await _log(owner_api, f"?q={full}"))["items"]) == 1              # Owner thì tìm được
+
+
 async def test_group_scope_limits_rows_for_scoped_role(owner_api: Api, client, db) -> None:  # type: ignore[no-untyped-def]
     """Vai có `data.read` phạm vi `assigned` chỉ thấy nhóm được giao (cả tin lẫn sự kiện); sự kiện cả kênh bị ẩn."""
     org = await org_id(db)

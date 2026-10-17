@@ -12,6 +12,7 @@ làm gì" (sàng lọc, quyết định của agent trực, bản nháp ở Bàn
 """
 
 import re
+import unicodedata
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
@@ -36,7 +37,24 @@ READ = require("data.read")
 
 #: Số dài (≥ 8 chữ số) mà `mask_text` che — dạng PostgreSQL. Dùng để BỎ khỏi chuỗi tìm kiếm của vai dưới Owner; mẫu này
 #: khớp rộng hơn một chút so với mẫu Python (có thể bỏ thừa, không bao giờ bỏ thiếu) nên không lộ số bị che.
-_LONGNUM_PG = r"(?<![0-9])[0-9][0-9 .-]{7,22}[0-9](?![0-9])"
+def _nd_class() -> str:
+    """Mọi chữ số Unicode (loại Nd) dạng lớp ký tự regex — đúng tập mà `\\d` của Python (`mask_text`) coi là chữ số,
+    kể cả số Ả Rập–Ấn Độ, số toàn chiều rộng…; `[0-9]` / `[[:digit:]]` của PostgreSQL chỉ khớp ASCII nên người xem dò
+    được số đã che bằng chữ số Unicode. Dựng từ `unicodedata` lúc nạp mô-đun để hai bên luôn khớp nhau."""
+    out: list[str] = []
+    start: int | None = None
+    for c in range(0x110000 + 1):
+        nd = c < 0x110000 and unicodedata.category(chr(c)) == "Nd"
+        if nd and start is None:
+            start = c
+        elif not nd and start is not None:
+            out.append(chr(start) if start == c - 1 else f"{chr(start)}-{chr(c - 1)}")
+            start = None
+    return "".join(out)
+
+
+_ND = _nd_class()
+_LONGNUM_PG = rf"(?<![{_ND}])[{_ND}][{_ND} .-]{{7,22}}[{_ND}](?![{_ND}])"
 _CURSOR_RE = re.compile(r"^(\d{1,20})_([0-9a-fA-F-]{36})$")
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 MAX_TEXT = 400
