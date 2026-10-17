@@ -252,6 +252,10 @@ def test_client_ip_trusts_local_proxy_only_when_bound_to_loopback(monkeypatch: p
 
     monkeypatch.setattr(get_settings(), "access_mode", mode)
     monkeypatch.setattr(get_settings(), "bind_addr", bind)
+    monkeypatch.setattr(get_settings(), "trusted_proxies", "172.18.0.1")   # kết nối từ Caddy (review v0.1.63, P3)
+    from gh.auth import deps
+
+    deps.reset_trusted_proxy_cache()
     assert client_ip(_req(headers)) == want
 
 

@@ -1,7 +1,10 @@
 """Dependency FastAPI: người dùng hiện tại, CSRF, quyền, phiên PIN."""
 
 import ipaddress
+import socket
+import time
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from fastapi import Depends, Request
 from sqlalchemy import text
@@ -50,14 +53,67 @@ def _local_proxy_ip(request: Request) -> str | None:
     return None
 
 
+_TRUST_TTL_S = 30.0
+_LOOPBACK = (ipaddress.ip_network("127.0.0.0/8"), ipaddress.ip_network("::1/128"))
+_trust_cache: dict[str, tuple[float, tuple[Any, ...]]] = {}
+
+
+def reset_trusted_proxy_cache() -> None:
+    _trust_cache.clear()
+
+
+def _resolve(host: str) -> list[str]:
+    return [str(i[4][0]) for i in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)]
+
+
+def _trusted_networks() -> tuple[Any, ...]:
+    """Mạng tin cậy để đọc header chuyển tiếp: loopback + `Settings.trusted_proxies` (IP / CIDR / tên dịch vụ). Tên
+    được phân giải lại mỗi 30 giây (proxy tạo lại đổi IP); không phân giải được ⇒ chỉ loopback (đóng an toàn)."""
+    raw = get_settings().trusted_proxies
+    now = time.monotonic()
+    hit = _trust_cache.get(raw)
+    if hit is not None and now - hit[0] < _TRUST_TTL_S:
+        return hit[1]
+    nets: list[Any] = list(_LOOPBACK)
+    for item in (x.strip() for x in raw.split(",")):
+        if not item:
+            continue
+        try:
+            nets.append(ipaddress.ip_network(item, strict=False))
+            continue
+        except ValueError:
+            pass
+        try:
+            nets += [ipaddress.ip_network(ip) for ip in _resolve(item)]
+        except (OSError, ValueError):
+            continue
+    out = tuple(nets)
+    _trust_cache[raw] = (now, out)
+    return out
+
+
+def _from_trusted_proxy(peer: str | None) -> bool:
+    ip = _valid_ip(peer)
+    if ip is None:
+        return False
+    addr = ipaddress.ip_address(ip)
+    return any(addr.version == n.version and addr in n for n in _trusted_networks())
+
+
 def client_ip(request: Request) -> str | None:
+    """IP người dùng. Review v0.1.63 (P3): header chuyển tiếp CHỈ được đọc khi kết nối đến từ proxy tin cậy
+    (`Settings.trusted_proxies`, mặc định Caddy) hoặc loopback (gọi nội bộ ASGI); kết nối khác (vd hộp agy trên mạng
+    agy-bus gọi thẳng api:8000) ⇒ IP kết nối thật, header bị bỏ qua."""
+    peer = request.client.host if request.client else None
+    if not _from_trusted_proxy(peer):
+        return peer
     real = _local_proxy_ip(request)
     if real:
         return real
     fwd = request.headers.get("x-forwarded-for")
     if fwd:
         return fwd.split(",")[0].strip()
-    return request.client.host if request.client else None
+    return peer
 
 
 async def optional_user(request: Request, db: AsyncSession = DB) -> service.CurrentUser | None:

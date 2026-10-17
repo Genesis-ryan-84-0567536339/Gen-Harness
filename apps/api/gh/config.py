@@ -70,6 +70,10 @@ class Settings(BaseSettings):
     # Rỗng/khác (chạy ngoài compose, LAN) ⇒ không tin thêm header nào.
     access_mode: str = ""
     bind_addr: str = ""
+    # Review v0.1.63 (P3): chỉ tin header chuyển tiếp (X-Forwarded-For, X-Gh-Upstream-Xff, Cf-Connecting-IP) khi kết nối
+    # đến từ các địa chỉ này (IP, CIDR hoặc tên dịch vụ compose — phân giải lại mỗi 30 giây) hoặc loopback. Mặc định
+    # "proxy" = Caddy của compose; hộp agy (agy-bus) và dịch vụ khác gọi thẳng api:8000 không giả được IP.
+    trusted_proxies: str = "proxy"
     pin_session_minutes: int = 30
     pin_max_attempts: int = 5
     pin_lock_minutes: int = 15
