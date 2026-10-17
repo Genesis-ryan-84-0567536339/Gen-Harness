@@ -355,6 +355,19 @@ describe('Kết nối › Telegram (thẻ)', () => {
     expect(puts[puts.length - 1].body).toEqual({ enabled: true, briefing: false, reminders: true });
   });
 
+  it('v0.1.70 (P3): đang Tạm dừng rồi Đổi token/chat_id → Lưu KHÔNG tự bật lại (giữ enabled:false); thẻ vẫn "đang tắt"', async () => {
+    const { calls } = go({ config: { ...SAVED, enabled: false } });
+    renderCard();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Đổi token/chat_id' }));
+    await user.click(screen.getByRole('switch', { name: 'Gửi nhắc việc' }));
+    await user.click(screen.getByRole('button', { name: 'Lưu' }));
+    expect(await screen.findByTestId('telegram-target')).toHaveTextContent('đang tắt');
+    const puts = calls.filter((c) => c.method === 'PUT');
+    expect(puts[puts.length - 1].body).toEqual({ enabled: false, briefing: true, reminders: false });
+    expect(screen.getByRole('button', { name: 'Bật lại' })).toBeInTheDocument();
+  });
+
   it('Trực canh máy chủ gửi lỗi (failed) → câu theo mã + Chi tiết kỹ thuật; dòng tin thử từ máy chủ; Gửi thử không hứa tin thứ hai', async () => {
     go({
       config: {

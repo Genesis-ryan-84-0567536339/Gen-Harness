@@ -144,7 +144,8 @@ function SetupForm({ t, onDone, onCancel }: { t: TelegramConfig | null; onDone: 
     const needChat = !configured && !cid;
     setChatError(needChat ? 'Chọn một chat ở "Tìm chat_id" hoặc nhập chat_id.' : null);
     if (tok === false || needChat) return;
-    const body: TelegramSaveBody = { enabled: true, briefing, reminders };
+    // Chưa cấu hình ⇒ nối mới = bật; đã cấu hình ⇒ GIỮ trạng thái hiện tại (đang Tạm dừng rồi sửa token không tự bật lại).
+    const body: TelegramSaveBody = { enabled: configured ? t?.enabled === true : true, briefing, reminders };
     if (cid) body.chat_id = cid;
     if (tok) body.token = tok;
     save.mutate(body);
