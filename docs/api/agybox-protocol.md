@@ -98,7 +98,8 @@ st = await box_status()          # cache 10 giây; không tham số = đọc GH_
   chưa bật) — token có quyền của tài khoản Google đó trong phạm vi OAuth agy xin. Gợi ý: dùng **một tài khoản Google riêng** cho Antigravity (không phải
   tài khoản Gmail/Drive chính của Sếp), và thu hồi phiên ở myaccount.google.com › Bảo mật nếu nghi lộ.
 - **HOME tạm mỗi lượt (gói sửa review, P1-1)**: mọi lượt agy — trong hộp lẫn trong tiến trình api/worker — chạy với HOME là thư mục mới 0700
-  (`clients.make_turn_home`, xoá sau lượt) chỉ chứa tệp token; không chép `settings.json`/`mcp`/`customizations`/lịch sử. Cấu hình agy là mặc
+  (`clients.make_turn_home`, xoá sau lượt) chỉ chứa tệp token, và `TMPDIR` là thư mục riêng trong HOME tạm đó (kiểm thật: agy ghi bộ đệm
+  `unleash-repo-schema-…json` vào thư mục tạm của hệ thống — dùng chung giữa các lượt nếu để `/tmp`); không chép `settings.json`/`mcp`/`customizations`/lịch sử. Cấu hình agy là mặc
   định của bản cài (chưa sinh `settings.json` an toàn từ mã: tên/giá trị khoá chưa kiểm được trên phiên thật — Nợ). Trong tiến trình, token agy
   làm mới được chép ngược về kho phiên bởi `clients.sync_token_back`: chỉ đúng tệp token, đối tượng JSON ≤ 64 KiB, cùng email (id_token) với bản
   đã đưa vào, dưới `flock`, so-và-đổi (tệp trong kho phải còn đúng bản đã đưa vào), tệp tạm `O_EXCL|O_NOFOLLOW` + `rename`. Lượt trong cửa sổ làm

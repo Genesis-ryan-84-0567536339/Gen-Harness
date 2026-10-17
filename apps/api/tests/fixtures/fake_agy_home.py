@@ -1,6 +1,6 @@
 """CLI giả cho test HOME tạm mỗi lượt agy (gói sửa review v0.1.63, P1-1): hành vi chọn theo dòng đầu của prompt.
 
-LIST    → trả danh sách tệp (đường tương đối) dưới $HOME + đường $HOME
+LIST    → trả danh sách tệp (đường tương đối) dưới $HOME + đường $HOME · TMP → ghi một tệp vào thư mục tạm, trả đường
 POISON  → ghi settings.json, mcp/, customizations/ độc vào thư mục cấu hình trong $HOME (giả agy bị lừa sửa cấu hình)
 REFRESH → ghi lại tệp token trong $HOME (access_token mới, cùng email) — giả agy làm mới token
 SWAP    → ghi tệp token của email KHÁC · BAD → tệp token không phải JSON · HUGE → tệp token quá lớn
@@ -30,6 +30,14 @@ if sys.argv[1:2] == ["models"]:
     sys.exit(0)
 prompt = sys.stdin.read()
 head = prompt.split("\n", 1)[0].strip()
+if head == "TMP":
+    # agy thật ghi bộ đệm (vd unleash-repo-schema-…json) vào thư mục tạm của hệ thống — phải là thư mục riêng của lượt.
+    import tempfile
+
+    d = tempfile.gettempdir()
+    (Path(d) / "unleash-cache.json").write_text("{}")
+    print(json.dumps({"response": json.dumps({"tmp": d, "env": os.environ.get("TMPDIR")})}))
+    sys.exit(0)
 if head == "LIST":
     files = sorted(str(p.relative_to(home)) for p in home.rglob("*") if p.is_file() or p.is_symlink())
     print(json.dumps({"response": json.dumps({"home": str(home), "files": files})}))

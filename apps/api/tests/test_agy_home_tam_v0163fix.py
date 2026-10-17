@@ -66,6 +66,17 @@ async def test_inproc_turn_sees_only_the_token_in_a_fresh_home(tmp_path: Path, v
     assert not home.exists()  # noqa: ASYNC240 — xoá sau lượt
 
 
+async def test_turn_temp_dir_is_private_and_removed(tmp_path: Path, vol: Path) -> None:
+    """Kiểm thật trong hộp: agy ghi bộ đệm (unleash…) vào /tmp ⇒ lượt sau đọc lại được. TMPDIR của agy phải là thư mục
+    riêng trong HOME tạm của lượt (xoá sau lượt)."""
+    agy = _agy(tmp_path, vol)
+    out = json.loads(await _say(agy, "TMP"))
+    assert out["env"] == out["tmp"] and "gh-agy-home-" in out["tmp"]
+    assert not Path(out["tmp"]).exists()  # noqa: ASYNC240
+    out2 = json.loads(await _say(agy, "TMP"))
+    assert out2["tmp"] != out["tmp"]
+
+
 async def test_poisoned_config_from_a_turn_is_not_loaded_next_turn(tmp_path: Path, vol: Path) -> None:
     agy = _agy(tmp_path, vol)
     (vol / "settings.json").unlink()

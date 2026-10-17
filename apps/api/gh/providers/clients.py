@@ -586,6 +586,7 @@ def make_turn_home(token: bytes | None) -> Path:
         cfg = home / ".gemini" / "antigravity-cli"
         cfg.mkdir(mode=0o700, parents=True)
         os.chmod(home / ".gemini", 0o700)
+        (home / "tmp").mkdir(mode=0o700)       # TMPDIR của lượt (cli_env) — agy ghi bộ đệm unleash… vào thư mục tạm
         if token is not None:
             fd = os.open(cfg / TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
             with os.fdopen(fd, "wb") as fh:
@@ -615,9 +616,16 @@ def cli_env(cli_home: str, home: str | Path | None = None) -> dict[str, str]:
     if home is None:
         d = cli_home_dir(cli_home)
         home = d.parent.parent if d.parent.name == ".gemini" else d
+        turn_tmp = None
+    else:
+        # Kiểm thật trong hộp (gói sửa review v0.1.63): agy ghi bộ đệm (unleash-repo-schema-…json) vào /tmp — chung
+        # giữa các lượt ⇒ một lượt bị lừa để lại tệp cho lượt sau đọc. TMPDIR = thư mục riêng trong HOME tạm của lượt.
+        turn_tmp = Path(home) / "tmp"
     env = {"PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"), "HOME": str(home),
            "NO_COLOR": "1", "TERM": "dumb", "AGY_CLI_DISABLE_AUTO_UPDATE": "1",
            "GEMINI_FORCE_FILE_STORAGE": "true", "LANG": "C.UTF-8"}
+    if turn_tmp is not None and turn_tmp.is_dir():
+        env["TMPDIR"] = str(turn_tmp)
     env.update({k: os.environ[k] for k in PROXY_ENV if os.environ.get(k)})
     return env
 
