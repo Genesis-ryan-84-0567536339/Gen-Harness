@@ -96,13 +96,16 @@ async def test_run_removes_cwd_even_on_timeout(tmp_path: Path, agy: dict[str, An
     tmpd.mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(tmpd))
     slow = tmp_path / "bin" / "agy-slow"
-    slow.write_text('#!/bin/sh\npwd > "$HOME/slow-cwd"\nexec sleep 30\n')
+    # Gói sửa review v0.1.63 (P1-1): HOME cũng là thư mục tạm của lượt ⇒ ghi ra chỗ cố định của test.
+    slow.write_text(f'#!/bin/sh\npwd > "{tmp_path}/slow-cwd"\necho "$HOME" > "{tmp_path}/slow-home"\nexec sleep 30\n')
     slow.chmod(0o755)
     c = AgyClient(str(slow), str(agy["home"]), timeout=3.0)
     with pytest.raises(TimeoutError):
         await c._run("--output-format", "json", stdin=b"hi")
-    cwd = (tmp_path / "agy" / "slow-cwd").read_text().strip()
+    cwd = (tmp_path / "slow-cwd").read_text().strip()
     assert Path(cwd).name.startswith("gh-agy-") and Path(cwd).parent == tmpd and _gone(cwd)
+    home = (tmp_path / "slow-home").read_text().strip()
+    assert Path(home).name.startswith("gh-agy-home-") and Path(home).parent == tmpd and _gone(home)
     # generate đổi hết giờ thành ProviderError (bộ định tuyến chuyển nguồn) — vẫn không còn thư mục nào.
     from gh.providers.clients import ProviderError
 

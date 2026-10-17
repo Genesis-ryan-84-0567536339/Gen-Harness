@@ -400,7 +400,9 @@ def _tier_kw(router: Any, tier: str | None, effort: str | None, *, owner: bool =
     try:
         params = inspect.signature(router.generate).parameters
     except (TypeError, ValueError):
-        return {}
+        # Review v0.1.63 (P3): không đọc được chữ ký ⇒ ĐÓNG AN TOÀN — Gen của nhân viên vẫn truyền owner=False (bộ
+        # định tuyến không nhận thì lỗi rõ ràng) chứ không âm thầm thành lượt của Owner (agy trong tiến trình).
+        return {} if owner else {"owner": False}
     var_kw = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
     return {k: v for k, v in want.items() if var_kw or k in params}
 

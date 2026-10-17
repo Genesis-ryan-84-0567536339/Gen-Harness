@@ -26,7 +26,8 @@ vẫn giữ.
 
 v0.1.63 (gói H2) — MỖI VAI MỘT CHỖ CHẠY agy (quyết định của Sếp 16/10/2026; luật ở `gh.providers.placement`, MỘT điểm
 quyết định `gh.providers.agy_policy.decide` gộp luật đó với trạng thái hộp):
-- core (core.gen của Owner, core.briefing, agent nội bộ không gắn kênh / nhóm / người) ⇒ agy TRONG TIẾN TRÌNH
+- core (core.gen của Owner, agent nội bộ không gắn kênh / nhóm / người) ⇒ agy TRONG TIẾN TRÌNH (core.briefing qua hộp
+  từ review v0.1.63 P2-3 — prompt có tên hiển thị khách)
   (`cli_factory` → `AgyClient`);
 - lớp ngoại giao / người ngoài (core.reply, agent ngoại giao, core.refinery sàng lọc tin người lạ, Gen của nhân viên,
   lượt thử agent) ⇒ agy QUA HỘP RIÊNG (`box_factory` → `AgyBoxClient`, container không có khoá / DB / Redis chính);
@@ -95,7 +96,7 @@ PROBE_TIMEOUT_S = 90.0
 #: Số lượt gọi CLI tối đa của một lần "Kiểm tra kết nối" (kể cả lượt thử lại khi CLI đòi / không nhận mức suy nghĩ).
 PROBE_MAX_CALLS = 4
 #: Tự lành (v0.1.58): nguồn Antigravity CLI mất dòng model ⇒ lượt gọi tự kiểm tra kết nối — tối đa một lần / 10 phút /
-#: tổ chức. Chỉ vai chạy agy trong tiến trình (core.gen của Owner, Bản tin, agent nội bộ) kích hoạt được khi chuỗi rỗng.
+#: tổ chức. Chỉ vai chạy agy trong tiến trình (core.gen của Owner, agent nội bộ) kích hoạt được khi chuỗi rỗng.
 AGY_HEAL_KEY = "gh:agy_heal:{}"
 AGY_HEAL_TTL = 600
 #: Trần thời gian của lần kiểm tra kết nối tự lành (giây): treo quá hạn ⇒ lượt Gen đi tiếp đường cũ.
@@ -367,7 +368,7 @@ class ModelRouter:
         #: agy TRONG tiến trình — chỉ cho vai `placement.INPROC` và việc của Sếp (đăng nhập, gọi thử, chẩn đoán).
         self.cli_factory = cli_factory or (lambda: AgyClient(s.cli_binary, s.cli_home))
         #: agy QUA HỘP RIÊNG (`AgyBoxClient`, v0.1.63 H1); trả None khi hộp chưa được cài.
-        self.box_factory = box_factory or (lambda: AgyBoxClient.from_env())
+        self.box_factory = box_factory or (lambda: AgyBoxClient.from_env(cli_home=get_settings().cli_home))
         self.claude_factory = claude_factory or (lambda: ClaudeCodeClient(get_settings().claude_binary,
                                                                           get_settings().claude_home))
 
@@ -565,8 +566,9 @@ class ModelRouter:
                        json_mode: bool = True, temperature: float = 0.2,
                        tier: str | None = None, effort: str | None = None, owner: bool = True) -> Routed:
         """`owner` = người hỏi là Owner (mặc định True: việc nền / hệ thống không có người hỏi). Chỉ `core.gen` phân
-        biệt. v0.1.63 (H2): chỗ chạy Antigravity CLI theo VAI — Gen của Owner, Bản tin, agent nội bộ chạy agy trong tiến
-        trình; Gen của nhân viên (`owner=False`), `core.reply`, `core.refinery`, agent ngoại giao và lượt thử agent
+        biệt. v0.1.63 (H2): chỗ chạy Antigravity CLI theo VAI — Gen của Owner, agent nội bộ chạy agy trong tiến
+        trình; Gen của nhân viên (`owner=False`), `core.reply`, `core.refinery`, `core.briefing`, agent ngoại giao và
+        lượt thử agent
         (`purpose="setup_agent_try"`) chạy agy QUA HỘP RIÊNG (`box_factory`). Hộp chưa cài / tắt ⇒ các lượt đó bỏ
         Antigravity (kể cả dòng gán agy cũ), dùng nguồn AI kế và ghi lý do vào `reasons` — KHÔNG BAO GIỜ chạy agy trong
         tiến trình thay cho hộp (`agy_policy.decide`, luật ở `gh.providers.placement`). Xem docstring module.

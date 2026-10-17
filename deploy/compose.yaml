@@ -159,9 +159,12 @@ services:
   # có lừa được agy đọc tệp/chạy lệnh cũng KHÔNG chạm khoá master, DB hay Redis chính. Cùng ảnh api (đã có agy ghim SHA) nhưng
   # chạy `python -m gh.agybox.server`. KHÔNG có GH_DATABASE_URL/GH_ADMIN_DATABASE_URL/GH_REDIS_URL, KHÔNG có khoá master/bridge/
   # browser/offsite (chỉ gh_agy_key để kiểm chữ ký yêu cầu), KHÔNG ở mạng default (không thấy db/redis/bridge/browser-redis).
-  # Hai mạng: agy-bus (internal — chỉ api/worker gọi vào) và agy-out (đường ra Internet cho agy gọi Google). Chỉ mount agy_state
-  # (tệp token OAuth của hồ sơ đang hoạt động) — không claude_state, gh_objects hay run/ của máy chủ. Hộp KHÔNG gọi ngược api.
-  # Nợ (ke-hoach-sau-v0162 §6): lối ra agy-out chưa có allowlist tên miền (agy chưa chứng minh theo HTTPS_PROXY).
+  # Review v0.1.63 (P2-2): CHỈ mạng agy-bus (internal — api/worker gọi vào); ra Internet DUY NHẤT qua proxy agy-egress
+  # (HTTPS_PROXY): proxy chặn đích là / phân giải ra IP nội bộ (gateway Docker, LAN của máy chủ, loopback, link-local, CGNAT).
+  # Review v0.1.63 (P1-1): hộp KHÔNG mount volume nào (kể cả agy_state) — tệp token OAuth của hồ sơ đang hoạt động đến trong
+  # từng yêu cầu đã ký, đặt vào HOME tạm của đúng lượt đó (tmpfs /tmp, xoá sau lượt); agy trong hộp có bị lừa cũng không
+  # ghi được gì mà api/worker hay lượt sau đọc lại. Không claude_state, gh_objects hay run/ của máy chủ. Hộp KHÔNG gọi ngược api.
+  # Nợ: proxy mặc định cho mọi tên miền công khai (GH_AGY_EGRESS_ALLOW rỗng) — allowlist chặt khi đã đo đủ tên miền agy dùng.
   agy-box:
     build: { context: .., dockerfile: deploy/images/api.Dockerfile }
     command: ["python", "-m", "gh.agybox.server"]
@@ -170,18 +173,19 @@ services:
     init: true
     environment:
       GH_AGYBOX_KEY_FILE: /run/secrets/gh_agy_key
-      GH_CLI_HOME: /var/lib/gh/agy/.gemini/antigravity-cli
       GH_CLI_BINARY: agy
       AGY_CLI_DISABLE_AUTO_UPDATE: "1"
-      GH_AGYBOX_MAX_JOBS: "2"
+      GH_AGYBOX_MAX_JOBS: "1"
+      # agy theo HTTPS_PROXY (đã đo: CONNECT qua proxy); AgyClient chuyển hai biến này vào môi trường sạch của agy.
+      HTTPS_PROXY: http://agy-egress:3128
+      HTTP_PROXY: http://agy-egress:3128
+      # Healthcheck (urllib) gọi 127.0.0.1:8090 — phải đi thẳng, không qua proxy (proxy chỉ nhận CONNECT ⇒ 405).
+      NO_PROXY: 127.0.0.1,localhost
     secrets: [gh_agy_key]
-    # nocopy + chờ api: volume mới tinh do api chép nội dung ảnh (thư mục thuộc gh:gh) ở lần mount đầu — như worker. Hộp mount
-    # sau, không chép: nếu hộp tạo volume trước thì thư mục thuộc root, hộp lẫn api đều không ghi được token agy.
-    volumes:
-      - { type: volume, source: agy_state, target: /var/lib/gh/agy, volume: { nocopy: true } }
-    networks: [agy-bus, agy-out]
+    networks: [agy-bus]
     depends_on:
       api: { condition: service_started }
+      agy-egress: { condition: service_started }
     read_only: true
     tmpfs: ["/tmp:size=256m"]
     cap_drop: [ALL]
@@ -195,6 +199,36 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  # Review v0.1.63 (P2-2) — PROXY LỐI RA của hộp riêng Antigravity: cùng ảnh api (không thêm ảnh), chạy
+  # `python -m gh.agybox.egress` (chỉ stdlib, không khoá, không volume). Chỉ nhận CONNECT tới cổng 443; phân giải tên MỘT lần,
+  # mọi IP phải định tuyến toàn cầu (chặn RFC1918, loopback, link-local, CGNAT 100.64/10, gateway, IPv6 nội bộ) rồi nối thẳng
+  # IP đã kiểm (chống DNS rebinding). GH_AGY_EGRESS_ALLOW (tuỳ chọn, phân cách dấu phẩy, vd
+  # "googleapis.com,accounts.google.com,antigravity-unleash.goog") giới hạn tên miền; rỗng = mọi tên miền công khai.
+  # Hai mạng: agy-bus (hộp gọi vào) và agy-out (ra Internet) — KHÔNG mạng default.
+  agy-egress:
+    build: { context: .., dockerfile: deploy/images/api.Dockerfile }
+    command: ["python", "-m", "gh.agybox.egress"]
+    restart: unless-stopped
+    logging: *logging
+    init: true
+    environment:
+      GH_AGY_EGRESS_ALLOW: ${GH_AGY_EGRESS_ALLOW:-}
+      GH_AGY_EGRESS_PORTS: "443"
+    networks: [agy-bus, agy-out]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    # Ảnh api có HEALTHCHECK riêng (cổng 8000) — ghi đè bằng kiểm cổng proxy.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 3128), 3).close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
 
   bridge:
     build: { context: .., dockerfile: deploy/images/bridge.Dockerfile }
@@ -367,10 +401,11 @@ networks:
     internal: true
   # Chỉ browser-egress: đường ra Internet của trình duyệt.
   browser-out: {}
-  # v0.1.63 (H1): api + worker + agy-box — chỉ để api/worker gọi vào hộp; không db/redis/bridge/browser.
+  # v0.1.63 (H1): api + worker + agy-box (+ agy-egress, P2-2) — api/worker gọi vào hộp, hộp gọi proxy lối ra; không
+  # db/redis/bridge/browser.
   agy-bus:
     internal: true
-  # Chỉ agy-box: đường ra Internet của agy (đăng nhập/gọi model Google).
+  # Chỉ agy-egress: đường ra Internet của agy (qua proxy chặn IP nội bộ — hộp không còn ở mạng này).
   agy-out: {}
 
 volumes:

@@ -28,7 +28,10 @@ def _wrapper(tmp: Path, name: str, script: Path) -> str:
     """Tệp chạy giả (như /usr/local/bin/agy, /usr/local/bin/claude) bọc script Python của fixture."""
     (tmp / "bin").mkdir(exist_ok=True)
     path = tmp / "bin" / name
-    path.write_text(f"#!/bin/sh\nexec {sys.executable} {script} \"$@\"\n")
+    # Gói sửa review v0.1.63 (P1-1): mỗi lượt agy có HOME tạm (xoá sau lượt) ⇒ CLI giả ghi nhật ký lượt gọi vào chỗ
+    # cố định của test (<tmp>/agy/agy-calls.log, như trước khi HOME còn là thư mục cha của GH_CLI_HOME).
+    calls = tmp / "agy" / "agy-calls.log"
+    path.write_text(f"#!/bin/sh\nFAKE_AGY_CALLS={calls} exec {sys.executable} {script} \"$@\"\n")
     path.chmod(0o755)
     return str(path)
 

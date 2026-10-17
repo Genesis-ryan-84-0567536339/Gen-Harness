@@ -63,7 +63,7 @@ func TestServicesStep_HappyPath_UpThenReady(t *testing.T) {
 	srv, _ := tlsReadyServer(t, 0)
 
 	fr := &fake.Runner{Responses: []fake.Response{
-		{Match: fake.MatchArgsContain("up", "-d", "api", "worker", "agy-box", "bridge", "browser-egress", "browser", "web", "proxy"), Output: []byte("")},
+		{Match: fake.MatchArgsContain("up", "-d", "api", "worker", "agy-egress", "agy-box", "bridge", "browser-egress", "browser", "web", "proxy"), Output: []byte("")},
 	}}
 
 	step := servicesStep{
@@ -121,7 +121,8 @@ func TestServicesStep_UpBaoGomAgyBox(t *testing.T) {
 			}
 		}
 	}
-	want := []string{"api", "worker", "agy-box", "bridge", "browser-egress", "browser", "web", "proxy"}
+	// Gói sửa review v0.1.63 (P2-2): proxy lối ra agy-egress lên trước hộp (hộp chỉ ra Internet qua nó).
+	want := []string{"api", "worker", "agy-egress", "agy-box", "bridge", "browser-egress", "browser", "web", "proxy"}
 	if strings.Join(upArgs, ",") != strings.Join(want, ",") {
 		t.Fatalf("docker compose up -d %v, muốn %v", upArgs, want)
 	}

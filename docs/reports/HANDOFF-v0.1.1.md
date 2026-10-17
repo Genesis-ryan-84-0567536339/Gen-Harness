@@ -23,7 +23,7 @@ Còn hiệu lực từ v0.1.1 (vai trò DB, volume, gói hồ sơ); chi tiết �
 
 ## Hiện trạng (v0.1.63)
 
-Bản mới nhất **v0.1.63** (17/10/2026, `VERSION` = v0.1.63): **hộp riêng Antigravity `agy-box`** (container không khoá master/DB/Redis; mỗi vai một chỗ chạy agy: Gen của Sếp, Bản tin, agent nội bộ trong tiến trình — sàng lọc, Soạn lại / Dịch nháp, agent trực kênh, Gen nhân viên, thử agent qua hộp; hộp tắt ⇒ nguồn AI kế), **"nguồn AI dùng được" một hàm** (`providers.readiness`, B2), `genh` sinh `gh_agy_key` + dựng hộp, cổng phát hành `check_agy_box_isolation.py` + `e2e_agy_box.sh` ([v0.1.63.md](../releases/v0.1.63.md)); không migration; chưa push — chờ mốc M1.
+Bản mới nhất **v0.1.63** (17/10/2026, `VERSION` = v0.1.63): **hộp riêng Antigravity `agy-box`** (container không khoá master/DB/Redis; mỗi vai một chỗ chạy agy: Gen của Sếp, agent nội bộ trong tiến trình — Bản tin, sàng lọc, Soạn lại / Dịch nháp, agent trực kênh, Gen nhân viên, thử agent qua hộp; hộp tắt ⇒ nguồn AI kế), **"nguồn AI dùng được" một hàm** (`providers.readiness`, B2), `genh` sinh `gh_agy_key` + dựng hộp, cổng phát hành `check_agy_box_isolation.py` + `e2e_agy_box.sh` ([v0.1.63.md](../releases/v0.1.63.md)); không migration; chưa push — chờ mốc M1.
 Trước đó **v0.1.62** (17/10/2026): đợt A phần 2, Antigravity phân lớp, kênh bền, sức khoẻ ([v0.1.62.md](../releases/v0.1.62.md)); không migration.
 Trước đó **v0.1.61** (16/10/2026, đã vào main): đợt A phần 1 — mã PIN cho người được giao quyền, bảng quyền/tên vai trò (migration 0036), nháp & gửi tin trung thực, gộp người đủ bảng, lưới `check_terms.py` + route-crawl ([v0.1.61.md](../releases/v0.1.61.md)).
 Các bản cũ (v0.1.50 – v0.1.60: Gen nhớ + ghi Kho, tự cập nhật đêm tự lành, Gen hướng dẫn, Mặt tiền Owner v2, thiết lập một màn, sửa QR WhatsApp, khoá thông tin riêng…) xem [CHANGELOG.md](../../CHANGELOG.md) và `docs/releases/`.
@@ -77,7 +77,7 @@ Nhánh local đang làm (CHƯA push, ngoài `claude/v0162`): **v0.1.63** đã t�
 ### Boss phải làm — v0.1.63 (không bắt buộc; chi tiết ở [v0.1.63.md](../releases/v0.1.63.md))
 
 1. Sau khi bản chính thức ra: `genh update` (hoặc đợi lịch đêm) — hộp `agy-box` và khoá `gh_agy_key` tự lên, không migration. Thẻ Sức khoẻ có dòng "Hộp riêng Antigravity: Đang chạy".
-2. Antigravity: đăng nhập vẫn ở **Kết nối › Bộ não AI** như cũ (hộp dùng chung phiên). Thẻ báo hết hạn ⇒ đăng nhập lại ở đó, không cần làm gì riêng trong hộp. Từ giờ agent trực kênh, Soạn lại / Dịch nháp chạy được bằng Antigravity; chưa có khoá API cũng được.
+2. Antigravity: đăng nhập vẫn ở **Kết nối › Bộ não AI** như cũ (api gửi phiên sang hộp theo từng lượt). Thẻ báo hết hạn ⇒ đăng nhập lại ở đó, không cần làm gì riêng trong hộp. Từ giờ agent trực kênh, Soạn lại / Dịch nháp chạy được bằng Antigravity; chưa có khoá API cũng được.
 3. Thẻ Zalo/WhatsApp "Mất liên lạc" ⇒ **Nối lại bằng phiên đã lưu** (từ v0.1.62). Tuỳ chọn: "Câu hỏi mở — mặc định đã chọn" ở [ROADMAP](../ROADMAP.md).
 
 ### Boss phải làm — v0.1.61 (đã qua; `genh update` + người được giao quyền tự đặt mã PIN ở Tài khoản của tôi; [v0.1.61.md](../releases/v0.1.61.md))
