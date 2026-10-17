@@ -64,6 +64,13 @@ async def _frames(sub: Any) -> list[dict[str, Any]]:
     return out
 
 
+async def _ask(db, org) -> None:  # type: ignore[no-untyped-def]
+    """Sếp đặt «Nhóm mới: Hỏi Sếp» (mặc định từ QĐ 17/10 là Lắng nghe im lặng) ⇒ nhóm mới vào `pending`."""
+    await db.execute(text("""UPDATE core.organizations SET settings = settings
+                             || '{"new_group_mode": {"zalo": "ask"}}'::jsonb WHERE id = :o"""), {"o": org})
+    await db.commit()
+
+
 async def _log(api: Api, qs: str = "") -> dict[str, Any]:
     r = await api.get("/listen-log" + qs)
     assert r.status_code == 200, r.text
@@ -96,7 +103,9 @@ async def test_timeline_merges_messages_and_events_newest_first(owner_api: Api, 
     ev = {i["event_type"]: i for i in items if i["kind"] == "event"}
     assert "group_new" in ev and "direct_new" in ev
     assert ev["group_new"]["text"].startswith("Tài khoản Zalo của Sếp vừa được thêm vào nhóm «Nhóm g1»")
-    assert "Chờ Sếp chọn" in ev["group_new"]["text"] and ev["group_new"]["listen_mode"] == "pending"
+    # QĐ 17/10: nhóm mới mặc định vào Lắng nghe im lặng (không còn «Chờ Sếp chọn» trừ khi Sếp đặt Hỏi Sếp)
+    assert ev["group_new"]["text"].endswith("Nhóm tự vào chế độ: Lắng nghe im lặng.")
+    assert ev["group_new"]["listen_mode"] == "silent" and ev["group_new"]["listen_mode_label"] == "Lắng nghe im lặng"
     assert ev["direct_new"]["direct"] is True and ev["direct_new"]["person"]["name"] == "Khách lạ"
     assert ev["direct_new"]["icon"] and ev["group_new"]["icon"] != ev["direct_new"]["icon"]
 
@@ -146,10 +155,12 @@ async def test_why_nothing_happened_notes(owner_api: Api, db) -> None:  # type: 
 
 async def test_group_not_listening_leaves_no_message_row_only_events(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
     org = await org_id(db)
+    await _ask(db, org)                                          # «Hỏi Sếp»: nhóm mới vào `pending`
     [dropped] = await put(sessionmaker(), org, msg("Tin nhóm chưa chọn", group="gNew"))
     assert dropped is None                                       # nhóm `pending` không lưu tin
     items = (await _log(owner_api))["items"]
     assert [i["kind"] for i in items] == ["event"] and items[0]["event_type"] == "group_new"
+    assert items[0]["listen_mode"] == "pending" and "Chờ Sếp chọn" in items[0]["text"]
 
 
 # ─── phân trang con trỏ & lọc ─────────────────────────────────────────────────────────────────────────────────────
@@ -242,6 +253,7 @@ async def test_directory_events_first_sync_is_summary_then_changes_are_events(ow
     assert kinds == ["groups_synced"]                    # lần đầu: một dòng tóm tắt, không từng nhóm/thành viên
     await db.execute(text("UPDATE core.groups SET listen_mode = 'silent' WHERE external_id = 'gA'"))
     await db.commit()
+    await _ask(db, org)                                  # «Hỏi Sếp»: nhóm mới (gC) vào `pending`
     # quét lần hai: gA đổi tên + thêm m4, bớt m3; gB vắng ⇒ đã rời; gC mới
     await handle_directory(db, redis, org, {"channel": "zalo", "groups_complete": True,
                                             "groups": [grp("gA", "Nhóm A mới", ["m1", "m2", "m4"]),
