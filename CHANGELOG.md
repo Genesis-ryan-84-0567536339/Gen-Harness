@@ -8,8 +8,8 @@ Ngày = ngày Release trên GitHub theo giờ Việt Nam; tiêu đề trong `doc
 Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) ghi ở [ROADMAP › Bản phản ứng](docs/ROADMAP.md).
 
 ## v0.1.63 — Hộp riêng Antigravity: mỗi vai một chỗ chạy, "nguồn AI dùng được" một hàm duy nhất (17/10/2026)
-- **Hộp riêng `agy-box`**: container chạy Antigravity không có khoá master, DB hay Redis (chỉ khoá ký `gh_agy_key`, không volume — tệp phiên agy gửi theo từng lượt, mọi lượt agy chạy HOME tạm; không mạng `default`); `genh update` tự sinh khoá và dựng hộp, `genh doctor` + thẻ Sức khoẻ có dòng "Hộp riêng Antigravity".
-- **Mỗi vai một chỗ chạy**: Gen của Sếp, Bản tin, agent nội bộ chạy agy trong tiến trình; sàng lọc tin người lạ, Soạn lại / Dịch nháp, agent trực kênh (ngoại giao), Gen của nhân viên, lượt thử agent chạy qua hộp. Hộp tắt ⇒ dùng nguồn AI kế, không bao giờ rơi về agy trong tiến trình; "Thử quy tắc" vẫn không dùng agy.
+- **Hộp riêng `agy-box`**: container chạy Antigravity không có khoá master, DB hay Redis (chỉ khoá ký `gh_agy_key`, không volume — tệp phiên agy gửi theo từng lượt, mọi lượt agy chạy HOME tạm; chỉ mạng internal, ra Internet qua proxy `agy-egress` chặn IP nội bộ/LAN); `genh update` tự sinh khoá và dựng hộp, `genh doctor` + thẻ Sức khoẻ có dòng "Hộp riêng Antigravity".
+- **Mỗi vai một chỗ chạy**: Gen của Sếp, agent nội bộ chạy agy trong tiến trình; Bản tin, sàng lọc tin người lạ, Soạn lại / Dịch nháp, trực việc, agent trực kênh (ngoại giao), Gen của nhân viên, lượt thử agent chạy qua hộp. Nên đăng nhập Antigravity bằng tài khoản Google riêng (token đi vào hộp). Hộp tắt ⇒ dùng nguồn AI kế, không bao giờ rơi về agy trong tiến trình; "Thử quy tắc" vẫn không dùng agy.
 - **Một hàm "nguồn AI dùng được"** (`providers.readiness`): bước 4 thiết lập, dòng "nguồn AI" ở Việc Sếp cần làm và nút Kiểm tra cùng hỏi nó (đóng F002/F010/F014/F035), có lý do `box_down`.
 - **Cổng phát hành**: `check_agy_box_isolation.py` + E2E `e2e_agy_box.sh` (cài mới và nâng cấp) trước khi ra bản chính thức.
 - Chi tiết: [docs/releases/v0.1.63.md](docs/releases/v0.1.63.md)
