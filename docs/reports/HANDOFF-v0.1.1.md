@@ -1,4 +1,4 @@
-# Bàn giao Gen-Harness — hiện trạng + việc dở (cập nhật 17/10/2026, bản v0.1.63)
+# Bàn giao Gen-Harness — hiện trạng + việc dở (cập nhật 17/10/2026, bản v0.1.65 — gộp v0.1.63 + v0.1.64 + v0.1.65)
 
 File này nay chỉ ghi **hiện trạng + việc dở** (tên cũ `HANDOFF-v0.1.1.md` giữ nguyên vì mã nguồn có chú thích trỏ tới).
 Lịch sử từng bản nằm ở [CHANGELOG.md](../../CHANGELOG.md) (3–5 dòng/bản) và `docs/releases/vX.Y.Z.md` (chi tiết, chuyển nguyên từ HANDOFF cũ):
@@ -21,9 +21,9 @@ Còn hiệu lực từ v0.1.1 (vai trò DB, volume, gói hồ sơ); chi tiết �
 - **Gói hồ sơ `.ghbundle`**: Python tạo/đọc (`python -m gh.bundle export|import`), Go chỉ chuyển bytes; mật khẩu qua `GH_BUNDLE_PASSWORD` (≥ 12 ký tự);
   mã thoát `0` ok · `2` sai mật khẩu/gói hỏng · `3` không tương thích · `1` lỗi khác; mã hoá lại mọi bí mật bằng khoá master máy đích.
 
-## Hiện trạng (v0.1.63)
+## Hiện trạng (v0.1.65)
 
-Bản mới nhất **v0.1.63** (17/10/2026, `VERSION` = v0.1.63): **hộp riêng Antigravity `agy-box`** (container không khoá master/DB/Redis; mỗi vai một chỗ chạy agy: Gen của Sếp, agent nội bộ trong tiến trình — Bản tin, sàng lọc, Soạn lại / Dịch nháp, agent trực kênh, Gen nhân viên, thử agent qua hộp; hộp tắt ⇒ nguồn AI kế), **"nguồn AI dùng được" một hàm** (`providers.readiness`, B2), `genh` sinh `gh_agy_key` + dựng hộp, cổng phát hành `check_agy_box_isolation.py` + `e2e_agy_box.sh` ([v0.1.63.md](../releases/v0.1.63.md)); không migration; chưa push — chờ mốc M1.
+Bản mới nhất **v0.1.65** (17/10/2026, `VERSION` = v0.1.65) là **bản gộp ba bản lớn** theo quyết định Sếp 17/10 (một lần `genh update`; không có bản v0.1.63/v0.1.64 riêng): **v0.1.63** hộp riêng Antigravity `agy-box` + proxy lối ra `agy-egress` (container không khoá master/DB/Redis/volume; mỗi vai một chỗ chạy agy; "nguồn AI dùng được" một hàm `providers.readiness`; cổng phát hành `check_agy_box_isolation.py` + `e2e_agy_box.sh`; [v0.1.63.md](../releases/v0.1.63.md)) · **v0.1.64** Telegram 2 chiều (ghép mã 6 số, lệnh chỉ đọc/đề xuất, không nhận mã PIN) + sàng lọc ghi loại người, Sếp tự đánh dấu nhân viên (migration 0037; [v0.1.64.md](../releases/v0.1.64.md)) · **v0.1.65** chế độ nghe & danh bạ (nhóm mới mặc định Lắng nghe im lặng, không bao giờ trả lời kể cả khi tag; thu thành viên mọi nhóm; tin 1-1 lưu im lặng; THAY ĐỔI QUYỀN: tin 1-1 chỉ Owner/người phụ trách, gán BOT người = Owner + PIN, che JID; migration 0038; [v0.1.65.md](../releases/v0.1.65.md)). Head migration = 0038. Chưa push — chờ mốc.
 Trước đó **v0.1.62** (17/10/2026): đợt A phần 2, Antigravity phân lớp, kênh bền, sức khoẻ ([v0.1.62.md](../releases/v0.1.62.md)); không migration.
 Trước đó **v0.1.61** (16/10/2026, đã vào main): đợt A phần 1 — mã PIN cho người được giao quyền, bảng quyền/tên vai trò (migration 0036), nháp & gửi tin trung thực, gộp người đủ bảng, lưới `check_terms.py` + route-crawl ([v0.1.61.md](../releases/v0.1.61.md)).
 Các bản cũ (v0.1.50 – v0.1.60: Gen nhớ + ghi Kho, tự cập nhật đêm tự lành, Gen hướng dẫn, Mặt tiền Owner v2, thiết lập một màn, sửa QR WhatsApp, khoá thông tin riêng…) xem [CHANGELOG.md](../../CHANGELOG.md) và `docs/releases/`.
@@ -33,7 +33,7 @@ Các bản cũ (v0.1.50 – v0.1.60: Gen nhớ + ghi Kho, tự cập nhật đê
   lịch đêm ~03:00 **tự lành** (bật lại khi mất/tắt/không chạy, trừ khi Sếp đã chủ động tắt), **người gác nút Cập nhật ngay tự chữa** (v0.1.54: `.path` failed vì hết hạn mức inotify ⇒ reset-failed + restart, vẫn lỗi ⇒ timer dự phòng quét mỗi phút), `genh auto-update status` nói thật, chọn bản cao nhất đã đủ 24 giờ; `genh export/import`, `genh offsite` (bản sao tuần ra USB/NAS), `genh remote` (Tailscale/Cloudflare/LAN/local),
   trực canh 12 phút → Telegram, gói chẩn đoán. Cổng mặc định chỉ nghe 127.0.0.1 (máy cũ giữ 0.0.0.0 + một chuông nhắc).
 - **Phát hành & CI**: xem "Quy trình phát hành" dưới; ảnh ghim digest, `uv.lock --frozen`, action ghim SHA, quét bảo mật dạng báo cáo, `check_*` trong `.github/scripts`. Môi trường dev riêng `genh-dev` (cổng 184xx, `make dev-up`; [dev-local.md](../dev-local.md)) — không đụng bản cài thật.
-- **Console**: 12 dịch vụ compose (`proxy web migrate api worker agy-box bridge browser browser-redis browser-egress db redis`); menu 6 mục + Nâng cao; trình thiết lập; Hướng dẫn thiết lập;
+- **Console**: 13 dịch vụ compose (`proxy web migrate api worker agy-box agy-egress bridge browser browser-redis browser-egress db redis`); menu 6 mục + Nâng cao; trình thiết lập; Hướng dẫn thiết lập;
   **Mặt tiền Owner** `/owner/*` (v0.1.60: 5 trụ cột Tình báo/Thông tin/Quan hệ/Phân tích/Việc + Cài đặt 4 khối; Owner mở `/` vào đây; Console ở Cài đặt › Cài đặt nâng cao); thiết lập một màn `/setup` (Tài khoản → Nguồn AI → Xong, mọi "Chọn model" về `/setup?buoc=nguon-ai`); Việc Sếp cần làm (10 dòng, 1 bắt buộc = nguồn AI, kết quả ở `ops.boss_checks`); chuông + dải "Cần Sếp xử lý"; Trợ giúp (gói chẩn đoán, cập nhật, **Lộ trình học cùng Gen**); phiên 7 ngày trượt, tối đa 30 ngày; PIN ở đường hạ rào.
 - **Gen (chỉ Owner)**: khung chat nhớ hội thoại; Bản tin 07:30/17:30; dẫn đường trên UI; **8 loại đề xuất** có Xác nhận (draft_message, reminder, assign, social_reply, social_dm,
   **memory_note, kho_create, kho_update**); **Gen nhớ** (30 ghi chú, Cài đặt › Bộ não AI); đọc Kho + lịch/mail/việc/Drive qua Gen-hub (đã che) và Tài liệu/Deal/Vụ việc nội bộ;
@@ -41,27 +41,25 @@ Các bản cũ (v0.1.50 – v0.1.60: Gen nhớ + ghi Kho, tự cập nhật đê
   **Gen hướng dẫn** (v0.1.54): thẻ Hôm nay của Sếp (≤ 3 việc cần làm ngay, mẹo, bài k/19), chấm đỏ, chuông `gen.coach` ≤ 1/ngày, dòng Bản tin x/N, tool `coach.status` — không gọi model, chỉ Owner, khuyên không ép.
 - **Model AI**: **hồ sơ tiêu chuẩn theo vai** (v0.1.55: không cần gán model; dòng gán của Owner thắng; Về mặc định), chọn Nhanh/Kỹ hơn trong khung chat; ModelRouter (khoá API Gemini/OpenRouter/OpenAI-compat), agy mỗi vai một chỗ chạy (v0.1.63: Gen của Sếp, Bản tin, agent không gắn kênh chạy trong tiến trình; `core.reply`, sàng lọc, agent ngoại giao, Gen của nhân viên, thử agent, Soạn lại / Dịch nháp chạy qua `agy-box`, hộp tắt ⇒ nguồn kế; Thử quy tắc không dùng agy; một hàm quyết định `agy_policy.decide`, luật ở `providers.placement`), Claude Code CLI (Owner tự quyết rủi ro, QD-12); model và mức suy nghĩ tách riêng;
   việc nền mặc định chỉ khoá API; chi phí ₫/ngày + trần; Jev tuỳ chọn: lọc trước tin trùng/rác (che dữ liệu bắt buộc, v0.1.55; QD-10 bỏ Jules).
-- **Kênh**: Zalo/WhatsApp qua bridge (v0.1.62 bền: mất mạng không xoá phiên, nút Nối lại bằng phiên đã lưu, Đăng xuất khi phiên lỗi; QR; WhatsApp v0.1.59: mã vẽ lớn, Baileys ghim 7.0.0-rc14, thử lại có giãn cách); Telegram một chiều tới Sếp; Facebook cá nhân đọc + Trả lời bình luận/Nhắn tin có Xác nhận + PIN + ảnh chụp (đăng bài = lát 2).
+- **Kênh**: Zalo/WhatsApp qua bridge (v0.1.62 bền: mất mạng không xoá phiên, nút Nối lại bằng phiên đã lưu, Đăng xuất khi phiên lỗi; QR; WhatsApp v0.1.59: mã vẽ lớn, Baileys ghim 7.0.0-rc14, thử lại có giãn cách); Telegram hai chiều với Sếp (v0.1.64: ghép mã 6 số, lệnh chỉ đọc/đề xuất); Facebook cá nhân đọc + Trả lời bình luận/Nhắn tin có Xác nhận + PIN + ảnh chụp (đăng bài = lát 2).
 - **Dữ liệu & bảo mật**: Postgres 16 (pgvector, pg_partman), RLS chỉ là phòng thủ phụ (mỗi bản cài 1 tổ chức), hạn lưu thật, bí mật mã hoá phong bì, DNS ghim cho MCP/Gen-hub, ngắt mạch Gen-hub 60 giây.
 
-## v0.1.63 — Hộp riêng Antigravity + nguồn AI dùng được (tích hợp cục bộ `local/v0163-int`, gốc v0.1.62 cuối)
+## v0.1.65 — bản gộp (nhánh `rel/v0165`, xếp trên `local/v0163-int` + gói sửa review P1/P2/P3)
 
-- **Vì sao**: v0.1.62 cho agy chạy trong tiến trình api nên chưa dùng được cho việc có người ngoài; Sếp chốt tách agy ra container riêng không giữ khoá.
-- **Thay đổi**: H1 (`gh/agybox`, dịch vụ `agy-box`, sức khoẻ), H2 (`placement.py` + `agy_policy.decide` + router), H3 (genh sinh `gh_agy_key`, khởi động/tải/doctor hộp; `check_agy_box_isolation.py`, `e2e_agy_box.sh`), B2 (`readiness.py`, hợp nhất bước 4 / dòng "nguồn AI" / nút Kiểm tra; F002 F010 F014 F035). Tích hợp: readiness hỏi chính sách cuối (`agy_policy.decide` + `placement.box_required`).
-- **Chưa làm**: Telegram 2 chiều (Nợ #13, v0.1.64); Nợ #42–#46 (`list_promises` con trỏ, nút Chạy lại tin lỗi, allowlist egress `agy-out`, chuyển cả core vào hộp, định dạng token agy thật); thử thật `agy-box` có phiên Antigravity (dev) và `--live` canary chưa chạy ở bản này.
-- **Boss cần làm**: xem "Boss phải làm — v0.1.63" dưới. Chi tiết: [v0.1.63.md](../releases/v0.1.63.md).
+- **Vì sao**: Sếp gộp ba bản lớn thành một lần phát hành; v0.1.63 cho việc có người ngoài chạy Antigravity trong container riêng, v0.1.64 cho Sếp nhắn Gen qua Telegram, v0.1.65 cho thu hết tình báo (mọi nhóm, thành viên, tin 1-1) mà không trả lời nhầm.
+- **Thay đổi**: hộp `agy-box` (`gh/agybox`, `placement.py`, `agy_policy.decide`, router), proxy `agy-egress`, HOME tạm mỗi lượt agy, `readiness.py`; `gh/telegram/*` (ghép, `inbound`, `poller`, `commands`), B6 loại người; `settings.new_group_mode` / `direct_mode`, `core.groups.left_at`, `direct_visible_sql` (tin 1-1), gán BOT người.
+- **Chưa làm**: Nợ #43 (nút Chạy lại tin lỗi); #44–#46 (allowlist egress mặc định, core vào hộp, định dạng/xoay vòng token agy); #47–#49 (quét danh bạ theo phần thay đổi, `view_scope`, tin 1-1 còn hở); đệm ở bridge cho loạt tin dồn < 1 giây trước khi tập nghe đồng bộ; chưa kiểm dịch vụ thật (WhatsApp QR #35, bot Telegram thật, bridge nhận nhóm lạ).
+- **Boss cần làm**: xem "Boss phải làm — v0.1.65" dưới. Chi tiết: [v0.1.65.md](../releases/v0.1.65.md).
 
-## Người lái và kế hoạch v0.1.63 – v0.1.70
+## Người lái và kế hoạch v0.1.65 – v0.1.70
 
-Claude Code chạy trên máy cục bộ là người lái DUY NHẤT (từ 16/10/2026; phiên đám mây đã dừng). Mỗi bản ≤ 4 gói không chồng tệp (QD-14), tối đa 1 migration/bản; push theo 4 mốc: M1 = v0.1.63–64, M2 = v0.1.65, M3 = v0.1.66–67, M4 = v0.1.68–70.
+Claude Code chạy trên máy cục bộ là người lái DUY NHẤT (từ 16/10/2026; phiên đám mây đã dừng). Mỗi bản ≤ 4 gói không chồng tệp (QD-14), tối đa 1 migration/bản; Sếp đã gộp v0.1.63–65 thành MỘT lần phát hành mang số v0.1.65; các bản sau: v0.1.66–67 và v0.1.68, v0.1.70 phát hành riêng (mỗi bản kiểm đầy đủ + review + push + PR).
 
-- **v0.1.63** (xong, chờ push) hộp riêng Antigravity `agy-box` + một hàm "nguồn AI dùng được" (B2).
-- **v0.1.64** Telegram 2 chiều (Nợ #13, đúng `chat_id` của Sếp, không nhận mã PIN) + sàng lọc ghi loại người, đánh dấu nhân viên (B6).
-- **v0.1.65** chế độ nghe & danh bạ (F1, migration duy nhất; thu thành viên mọi nhóm, tin 1-1 lưu im lặng).
+- **v0.1.65** (xong, chờ push) bản gộp: hộp riêng Antigravity (v0.1.63) + Telegram 2 chiều và sàng lọc ghi loại người (v0.1.64) + chế độ nghe & danh bạ (v0.1.65, migration 0038).
 - **v0.1.66** model hiển thị = model chạy (một bộ chọn model + bảng tầng) · **v0.1.67** agent làm và nói thật (tạo/sửa/bật tắt/nhân bản).
 - **v0.1.68** một danh sách việc, thiết lập nói thật · **v0.1.69** chuông có vòng đời + mặc định đúng QD · **v0.1.70** câu chữ sạch, hạ baseline Nợ #39/#40.
 
-Nhánh local đang làm (CHƯA push, ngoài `claude/v0162`): **v0.1.63** đã tích hợp ở `local/v0163-int` (H1 H2 H3 B2), **T** (Telegram 2 chiều), **B6** (sàng lọc ghi loại người). Gộp theo mốc; mỗi bản: gộp gói → bộ kiểm đầy đủ MỘT lần → `/code-review` (+ `/security-review` khi chạm khoá, PIN, quyền, container) → thử trên dev → ảnh 390/1440.
+Nhánh local (CHƯA push): **`rel/v0165`** = bản gộp trên; **`rel/v0166` … `rel/v0170`** xếp chồng tiếp (v0.1.66 model hiển thị = model chạy, v0.1.67 agent làm và nói thật, v0.1.68 một danh sách việc, v0.1.69 chuông có vòng đời, v0.1.70 câu chữ sạch). Mỗi bản: gộp gói → bộ kiểm đầy đủ MỘT lần → `/code-review` (+ `/security-review` khi chạm khoá, PIN, quyền, container) → thử trên dev → ảnh 390/1440.
 
 ## Quy trình phát hành & cổng
 
@@ -74,11 +72,13 @@ Nhánh local đang làm (CHƯA push, ngoài `claude/v0162`): **v0.1.63** đã t�
 
 ## Việc dở
 
-### Boss phải làm — v0.1.63 (không bắt buộc; chi tiết ở [v0.1.63.md](../releases/v0.1.63.md))
+### Boss phải làm — v0.1.65 (gộp v0.1.63–65; không bắt buộc; chi tiết ở [v0.1.65.md](../releases/v0.1.65.md#việc-boss-phải-làm))
 
-1. Sau khi bản chính thức ra: `genh update` (hoặc đợi lịch đêm) — hộp `agy-box` và khoá `gh_agy_key` tự lên, không migration. Thẻ Sức khoẻ có dòng "Hộp riêng Antigravity: Đang chạy".
-2. Antigravity: đăng nhập vẫn ở **Kết nối › Bộ não AI** như cũ (api gửi phiên sang hộp theo từng lượt). Thẻ báo hết hạn ⇒ đăng nhập lại ở đó, không cần làm gì riêng trong hộp. Từ giờ agent trực kênh, Soạn lại / Dịch nháp chạy được bằng Antigravity; chưa có khoá API cũng được.
-3. Thẻ Zalo/WhatsApp "Mất liên lạc" ⇒ **Nối lại bằng phiên đã lưu** (từ v0.1.62). Tuỳ chọn: "Câu hỏi mở — mặc định đã chọn" ở [ROADMAP](../ROADMAP.md).
+1. Sau khi bản chính thức ra: `genh update` (hoặc đợi lịch đêm) — migration 0037/0038 tự chạy; hộp `agy-box` + proxy `agy-egress` và khoá `gh_agy_key` tự lên (Sức khoẻ: "Hộp riêng Antigravity: Đang chạy"); bridge khởi động lại.
+2. Antigravity: đăng nhập ở **Kết nối › Bộ não AI** bằng **một tài khoản Google riêng** (token đi vào hộp mỗi lượt có người ngoài). Máy chưa có khoá API nay cũng trả lời khách được bằng Antigravity qua hộp.
+3. Telegram (tuỳ chọn): thẻ Telegram › **Nhận tin từ Sếp** › Ghép Telegram (PIN) → gửi `/start <mã 6 số>` cho bot → bật công tắc. Mã PIN chỉ gõ ở Console.
+4. Biết trước: **nhóm mới tự vào Lắng nghe im lặng** (không trả lời kể cả khi tag; đổi ở thẻ kênh, PIN); tin 1-1 cài cũ đang tắt nay **lưu im lặng**; **THAY ĐỔI QUYỀN**: tin 1-1 chỉ Owner/người phụ trách, gán/bỏ BOT cho người = Owner + PIN, JID che với vai dưới Owner.
+5. Thẻ Zalo/WhatsApp "Mất liên lạc" ⇒ **Nối lại bằng phiên đã lưu**. Tuỳ chọn: "Câu hỏi mở — mặc định đã chọn" ở [ROADMAP](../ROADMAP.md).
 
 ### Boss phải làm — v0.1.61 (đã qua; `genh update` + người được giao quyền tự đặt mã PIN ở Tài khoản của tôi; [v0.1.61.md](../releases/v0.1.61.md))
 
@@ -150,11 +150,11 @@ Nhánh local đang làm (CHƯA push, ngoài `claude/v0162`): **v0.1.63** đã t�
 
 ### Claude / điều phối viên còn dở
 
-- **Phát hành v0.1.62–63**: v0.1.62 ở `local/v0162-rc`, v0.1.63 ở `local/v0163-int` (gốc v0.1.62 cuối; đã gộp H1 H2 H3 B2) → bộ kiểm đầy đủ → review → push theo mốc M1 cùng v0.1.64 (mặc định) → PR → CI xanh → merge squash → bản thử → E2E → promote → kiểm genh tải về khớp tag → báo Boss.
-- **Chưa làm (mang từ v0.1.58)**: bước rẻ ở `e2e-install` (`agy --help | grep -- --effort`, `missing_reason` trong container); ô chọn model vẫn ẩn khi Kiểm tra đỏ (`offeredGroups`). **Nợ #44–#46** (egress `agy-out`, core vào hộp, định dạng token agy) · **Nợ #35** kiểm WhatsApp QR với máy chủ thật.
+- **Phát hành v0.1.65 (bản gộp)**: `rel/v0165` đã kiểm đầy đủ → Opus review phần gộp → push → PR → CI xanh → merge squash → bản thử → E2E → promote → kiểm genh tải về khớp tag → `genh update` → báo Boss. v0.1.62 (đã gộp vào chuỗi này) ở `local/v0162-rc`.
+- **Chưa làm (mang từ v0.1.58)**: bước rẻ ở `e2e-install` (`agy --help | grep -- --effort`, `missing_reason` trong container); ô chọn model vẫn ẩn khi Kiểm tra đỏ (`offeredGroups`). **Nợ #44–#49** (allowlist egress hộp, core vào hộp, định dạng/xoay vòng token agy, quét danh bạ theo phần thay đổi, `view_scope`, tin 1-1 còn hở); đệm ở bridge cho loạt tin dồn < 1 giây trước khi tập nghe đồng bộ · **Nợ #35** kiểm WhatsApp QR với máy chủ thật.
 - **Bản kế tiếp (đã hẹn)**: nhận kết quả "Thử 12 câu mẫu" của Jev từ Boss rồi quyết ngưỡng lọc trước; Boss dùng thử Mặt tiền v2 rồi góp ý; chuông Gen dẫn về Mặt tiền; xoá hội thoại Gen thì xoá luôn lựa chọn model đã nhớ (Nợ #29); dọn mã chết trình thiết lập cũ (Nợ #36).
 - **H-b còn mở**: timer đêm mất lịch khi `daemon-reload`/`enable` chạy từ bên trong service đêm — không tái hiện được bằng mã lẫn `e2e-nightly-real` (systemd thật: sau lần chạy timer vẫn có lần kế tiếp); tự lành bao ca này. Máy thật còn tái diễn thì ghi vào v0.1.53.md.
 - **PR Renovate** không tự merge nằm chờ tới khi Boss nhắn "xử lý PR phụ thuộc"; chưa có lịch tự động nào gọi Claude.
 - **Selector ghi Facebook** mới kiểm trên trang mẫu — chờ nghiệm thu thật (dòng 8). Chuông phiên hết có thể hiện hai lần (`social.paused` + `social.session_expired`), gộp ở bản sau nếu phiền.
 - **Giới hạn đã biết**: TOTP chưa làm; Redis lỗi ⇒ giới hạn đăng nhập tạm không áp; gói apt trong Dockerfile chưa ghim phiên bản; tag GHCR `:latest` cũ đứng yên (không dùng).
-- **Mục Nợ đầy đủ** (bộ câu hỏi chuẩn so model, F-70, TOTP, Facebook đăng bài lát 2, cosign/minisign, PHIEN bù, trường Kho "Công cụ"/"Người làm", lời hẹn trượt F-91/F-92, Gen hướng dẫn: `release_todos`, danh mục tính năng, "Làm giúp" G8, bộ bài cho nhân viên, tắt chuông theo loại…; Nợ #34–#37 và #42–#45: hộp riêng agy, WhatsApp QR thật, mã chết trình thiết lập cũ, bảng Quan hệ ở 1024px, `list_promises` con trỏ, Chạy lại tin lỗi, allowlist egress `agy-out`): [ROADMAP › Nợ](../ROADMAP.md).
+- **Mục Nợ đầy đủ** (bộ câu hỏi chuẩn so model, F-70, TOTP, Facebook đăng bài lát 2, cosign/minisign, PHIEN bù, trường Kho "Công cụ"/"Người làm", lời hẹn trượt F-91/F-92, Gen hướng dẫn: `release_todos`, danh mục tính năng, "Làm giúp" G8, bộ bài cho nhân viên, tắt chuông theo loại…; Nợ #35–#37 và #42–#49: WhatsApp QR thật, mã chết trình thiết lập cũ, bảng Quan hệ ở 1024px, `list_promises` con trỏ, Chạy lại tin lỗi, hộp agy (egress, core, token), danh bạ, `view_scope`, tin 1-1): [ROADMAP › Nợ](../ROADMAP.md).
