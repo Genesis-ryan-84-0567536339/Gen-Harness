@@ -1,4 +1,4 @@
-import { relabelKho, type DataToolName } from '@gen-harness/contracts';
+import { KHO_LABEL, relabelKho, type DataToolName } from '@gen-harness/contracts';
 
 /**
  * Nhãn tiếng Việt của bước `tool` trong khung Gen ("Đã tra …"). Phải phủ MỌI tên trong `DATA_TOOL_NAMES`
@@ -50,4 +50,9 @@ export const TOOL_LABEL: Record<DataToolName, string> = {
  */
 export function toolLabel(name: string, khoLabel?: string | null): string {
   return relabelKho((TOOL_LABEL as Record<string, string>)[name] ?? 'dữ liệu', khoLabel);
+}
+
+/** Nhãn của bước này có chứa tên Kho (nên cần tên Kho Sếp tự đặt)? */
+export function toolLabelHasKho(name: string): boolean {
+  return ((TOOL_LABEL as Record<string, string>)[name] ?? '').includes(KHO_LABEL);
 }
