@@ -84,7 +84,7 @@ export const STEP_DESCRIPTIONS: Record<number, string> = {
   3: 'Thông tin tổ chức và cách agent xưng hô với Sếp trong mọi tin nhắn.',
   4: 'Hệ thống cần ít nhất một nguồn AI để đọc và hiểu tin nhắn: đăng nhập tài khoản Google (Antigravity CLI) hoặc dán khoá API. Bấm Kiểm tra, chọn model, rồi xếp thứ tự dùng khi một nguồn hết hạn mức. Để sau được, nhưng khi chưa có model thì Gen và sàng lọc tin chưa chạy.',
   5: 'Kết nối ít nhất một kênh để hệ thống bắt đầu gom tin. Zalo và WhatsApp đăng nhập bằng mã QR trên điện thoại của Sếp.',
-  6: 'Mọi nhóm vừa đồng bộ đang “Chờ Sếp chọn” — chưa lưu tin nào. Sếp chọn nhóm nào agent được nghe và ai được xem dữ liệu của nhóm; thiếu nhóm vừa vào thì bấm Cập nhật danh sách nhóm.',
+  6: 'Mọi nhóm vừa đồng bộ đang “Chờ Sếp chọn” — chưa lưu tin nào. Sếp chọn nhóm nào agent được nghe (cột “Phạm vi xem” hiện mới là ghi chú ý Sếp — quyền xem thật theo vai trò); thiếu nhóm vừa vào thì bấm Cập nhật danh sách nhóm.',
   7: 'Em dùng sẵn lịch lọc tin mặc định (mỗi 15 phút hoặc đủ 500 tin) — Sếp chỉ cần cho em biết ngành để chọn bộ quy tắc hợp. Chỉnh chi tiết ở mục Nâng cao hoặc ở Quy tắc sàng lọc sau.',
   8: 'Tạo trợ lý AI đầu tiên: chọn một mẫu là xong — tên và vai trò điền sẵn theo mẫu, sửa lại ở Danh tính Agent bất cứ lúc nào.',
   9: 'Mức trợ lý được tự làm đã chọn sẵn: Soạn sẵn chờ duyệt. Những giới hạn bên dưới luôn bật để bảo vệ Sếp và nhân viên — không ai tắt được.',

@@ -15,6 +15,8 @@ import { ToastHost } from '../../src/shell/ToastHost';
 import { queryClient } from '../../src/lib/queryClient';
 import { qk2, useChannels } from '../../src/lib/dataQueries';
 import { applyEvent } from '../../src/lib/realtime';
+import { GUIDE } from '../../src/guide/guideContent';
+import { STEP_DESCRIPTIONS } from '../../src/setup/steps';
 
 // v0.1.65 (F1c): nhóm mới CHỜ chọn (Im lặng / Không nghe), Cập nhật danh sách nhóm, nhãn "Nghe hết, chỉ trả lời khi được tag",
 // bỏ "chờ QR", tin 1-1 ba mức. Máy chủ giả bằng fetch; không gọi Zalo/WhatsApp thật.
@@ -288,5 +290,19 @@ describe('Bước 6 Thiết lập', () => {
     );
     expect(await screen.findByRole('button', { name: /Cập nhật danh sách nhóm/ })).toBeInTheDocument();
     expect(screen.queryByText(/chờ hệ thống đồng bộ/)).not.toBeInTheDocument();
+  });
+});
+
+// Review v0.1.65 (P3): `view_scope` chưa được áp ở máy chủ ⇒ hướng dẫn bước 6 không được hứa "chọn ai được xem dữ liệu nhóm".
+describe('Hướng dẫn nhóm: «Phạm vi xem» nói đúng sự thật', () => {
+  it('việc hướng dẫn và mô tả bước 6 gọi «Phạm vi xem» là ghi chú, quyền xem thật theo vai trò', () => {
+    const item = GUIDE.find((g) => g.steps.some((x) => x.includes('Phạm vi xem')));
+    expect(item).toBeDefined();
+    const step = item!.steps.find((x) => x.includes('Phạm vi xem'))!;
+    expect(step).toMatch(/ghi chú/);
+    expect(step).toMatch(/theo vai trò/);
+    expect(step).not.toMatch(/chọn ai được xem dữ liệu/);
+    expect(STEP_DESCRIPTIONS[6]).toMatch(/ghi chú/);
+    expect(STEP_DESCRIPTIONS[6]).not.toMatch(/ai được xem dữ liệu/);
   });
 });

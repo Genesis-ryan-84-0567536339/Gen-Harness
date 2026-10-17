@@ -927,7 +927,7 @@
       "steps": [
         "Bấm \"Làm bước này\".",
         "Trong bảng nhóm, ở cột \"Chế độ lắng nghe\" của nhóm muốn theo dõi, chọn một chế độ: \"Nghe hết, chỉ trả lời khi được tag\" (an toàn nhất: vẫn lưu mọi tin của nhóm, chỉ trả lời khi được gọi tên), \"Lắng nghe im lặng\" (ghi nhận, không trả lời) hoặc \"Chủ động bắt tín hiệu\". Thiếu nhóm vừa vào? Bấm \"Cập nhật danh sách nhóm\".",
-        "Ở cột \"Phạm vi xem\", chọn ai được xem dữ liệu nhóm đó (mặc định \"Chỉ Sếp\").",
+        "Ở cột \"Phạm vi xem\", ghi lại ý Sếp muốn ai được xem nhóm đó (mặc định \"Chỉ Sếp\"). Cột này hiện mới là ghi chú — quyền xem thật vẫn theo vai trò (Cài đặt › Quyền hạn).",
         "Bấm \"Tiếp tục\"."
       ],
       "done_when": "Có ít nhất một nhóm đã được bật nghe (không còn ở “Chờ Sếp chọn”, “Không nghe” hay “Tạm dừng”).",
