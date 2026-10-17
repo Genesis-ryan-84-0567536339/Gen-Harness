@@ -40,6 +40,30 @@ export interface TelegramHostStatus {
   test: { at: string; ok: boolean; error_code: string | null } | null;
 }
 
+/**
+ * v0.1.64 (Telegram 2 chiều): Sếp nhắn Gen qua bot. Chỉ tài khoản đã GHÉP bằng mã 6 số (sống 10 phút) được nhận; qua
+ * Telegram Gen chỉ đọc/đề xuất — KHÔNG có nút Duyệt, KHÔNG nhận mã PIN (ghi ra ngoài vẫn Xác nhận + PIN trong Console).
+ * Mã ghép không bao giờ có ở đây (chỉ trong phản hồi `pair/start`); `owner_masked` dạng "•••4321".
+ */
+export interface TelegramInbound {
+  /** Công tắc "Nhận tin từ Sếp" (mặc định TẮT với bản cài cũ; chỉ bật được khi đã ghép). */
+  enabled: boolean;
+  paired: boolean;
+  owner_masked: string | null;
+  paired_at: string | null;
+  /** Có mã ghép còn sống (đã bấm Ghép Telegram, chưa gửi /start <mã>, chưa hết 10 phút). */
+  pair_pending: boolean;
+  pair_expires_at: string | null;
+  /** Lỗi vòng nhận tin lần gần nhất (vd TELEGRAM_POLL_CONFLICT) — null = ổn / chưa chạy. */
+  error_code: string | null;
+  message: string | null;
+}
+
+/** `POST /notify/telegram/pair/start` — cấu hình + mã ghép (mã chỉ hiện MỘT lần, không lưu vào cache). */
+export interface TelegramPairStart extends TelegramConfig {
+  pair: { code: string; expires_at: string; bot_username: string | null };
+}
+
 export interface TelegramConfig {
   configured: boolean;
   enabled: boolean;
@@ -51,6 +75,8 @@ export interface TelegramConfig {
   updated_at: string | null;
   last_test: TelegramLastTest | null;
   host: TelegramHostStatus;
+  /** v0.1.64 — thiếu ở máy chủ cũ hơn. */
+  inbound?: TelegramInbound;
 }
 
 /**
@@ -88,10 +114,17 @@ export const TELEGRAM_ERROR_CODES = [
   'TELEGRAM_BOT_BLOCKED',
   'TELEGRAM_RATE_LIMITED',
   'TELEGRAM_UNREACHABLE',
+  // v0.1.64 (2 chiều)
+  'TELEGRAM_NOT_PAIRED',
+  'TELEGRAM_POLL_CONFLICT',
+  'TELEGRAM_INBOUND_ACTIVE',
 ] as const;
 export type TelegramErrorCode = (typeof TELEGRAM_ERROR_CODES)[number];
 
-/** `GET/PUT/DELETE /notify/telegram`, `POST /notify/telegram/find-chat`, `POST /notify/telegram/test`. */
+/**
+ * `GET/PUT/DELETE /notify/telegram`, `POST /notify/telegram/find-chat`, `POST /notify/telegram/test`.
+ * v0.1.64: `POST …/pair/start` (PIN) · `PUT …/inbound` {enabled} (PIN; bật cần đã ghép) · `DELETE …/pair` (PIN).
+ */
 export function telegramEndpoints(r: ApiClient['request']) {
   return {
     getTelegram: (signal?: AbortSignal) => r<TelegramConfig>('/notify/telegram', { signal }),
@@ -100,5 +133,11 @@ export function telegramEndpoints(r: ApiClient['request']) {
     findTelegramChat: (token?: string) =>
       r<TelegramFindChatResult>('/notify/telegram/find-chat', { method: 'POST', body: token ? { token } : {} }),
     testTelegram: () => r<TelegramTestResult>('/notify/telegram/test', { method: 'POST', body: {} }),
+    /** `telegram.pair_start` — cấp mã ghép 6 số (sống 10 phút). */
+    pairStartTelegram: () => r<TelegramPairStart>('/notify/telegram/pair/start', { method: 'POST', body: {} }),
+    /** `telegram.inbound_toggle` — công tắc "Nhận tin từ Sếp". */
+    setTelegramInbound: (enabled: boolean) => r<TelegramConfig>('/notify/telegram/inbound', { method: 'PUT', body: { enabled } }),
+    /** Gỡ ghép tài khoản Telegram của Sếp (tắt nhận tin, huỷ mã đang chờ). */
+    unpairTelegram: () => r<TelegramConfig>('/notify/telegram/pair', { method: 'DELETE' }),
   };
 }

@@ -1,6 +1,13 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import type { TelegramChat, TelegramConfig, TelegramFindChatResult, TelegramSaveBody, TelegramTestResult } from '@gen-harness/contracts';
+import type {
+  TelegramChat,
+  TelegramConfig,
+  TelegramFindChatResult,
+  TelegramPairStart,
+  TelegramSaveBody,
+  TelegramTestResult,
+} from '@gen-harness/contracts';
 import { ApiError } from '@gen-harness/contracts';
 import { Button, Dialog, Icon, Switch, TextField } from '@gen-harness/ui';
 import { BOSS_CHECKS_KEY } from '../../guide/bossChecksModel';
@@ -18,11 +25,19 @@ import {
   BOTFATHER_STEPS,
   FIND_CHAT_EMPTY,
   HOST_STATE_LABEL,
+  INBOUND_NOTE,
+  INBOUND_TITLE,
+  PAIR_CODE_HINT,
   TELEGRAM_KEY,
   TELEGRAM_WARNING,
   type HostWait,
+  asInbound,
   asTelegramConfig,
   hostPollMs,
+  inboundStatusText,
+  pairInstruction,
+  pairPollMs,
+  spacedCode,
   hostTestText,
   hostWarning,
   hostWarningDetail,
@@ -39,6 +54,10 @@ import {
  * v0.1.44 (F-8c) — Kết nối › Telegram ("Báo động & bản tin"), CHỈ Owner. Bot Telegram của Sếp nhận cảnh báo sự cố
  * từ "Trực canh máy chủ" và bản tin 07:30/17:30, nhắc việc. Token chỉ GHI (máy chủ không bao giờ trả lại): sau khi
  * lưu, ô token xoá trắng, thẻ chỉ hiện "@bot → chat •••1234". Lưu/Tắt cần PIN (apiClient tự mở hộp PIN khi 423).
+ *
+ * v0.1.64 (Telegram 2 chiều): khối "Nhận tin từ Sếp" — Ghép Telegram (mã 6 số sống 10 phút, Sếp gửi `/start <mã>` cho
+ * bot), công tắc nhận tin (mặc định TẮT với bản cài cũ), Gỡ ghép. Qua Telegram Gen chỉ đọc/đề xuất: không có nút Duyệt,
+ * không nhập mã PIN ở đây ngoài hộp PIN chuẩn của Console. Mã ghép chỉ nằm trong state của thẻ, không vào cache.
  */
 export function TelegramCard() {
   // Gửi thử đạt + đã nhờ Trực canh máy chủ gửi tin thứ hai ⇒ hỏi lại mỗi 5 giây (tối đa ~2 phút) tới khi kết quả tin
@@ -47,7 +66,10 @@ export function TelegramCard() {
   const q = useQuery({
     queryKey: TELEGRAM_KEY,
     queryFn: ({ signal }) => api.notify.getTelegram(signal),
-    refetchInterval: (query) => hostPollMs(hostWait, asTelegramConfig(query.state.data)?.host?.test?.at),
+    refetchInterval: (query) => {
+      const d = asTelegramConfig(query.state.data);
+      return pairPollMs(d) || hostPollMs(hostWait, d?.host?.test?.at);
+    },
   });
   const t = asTelegramConfig(q.data);
   const [editing, setEditing] = useState(false);
@@ -321,8 +343,128 @@ function ConfiguredView({ t, onEdit, onHostRequested }: { t: TelegramConfig; onE
         <p className="muted-note">Chưa Gửi thử lần nào — bấm Gửi thử để chắc tin tới được điện thoại.</p>
       )}
       {test.isError ? <InlineError detail={errorDetail(test.error)}>{errorText(test.error)}</InlineError> : null}
+      <InboundBlock t={t} />
       {confirmOff ? <DisableDialog onClose={() => setConfirmOff(false)} /> : null}
     </>
+  );
+}
+
+/** Phần "Nhận tin từ Sếp" (v0.1.64): ghép bằng mã 6 số, công tắc, gỡ ghép. Ẩn khi máy chủ cũ chưa có khối `inbound`. */
+function InboundBlock({ t }: { t: TelegramConfig }) {
+  const tz = useOrgTimezone();
+  const inbound = asInbound(t);
+  const [pair, setPair] = useState<TelegramPairStart['pair'] | null>(null);
+  const [confirmUnpair, setConfirmUnpair] = useState(false);
+  const start = useMutation({
+    mutationFn: () => api.notify.pairStartTelegram(),
+    onSuccess: (r) => {
+      const { pair: p, ...cfg } = r; // mã ghép chỉ ở state thẻ — không đưa vào cache của react-query
+      setPair(p);
+      applyConfig(cfg);
+    },
+  });
+  const toggle = useMutation({
+    mutationFn: (enabled: boolean) => api.notify.setTelegramInbound(enabled),
+    onSuccess: (c) => applyConfig(c),
+  });
+  if (!inbound) return null;
+  // Đã ghép xong (hoặc mã hết hạn) ⇒ bỏ mã khỏi màn hình.
+  const showCode = pair !== null && inbound.pair_pending && !inbound.paired;
+  const statusText = inboundStatusText(inbound, (iso) => fmtDMClock(iso, tz));
+  const err = toggle.error ?? start.error;
+  return (
+    <div className="telegram-inbound" data-testid="telegram-inbound" role="group" aria-label={INBOUND_TITLE}>
+      <div className="gh-card__kicker">{INBOUND_TITLE}</div>
+      <div className="triage-row">
+        <Switch
+          checked={inbound.enabled}
+          label={INBOUND_TITLE}
+          disabled={!inbound.paired || toggle.isPending}
+          onChange={(v) => toggle.mutate(v)}
+        />
+        <span>{INBOUND_TITLE}</span>
+      </div>
+      <p className="muted-note" data-testid="telegram-inbound-status">
+        {statusText}
+      </p>
+      {inbound.error_code && inbound.enabled ? (
+        <div className="muted-note friendly-error" role="status" data-testid="telegram-inbound-error">
+          {telegramErrorText(inbound.error_code, inbound.message)}
+          <details className="tech-detail">
+            <summary>Chi tiết kỹ thuật</summary>
+            <code>{telegramTechDetail({ error_code: inbound.error_code, message: inbound.message })}</code>
+          </details>
+        </div>
+      ) : null}
+      {showCode && pair ? (
+        <div className="telegram-pair" data-testid="telegram-pair" role="status">
+          <div className="mono" style={{ fontSize: 28, letterSpacing: 4 }} data-testid="telegram-pair-code">
+            {spacedCode(pair.code)}
+          </div>
+          <p className="muted-note">{pairInstruction(pair.bot_username ?? t.bot_username, pair.code)}</p>
+          <p className="muted-note">{`${PAIR_CODE_HINT} Hết hạn lúc ${fmtDMClock(pair.expires_at, tz)}.`}</p>
+        </div>
+      ) : null}
+      <div className="conn-card__actions">
+        <Button variant="secondary" className="btn-27" icon="ph ph-link" loading={start.isPending} onClick={() => start.mutate()}>
+          {inbound.paired ? 'Ghép lại' : 'Ghép Telegram'}
+        </Button>
+        {inbound.paired ? (
+          <Button variant="ghost" className="btn-27" icon="ph ph-link-break" onClick={() => setConfirmUnpair(true)}>
+            Gỡ ghép
+          </Button>
+        ) : null}
+      </div>
+      {err ? <InlineError detail={errorDetail(err)}>{inboundErrorText(err)}</InlineError> : null}
+      <p className="muted-note" role="note" data-testid="telegram-inbound-note">
+        <Icon name="ph ph-shield-check" size={12} /> {INBOUND_NOTE}
+      </p>
+      {confirmUnpair ? <UnpairDialog onClose={() => setConfirmUnpair(false)} onDone={() => setPair(null)} /> : null}
+    </div>
+  );
+}
+
+/** Lỗi API của phần Nhận tin: mã đã biết ⇒ câu riêng; còn lại ⇒ câu chung của errorText. Luôn là chuỗi. */
+function inboundErrorText(e: unknown): string {
+  if (e instanceof ApiError && e.code && (e.code === 'TELEGRAM_NOT_PAIRED' || e.code.startsWith('TELEGRAM_'))) {
+    return telegramErrorText(e.code, e.message);
+  }
+  return errorText(e);
+}
+
+function UnpairDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const del = useMutation({
+    mutationFn: () => api.notify.unpairTelegram(),
+    onSuccess: (c) => {
+      applyConfig(c);
+      toast('Đã gỡ ghép — bot không còn nhận tin từ Sếp.', 'ok');
+      onDone();
+      onClose();
+    },
+  });
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      width={440}
+      title="Gỡ ghép Telegram?"
+      kicker={INBOUND_TITLE}
+      actions={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Giữ lại
+          </Button>
+          <Button variant="primary" loading={del.isPending} onClick={() => del.mutate()}>
+            Gỡ ghép
+          </Button>
+        </>
+      }
+    >
+      <p className="help-text">
+        Bot sẽ ngừng nhận tin từ tài khoản Telegram đã ghép. Báo động, bản tin, nhắc việc vẫn gửi như cũ. Muốn nhắn Gen qua Telegram lại, Sếp ghép lại bằng mã 6 số.
+      </p>
+      {del.isError ? <InlineError detail={errorDetail(del.error)}>{errorText(del.error)}</InlineError> : null}
+    </Dialog>
   );
 }
 
