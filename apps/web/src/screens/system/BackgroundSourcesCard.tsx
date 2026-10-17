@@ -6,12 +6,13 @@ import { Button, Dialog, Icon, Switch } from '@gen-harness/ui';
 import { errorDetail, errorText } from '../../lib/errorText';
 import { detailToText } from '../../lib/friendlyError';
 import { useCan } from '../../lib/permissions';
+import { AGY_BACKGROUND_NOTE } from '../../lib/agyLayers';
 import { useMe } from '../../lib/queries';
 import { toast } from '../../lib/toast';
 import { CardError, InlineError, Panel, PinHint, SkeletonLines } from '../common';
 import { useBackgroundSources, useSetBackgroundSources } from './queries';
 
-/** Nguồn CLI duy nhất Owner được bật cho việc nền (QD-12). Antigravity CLI KHÔNG BAO GIỜ chạy việc nền (F-22). */
+/** Nguồn CLI duy nhất Owner phải bật cho việc nền (QD-12). Antigravity CLI chạy việc nền không cần công tắc (v0.1.62). */
 const CLAUDE_CLI = 'claude_code_cli';
 
 /**
@@ -45,10 +46,10 @@ function fieldError(e: unknown): string {
 }
 
 /**
- * v0.1.41 (F-86, QD-12): "Nguồn AI cho việc nền" ở Bộ não AI — việc nền (sàng lọc tin, trực việc, Bản tin Gen) mặc định
- * chỉ chạy bằng khoá API. Owner có thể cho Claude Code CLI chạy việc nền: hộp cảnh báo hiện `risk_text` NGUYÊN VĂN từ
- * máy chủ + ô tích xác nhận + PIN `ai.background_cli` (423 ⇒ hộp PIN tự mở qua lib/api.ts rồi gửi lại). Tắt không cần
- * cảnh báo. Antigravity CLI không bao giờ là lựa chọn bật (F-22). Vai trò khác chỉ đọc.
+ * v0.1.41 (F-86, QD-12): "Nguồn AI cho việc nền" ở Bộ não AI — việc nền (sàng lọc tin, trực việc, Bản tin Gen) chạy bằng
+ * khoá API và (v0.1.62) Antigravity CLI. Owner có thể cho Claude Code CLI chạy việc nền: hộp cảnh báo hiện `risk_text`
+ * NGUYÊN VĂN từ máy chủ + ô tích xác nhận + PIN `ai.background_cli` (423 ⇒ hộp PIN tự mở qua lib/api.ts rồi gửi lại). Tắt
+ * không cần cảnh báo. Antigravity CLI không có công tắc (luôn chạy được). Vai trò khác chỉ đọc.
  */
 export function BackgroundSourcesCard() {
   const canRead = useCan('system.read');
@@ -80,7 +81,7 @@ function BackgroundBody({ data }: { data: BackgroundSources }) {
   const turnOff = () =>
     save.mutate(
       { allow_cli: [], accept_risk: false },
-      { onSuccess: () => toast('Đã tắt Claude Code CLI cho việc nền — việc nền chỉ dùng khoá API') },
+      { onSuccess: () => toast('Đã tắt Claude Code CLI cho việc nền — việc nền dùng khoá API hoặc Antigravity CLI') },
     );
 
   return (
@@ -104,17 +105,17 @@ function BackgroundBody({ data }: { data: BackgroundSources }) {
         </ol>
       )}
 
-      {!data.has_api_source ? (
+      {!data.has_api_source && !data.has_agy_source ? (
         <div className="risk-box bg-src__nokey" role="note" data-testid="bg-src-no-key" data-cli={cliOn ? 'on' : 'off'}>
           <Icon name="ph ph-key" size={16} color="var(--color-warn)" />
           <div className="risk-box__text">
             {cliOn ? (
-              // Owner đã cho Claude Code CLI chạy việc nền ⇒ việc nền VẪN chạy; chỉ khuyên thêm khoá API cho an toàn.
+              // Owner đã cho Claude Code CLI chạy việc nền ⇒ việc nền VẪN chạy; chỉ khuyên thêm khoá API hoặc Antigravity CLI.
               <div className="risk-box__title">Việc nền đang chạy bằng Claude Code CLI — nên dán khoá API OpenRouter/Gemini để an toàn hơn</div>
             ) : (
               <>
-                <div className="risk-box__title">Chưa có khoá API — dán khoá OpenRouter/Gemini để việc nền chạy</div>
-                Bản tin Gen vẫn gửi đúng giờ phần không cần model; sàng lọc tin và trực việc cần một nguồn AI bằng khoá API.
+                <div className="risk-box__title">Chưa có nguồn AI cho việc nền — dán khoá OpenRouter/Gemini hoặc đăng nhập Antigravity CLI</div>
+                Bản tin Gen vẫn gửi đúng giờ phần không cần model; sàng lọc tin cần một nguồn AI (khoá API hoặc Antigravity CLI), trực việc cần khoá API.
               </>
             )}
             {canManage ? (
@@ -152,7 +153,9 @@ function BackgroundBody({ data }: { data: BackgroundSources }) {
           {save.isError && !confirmOpen ? <InlineError detail={errorDetail(save.error)}>{fieldError(save.error)}</InlineError> : null}
         </div>
       ) : null}
-      <p className="muted-note">Antigravity CLI chỉ dùng khi Sếp hỏi Gen trực tiếp — không bao giờ chạy việc nền.</p>
+      <p className="muted-note" data-testid="bg-src-agy-note">
+        {AGY_BACKGROUND_NOTE}
+      </p>
 
       {confirmOpen ? <ConfirmCliDialog riskText={data.risk_text} onClose={() => setConfirmOpen(false)} save={save} /> : null}
     </>

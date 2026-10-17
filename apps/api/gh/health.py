@@ -12,7 +12,8 @@ cả chuông (core.notifications) lẫn dải "Cần Sếp xử lý" ở Tổng 
 - `evaluate` + `watch_loop` (chạy trong api, `Settings.health_watch_seconds`): mỗi phút tính lại các sự cố theo dõi
   định kỳ (cập nhật lỗi trong 24 giờ, quá hạn sao lưu theo tần suất bước 11, bộ xử lý nền im, ổ đĩa sắp đầy, model
   đang hết đăng nhập, bản sao ngoài máy cũ/lỗi — v0.1.40, chi phí AI hôm nay vượt trần — v0.1.41, lịch tự cập nhật
-  đêm im quá 36 giờ — v0.1.53) và dọn dòng sự kiện cũ.
+  đêm im quá 36 giờ — v0.1.53, cầu nối tin nhắn im quá 2 phút và hàng lỗi tin khách vào > 0 — v0.1.62) và dọn dòng sự
+  kiện cũ.
 
 Hợp đồng Redis với worker (gh/worker.py ghi): `gh:cron:last:<tên hàm>` = JSON {"at": ISO UTC 'Z', "ok": bool,
 "ms": int} + tên hàm trong tập `gh:cron:names`; `gh:worker:heartbeat` = ISO UTC. Hàng lỗi: tập `gh:dlq:streams`
@@ -49,6 +50,18 @@ BACKUP_STALE_LIMITS: dict[str, tuple[timedelta, str]] = {
 UPDATE_FAILED_RECENT = timedelta(hours=24)
 WORKER_SILENT_MINUTES = 10
 HEARTBEAT_KEY = "gh:worker:heartbeat"
+#: Nhịp tim cầu nối tin nhắn (apps/bridge ghi mỗi 15 giây, TTL 45 giây). Khoá HẾT HẠN sau 45 giây nên "mất khoá" không
+#: đủ để biết im bao lâu ⇒ lấy thêm nhịp từng phiên kênh (`core.channel_sessions.last_heartbeat_at`, cũng 15 giây/lần).
+BRIDGE_HEARTBEAT_KEY = "gh:bridge:heartbeat"
+#: Cầu nối im quá N phút (mà còn kênh đang "kết nối") ⇒ sự cố `bridge.silent`. Dư gấp nhiều lần chu kỳ nhịp để bridge
+#: khởi động lại / Redis chớp không đẻ chuông giả.
+BRIDGE_SILENT_MINUTES = 2
+#: Hàng lỗi của tin khách vào (`gh.bridge.inbound`): tin đã thử nhập kho 5 lần mà vẫn lỗi. Chỉ hàng này phát lại được
+#: (nhập kho tin thô idempotent theo mã tin ngoài); mọi hàng lỗi khác chỉ xem rồi xoá — phát lại có thể lặp tác dụng.
+DLQ_INBOUND = "gh.bridge.inbound.dlq"
+DLQ_REPLAYABLE = frozenset({"gh.bridge.inbound"})
+#: Một lần bấm "Phát lại" xử lý tối đa N tin (còn dư thì bấm tiếp) — không giữ yêu cầu HTTP quá lâu.
+DLQ_REPLAY_BATCH = 500
 CRON_LAST_PREFIX = "gh:cron:last:"
 CRON_NAMES_KEY = "gh:cron:names"
 DISCOVERED_KEY = "gh:health:discovered"
@@ -81,9 +94,14 @@ NIGHTLY_STALE_HOURS = 36
 ACTIONS = {
     "channel.down": "Đăng nhập lại",
     "model.auth_expired": "Đăng nhập lại model",
+    # Khoá API bị từ chối dùng cùng `kind` model.auth_expired nhưng link `/api` ⇒ nhãn nút riêng (`_ACTION_BY_LINK`).
     "update.failed": "Xem & thử lại",
     "backup.stale": "Mở mục Sao lưu",
     "worker.silent": "Xem sức khoẻ",
+    # F051: cầu nối tin nhắn (Zalo/WhatsApp) im — tin khách không vào được.
+    "bridge.silent": "Xem sức khoẻ",
+    # F064/F102: tin khách nằm trong hàng lỗi — đích là nút Phát lại ở thẻ Sức khoẻ.
+    "dlq.inbound": "Xem & phát lại",
     "disk.low": "Xem cách giải phóng",
     "host.autostart": "Xem cách bật",
     # v0.1.53 (F-99): lịch tự cập nhật đêm không chạy (tắt / linger tắt / trình nhận yêu cầu lỗi) — `_eval_nightly`.
@@ -106,6 +124,11 @@ ACTIONS = {
     # Nút cuộn tới + làm sáng thẻ Gen-hub ở Kết nối (không mở trang Gen-hub bên ngoài) — cùng nhãn nút của Bản tin.
     "hub.unreachable": "Mở thẻ Gen-hub",
 }
+#: Khoá API bị từ chối (F007): đích `/api` (API & Model — nơi dán khoá mới) ⇒ nhãn nút theo ĐÍCH, không theo `kind`
+#: (CLI vẫn "Đăng nhập lại model" → Kết nối › Bộ não AI). Khoá = (kind, link).
+MODEL_API_LINK = "/api"
+MODEL_CLI_LINK = "/connections#brain"
+_ACTION_BY_LINK = {("model.auth_expired", MODEL_API_LINK): "Thêm khoá API mới"}
 #: Nhãn cho người KHÔNG phải Owner khi nút ở nhãn gốc chỉ Owner có (vd "Chọn nơi lưu" — Manager không có nút đó).
 NON_OWNER_ACTIONS = {
     "offsite.stale": "Xem bản sao ngoài máy",
@@ -246,7 +269,8 @@ async def active_issues(db: AsyncSession, org_id: uuid.UUID, *, is_owner: bool =
     return [{"key": r.key, "kind": r.kind, "severity": r.severity, "title": r.title,
              "body": _viewer_body(r.kind, r.fingerprint, r.body, is_owner),
              "link": None if not is_owner and r.kind in NON_OWNER_NO_LINK else r.link,
-             "action": labels.get(r.kind, "Xem chi tiết"), "raised_at": _iso(r.raised_at)}
+             "action": _ACTION_BY_LINK.get((r.kind, r.link)) or labels.get(r.kind, "Xem chi tiết"),
+             "raised_at": _iso(r.raised_at)}
             for r in rows]
 
 
@@ -278,6 +302,30 @@ async def _dlq_queues(redis: Any) -> list[dict[str, Any]]:
             continue
         queues.append({"stream": name[: -len(".dlq")], "dlq": int(await redis.xlen(name))})
     return queues
+
+
+# ─── cầu nối tin nhắn (bridge): nhịp tim ─────────────────────────────────────────────────────────────────────
+
+async def _bridge_state(db: AsyncSession, redis: Any, org_id: uuid.UUID, now: datetime) -> dict[str, Any] | None:
+    """Cầu nối tin nhắn (apps/bridge). Trả {"state": 'ok'|'silent', "last_seen_at", "silent_minutes"} hoặc None khi
+    không có gì để báo (không có nhịp VÀ không kênh nào đang "kết nối" ⇒ chưa dùng cầu nối, không phải sự cố).
+
+    - Khoá nhịp còn ⇒ 'ok' (khoá sống 45 giây, bridge ghi lại mỗi 15 giây).
+    - Hết khoá: dựa vào nhịp gần nhất của các phiên kênh còn "kết nối" (`state='active'`, chưa kết thúc) — bridge
+      chết/treo không gửi `session.ended` nên phiên vẫn 'active' mà nhịp đứng yên; im quá `BRIDGE_SILENT_MINUTES` ⇒
+      'silent'. Phiên chưa có nhịp nào lấy giờ bắt đầu làm mốc."""
+    raw = await redis.get(BRIDGE_HEARTBEAT_KEY)
+    if raw:
+        return {"state": "ok", "last_seen_at": _iso(_parse_ts(raw) or now), "silent_minutes": None}
+    seen = (await db.execute(text("""
+        SELECT max(COALESCE(last_heartbeat_at, started_at, qr_issued_at)) FROM core.channel_sessions
+        WHERE org_id = :o AND state = 'active' AND ended_at IS NULL"""), {"o": org_id})).scalar_one_or_none()
+    if seen is None:
+        return None
+    gap = now - seen
+    if gap <= timedelta(minutes=BRIDGE_SILENT_MINUTES):
+        return {"state": "ok", "last_seen_at": _iso(seen), "silent_minutes": None}
+    return {"state": "silent", "last_seen_at": _iso(seen), "silent_minutes": int(gap.total_seconds() // 60)}
 
 
 async def _cron_runs(redis: Any) -> list[dict[str, Any]]:
@@ -526,6 +574,13 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
     except Exception:  # noqa: BLE001
         log.warning("Không đọc được nhịp trình duyệt nền", exc_info=True)
 
+    # F051: cầu nối tin nhắn — CHỈ có khối khi có nhịp hoặc có kênh đang "kết nối" (giữ khuôn cũ khi chưa dùng cầu nối).
+    bridge: dict[str, Any] | None = None
+    try:
+        bridge = await _bridge_state(db, redis, org_id, now)
+    except Exception:  # noqa: BLE001
+        log.warning("Không đọc được nhịp cầu nối tin nhắn", exc_info=True)
+
     queues: list[dict[str, Any]] = []
     try:
         queues = await _dlq_queues(redis)
@@ -621,6 +676,7 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
         log.warning("Không đọc được kết quả kiểm Việc Sếp cần làm", exc_info=True)
 
     bad = (any(i["severity"] == "bad" for i in issues) or worker["state"] == "silent"
+           or (bridge is not None and bridge["state"] == "silent")
            or (update["failed"] and not update["interrupted"]) or disk["state"] == "low" or backup["stale"])
     warn = (any(i["severity"] == "warn" for i in issues) or browser["state"] == "silent" or update["failed"]
             or any(q["dlq"] > 0 for q in queues) or any(c["ok"] is False for c in crons)
@@ -639,6 +695,8 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
         "disk": disk,
         "issues": issues,
     }
+    if bridge is not None:
+        out["bridge"] = bridge
     if boss_checks:
         # Chỉ khi đã có ít nhất một lần kiểm (như 'autostart': khuôn cũ giữ nguyên khi chưa có gì để xem).
         out["boss_checks"] = boss_checks
@@ -735,6 +793,93 @@ async def _eval_worker(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
                               "Bấm để xem cách khởi động lại.", link=STORAGE_LINK, redis=redis)
     elif state == "ok":
         await clear(db, org_id, "worker.silent")
+
+
+async def _eval_bridge(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: datetime) -> None:
+    """F051: cầu nối tin nhắn im quá `BRIDGE_SILENT_MINUTES` mà còn kênh đang "kết nối" ⇒ sự cố `bridge.silent`
+    (chuông + dải "Cần Sếp xử lý"). Có nhịp lại / không còn kênh nào cần cầu nối ⇒ đóng."""
+    st = await _bridge_state(db, redis, org_id, now)
+    if st is not None and st["state"] == "silent":
+        await raise_once(db, org_id, key="bridge.silent", kind="bridge.silent", severity="bad",
+                         title=f"Bộ nhận tin Zalo/WhatsApp đã ngừng {st['silent_minutes']} phút",
+                         body="Tin khách đang KHÔNG vào được Gen-Harness và bản nháp đã duyệt có thể hết hạn trước khi "
+                              "gửi, dù thẻ kênh vẫn ghi \"Đang kết nối\". Bấm để xem cách khởi động lại.",
+                         link=HEALTH_LINK, redis=redis)
+    else:
+        await clear(db, org_id, "bridge.silent")
+
+
+async def sync_dlq_alert(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:
+    """F064/F102: hàng lỗi tin khách vào (`DLQ_INBOUND`) > 0 ⇒ sự cố `dlq.inbound` (một chuông tới khi hết; số tin đổi
+    thì chỉ làm mới chữ). Hết sạch (phát lại / xoá) ⇒ đóng ngay. Bên gọi commit."""
+    n = int(await redis.xlen(DLQ_INBOUND)) if await redis.exists(DLQ_INBOUND) else 0
+    if n > 0:
+        await raise_once(db, org_id, key="dlq.inbound", kind="dlq.inbound", severity="warn",
+                         title=f"{n} tin khách chưa nhập kho được",
+                         body="Mỗi tin đã thử nhập 5 lần mà vẫn lỗi nên nằm trong hàng lỗi — chưa mất. Bấm để xem và "
+                              "phát lại; phát lại vẫn lỗi thì gửi kèm khi báo lỗi (Trợ giúp › Báo lỗi).",
+                         link=HEALTH_LINK, redis=redis)
+    else:
+        await clear(db, org_id, "dlq.inbound")
+
+
+class DlqError(Exception):
+    """Phát lại/xoá hàng lỗi không làm được; `code` ∈ {'unknown', 'not_replayable'} (route đổi sang lỗi HTTP)."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+async def _dlq_name(redis: Any, stream: str) -> str:
+    """Tên hàng lỗi của `stream` nếu là hàng đã ghi nhận (tập `gh:dlq:streams`) — không nhận tên tuỳ ý từ URL."""
+    from gh.chassis.bus import DLQ_STREAMS_KEY
+
+    await _discover(redis)
+    name = f"{stream}.dlq"
+    if not stream or not await redis.sismember(DLQ_STREAMS_KEY, name) or not await redis.exists(name):
+        raise DlqError("unknown")
+    return name
+
+
+async def dlq_replay(redis: Any, stream: str) -> dict[str, int]:
+    """Phát lại tối đa `DLQ_REPLAY_BATCH` việc trong hàng lỗi của `stream` (chỉ `DLQ_REPLAYABLE`): chép sang stream gốc
+    (bỏ `error`/`group`) rồi xoá khỏi hàng lỗi — chép TRƯỚC xoá SAU nên không mất tin; lỡ dở thì tin nhập kho lại bị bỏ
+    qua vì trùng mã tin ngoài (`ingest_message` idempotent). Trả {"replayed", "remaining"}."""
+    from gh.chassis.bus import DLQ_STREAMS_KEY
+
+    name = await _dlq_name(redis, stream)
+    if stream not in DLQ_REPLAYABLE:
+        raise DlqError("not_replayable")
+    replayed = 0
+    for entry_id, fields in await redis.xrange(name, min="-", max="+", count=DLQ_REPLAY_BATCH):
+        keep = {k: v for k, v in fields.items() if _s(k) not in ("error", "group")}
+        if keep:
+            await redis.xadd(stream, keep, maxlen=100_000, approximate=True)
+        await redis.xdel(name, entry_id)
+        replayed += 1
+    remaining = int(await redis.xlen(name))
+    if remaining == 0:
+        await redis.srem(DLQ_STREAMS_KEY, name)
+    return {"replayed": replayed, "remaining": remaining}
+
+
+async def dlq_clear(redis: Any, stream: str) -> dict[str, int]:
+    """"Đã xem, xoá": XTRIM hàng lỗi của `stream` tới mục mới nhất TẠI LÚC BẤM (MINID = mã đó + 1) — việc lỗi mới tới
+    sau đó vẫn còn. Trả {"cleared", "remaining"}."""
+    from gh.chassis.bus import DLQ_STREAMS_KEY
+
+    name = await _dlq_name(redis, stream)
+    last = await redis.xrevrange(name, count=1)
+    if not last:
+        return {"cleared": 0, "remaining": 0}
+    ms, _, seq = _s(last[0][0]).partition("-")
+    before = int(await redis.xlen(name))
+    await redis.xtrim(name, minid=f"{ms}-{int(seq or 0) + 1}", approximate=False)
+    remaining = int(await redis.xlen(name))
+    if remaining == 0:
+        await redis.srem(DLQ_STREAMS_KEY, name)
+    return {"cleared": before - remaining, "remaining": remaining}
 
 
 async def _eval_disk(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:
@@ -906,12 +1051,24 @@ async def _eval_offsite(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: da
 
 async def raise_model_expired(db: AsyncSession, org_id: uuid.UUID, provider_id: uuid.UUID, name: str, *,
                               redis: Any = None) -> bool:
-    """Sự cố "model cần đăng nhập lại" — một khoá mỗi nhà cung cấp (`model.auth_expired:<uuid>`)."""
-    return await raise_once(
-        db, org_id, key=f"model.auth_expired:{provider_id}", kind="model.auth_expired", severity="warn",
-        title=f"Model {name} cần đăng nhập lại",
-        body="Gen và sàng lọc tin có thể dừng nếu không còn model khác. Bấm để đăng nhập lại.",
-        link="/system?tab=brain", redis=redis)
+    """Sự cố "model hết xác thực" — một khoá mỗi nhà cung cấp (`model.auth_expired:<uuid>`). F007: câu chữ + đích bấm
+    theo LOẠI nguồn — CLI (đăng nhập tài khoản) ⇒ Kết nối › Bộ não AI; khoá API (dán khoá) ⇒ API & Model, vì khoá API
+    không có chuyện "đăng nhập" và trang Bộ não AI chỉ đọc."""
+    from gh.providers.router import CLI_KINDS
+
+    kind = (await db.execute(text("SELECT kind FROM agent.providers WHERE id = :i"),
+                             {"i": provider_id})).scalar_one_or_none()
+    if kind in CLI_KINDS:
+        title = f"Model {name} cần đăng nhập lại"
+        body = "Gen và sàng lọc tin có thể dừng nếu không còn model khác. Bấm để đăng nhập lại."
+        link = MODEL_CLI_LINK
+    else:
+        title = f"Khoá API của {name} bị từ chối — thêm khoá mới"
+        body = ("Khoá bị sai, hết hạn hoặc chưa có nên nhà cung cấp không nhận. Gen và sàng lọc tin có thể dừng nếu "
+                "không còn model khác. Bấm để dán khoá mới ở API & Model.")
+        link = MODEL_API_LINK
+    return await raise_once(db, org_id, key=f"model.auth_expired:{provider_id}", kind="model.auth_expired",
+                            severity="warn", title=title, body=body, link=link, redis=redis)
 
 
 async def _eval_models(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:
@@ -950,14 +1107,16 @@ async def _eval_budget(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
 
 
 async def _eval_background_source(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:
-    """v0.1.41 (F-86): sự cố `ai.background_no_source` đang mở mà Sếp đã thêm khoá API (có model) hoặc đã cho Claude
-    Code CLI chạy việc nền ⇒ đóng ngay, không đợi một lượt việc nền chạy được (refinery rảnh / trực việc tắt thì có
-    thể tới bản tin kế tiếp mới có lượt). Chỉ truy vấn nguồn khi sự cố đang mở."""
+    """v0.1.41 (F-86): sự cố `ai.background_no_source` đang mở mà Sếp đã thêm khoá API (có model), đăng nhập Antigravity
+    CLI (có model; v0.1.62 — chạy được việc nền) hoặc đã cho Claude Code CLI chạy việc nền ⇒ đóng ngay, không đợi một
+    lượt việc nền chạy được (refinery rảnh / trực việc tắt thì có thể tới bản tin kế tiếp mới có lượt). Chỉ truy vấn
+    nguồn khi sự cố đang mở."""
     from gh.providers.router import (
         BG_NO_SOURCE_FLAG,
         BG_NO_SOURCE_KEY,
         BG_NO_SOURCE_TRY,
         background_cli_allowed,
+        has_agy_source,
         has_api_source,
     )
 
@@ -966,7 +1125,8 @@ async def _eval_background_source(db: AsyncSession, org_id: uuid.UUID, redis: An
                               {"o": org_id, "k": BG_NO_SOURCE_KEY})).first()
     if open_ is None:
         return
-    if await has_api_source(db, org_id) or await background_cli_allowed(db, org_id):
+    if (await has_api_source(db, org_id) or await has_agy_source(db, org_id)
+            or await background_cli_allowed(db, org_id)):
         await clear(db, org_id, BG_NO_SOURCE_KEY)
         await redis.delete(BG_NO_SOURCE_FLAG.format(org_id), BG_NO_SOURCE_TRY.format(org_id))
 
@@ -1011,6 +1171,8 @@ async def evaluate(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: date
         ("update.failed", lambda: _eval_update(db, org_id, redis, now)),
         ("backup.stale", lambda: _eval_backup(db, org_id, redis, now)),
         ("worker.silent", lambda: _eval_worker(db, org_id, redis, now, started_at)),
+        ("bridge.silent", lambda: _eval_bridge(db, org_id, redis, now)),
+        ("dlq.inbound", lambda: sync_dlq_alert(db, org_id, redis)),
         ("disk.low", lambda: _eval_disk(db, org_id, redis)),
         ("host.autostart", lambda: _eval_autostart(db, org_id, redis)),
         ("host.nightly", lambda: _eval_nightly(db, org_id, redis, now)),

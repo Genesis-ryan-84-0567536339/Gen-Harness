@@ -409,6 +409,10 @@ export interface Channel {
   ended_at?: string | null;
   /** Last bridge error for this channel, if any. */
   error?: string | null;
+  /** v0.1.62 (F046): phiên 'Lỗi kết nối' còn credential ⇒ `POST /channels/{type}/resume` nối lại được, không cần quét QR. Máy chủ cũ không gửi. */
+  resumable?: boolean;
+  /** v0.1.62 (F051): bộ nhận tin (bridge) còn nhịp tim; `false` ⇒ "Mất liên lạc"; null/vắng = chưa biết. */
+  bridge_online?: boolean | null;
 }
 
 export type ListenMode = 'off' | 'tagged_only' | 'silent' | 'proactive' | 'paused';

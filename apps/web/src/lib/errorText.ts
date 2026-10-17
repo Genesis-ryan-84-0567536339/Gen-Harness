@@ -1,5 +1,5 @@
 import { ApiError, PinCancelledError } from '@gen-harness/contracts';
-import { AGY_ONLY_TEXT, MODEL_UNAVAILABLE_TEXT, agyOnlyReasons, detailToText, isAgyOnlyText } from './friendlyError';
+import { MODEL_UNAVAILABLE_TEXT, detailToText } from './friendlyError';
 import { DEFAULT_TZ, fmtDMClock } from './format';
 
 const INTERNAL_FALLBACK_TITLE = 'Hệ thống gặp lỗi khi xử lý yêu cầu — đã ghi nhật ký';
@@ -10,27 +10,23 @@ export function isModelUnavailable(e: unknown): boolean {
   return e instanceof ApiError && e.code === 'MODEL_UNAVAILABLE';
 }
 
-/**
- * v0.1.38 (F-22): 503 MODEL_UNAVAILABLE vì chuỗi chỉ có Antigravity CLI (máy chủ trả AGY_ONLY_TITLE/AGY_ONLY_HINT).
- * Nhân viên: `reasons` đã lọc rỗng nhưng title vẫn đúng ⇒ xét title trước.
- */
-export function isAgyOnlyUnavailable(e: unknown): boolean {
-  if (!(e instanceof ApiError) || !isModelUnavailable(e)) return false;
-  return isAgyOnlyText(e.problem.title) || agyOnlyReasons(e.reasons);
-}
-
-/** Câu cho lỗi "chỉ có Antigravity CLI": title + hướng dẫn của máy chủ (chuỗi), thiếu thì câu mặc định. */
-export function agyOnlyText(e: unknown): string {
-  if (!(e instanceof ApiError)) return AGY_ONLY_TEXT;
-  const title = typeof e.problem.title === 'string' ? e.problem.title.trim() : '';
-  const detail = detailToText(e.problem.detail).trim();
-  if (isAgyOnlyText(title) && detail) return `${title}. ${detail}`;
-  return isAgyOnlyText(title) ? title : AGY_ONLY_TEXT;
-}
-
 function titleOf(e: ApiError, fallback: string): string {
   const t = e.problem.title;
   return typeof t === 'string' && t.trim() ? t.trim() : fallback;
+}
+
+const FORBIDDEN_TEXT = 'Vai trò của bạn không có quyền làm thao tác này.';
+const CSRF_TEXT = 'Phiên đã cũ — tải lại trang rồi thử lại.';
+
+/**
+ * v0.1.62 (F110): 403 phân theo mã — CSRF_INVALID là phiên lệch (tải lại trang), không phải thiếu quyền; chỉ FORBIDDEN
+ * (hoặc 403 không mã) mới dùng câu về vai trò. Mã khác (GEN_DISABLED, PASSWORD_CHANGE_REQUIRED…) đã kèm câu tiếng Việt
+ * riêng của máy chủ ⇒ hiện câu đó; không có câu thì quay về câu quyền.
+ */
+function forbiddenText(e: ApiError): string {
+  if (e.code === 'CSRF_INVALID') return CSRF_TEXT;
+  if (e.code === 'FORBIDDEN') return FORBIDDEN_TEXT;
+  return detailToText(e.problem.detail).trim() || titleOf(e, FORBIDDEN_TEXT);
 }
 
 /**
@@ -40,9 +36,8 @@ function titleOf(e: ApiError, fallback: string): string {
 export function errorText(e: unknown, tz: string = DEFAULT_TZ): string {
   if (e instanceof PinCancelledError) return 'Đã huỷ — thao tác cần mã PIN.';
   if (e instanceof ApiError) {
-    if (e.status === 0) return 'Không kết nối được máy chủ. Kiểm tra dịch vụ api rồi thử lại.';
-    if (e.status === 403) return 'Vai trò của bạn không có quyền làm thao tác này.';
-    if (isAgyOnlyUnavailable(e)) return agyOnlyText(e);
+    if (e.status === 0) return 'Không kết nối được máy chủ. Kiểm tra máy chủ rồi thử lại.';
+    if (e.status === 403) return forbiddenText(e);
     if (isModelUnavailable(e)) return MODEL_UNAVAILABLE_TEXT;
     // v0.1.35: 500 INTERNAL — câu dễ hiểu (title) KÈM mã lỗi; `detail` chỉ có mã nên không được thay chỗ title.
     // v0.1.44 (F-4b): kèm "Mã yêu cầu" (X-Request-ID) cạnh mã lỗi để người hỗ trợ đối chiếu nhật ký.

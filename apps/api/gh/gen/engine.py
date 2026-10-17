@@ -20,8 +20,9 @@ tính năng → screens.list / guide.list / coach.status, không bịa.
 
 v0.1.55 (G3): (1) Sếp chọn Tự động (chuẩn) · Nhanh · Cân bằng · Kỹ hơn + Mức suy nghĩ Thấp/Vừa/Cao ngay trong khung
 chat (`TurnInput.model_choice`): `resolve_model_choice` (THUẦN) đối chiếu với `model_options` (G1) — tầng không dùng
-được cho người này / hội thoại này (nhân viên, hoặc hội thoại đã nhiễm nội dung ngoài mà tầng chỉ chạy bằng agy) thì
-HẠ về Tự động kèm một bước `notice` (chuỗi). Luật cứng không đổi: agy chỉ cho Owner, hội thoại `tainted` không agy.
+được (chưa có nguồn AI nào phục vụ tầng đó) thì HẠ về Tự động kèm một bước `notice` (chuỗi). v0.1.62: luật "agy chỉ cho
+Owner, hội thoại `tainted` không agy" (F-22) đã gỡ — Owner chọn mở cho mọi vai ngày 16/10/2026 — nên tầng không còn
+phụ thuộc người hỏi là ai hay hội thoại đã đọc nội dung bên ngoài chưa.
 (2) J3: định tuyến theo ý định — `out_of_scope` (Jev hoặc quy tắc tất định `decider.rule_intent`) trả câu mẫu, KHÔNG
 gọi model; `data` đơn giản ở chế độ Tự động chạy tầng Nhanh; Jev lỗi / chậm / độ tin thấp ⇒ quy tắc tất định, rồi
 đường LLM như cũ. Action Log `gen.decide` thêm `route` ∈ {canned, fast, default} và `source` ∈ {jev, rule, llm}.
@@ -55,7 +56,7 @@ from gh.gen.tools import ToolRunner, tools_for
 from gh.gen.validator import Validator
 from gh.hub_link import KHO_LABEL, kho_write, load_kho_label, relabel
 from gh.providers.clients import Message
-from gh.providers.router import ModelRouter, ModelUnavailable, agy_only
+from gh.providers.router import ModelRouter, ModelUnavailable
 
 log = logging.getLogger("gh.gen")
 
@@ -71,27 +72,14 @@ FAILED = "Gen gặp lỗi khi trả lời, {addr} thử lại sau giúp em."
 # v0.1.28 (UX C1): có model nhưng lượt gọi lỗi (mạng, hạn mức…) — không nói "chưa có model".
 MODEL_DOWN = ("Gen chưa gọi được model lúc này (nguồn AI đang lỗi hoặc hết hạn mức). {addr} thử lại sau ít phút, "
               "hoặc xem trạng thái nguồn ở màn API & Model nhé.")
-# v0.1.38 (F-22): chuỗi model chỉ có Antigravity CLI mà người hỏi không phải Sếp.
-AGY_STAFF = ("Gen chưa trả lời được {addr}: nguồn AI hiện có là Antigravity CLI, chỉ dùng cho Gen của Sếp (luật an "
-             "toàn). Nhờ Sếp thêm nguồn khác (khoá API hoặc Claude Code CLI) cho mục \"Gen — trợ lý quản trị\" nhé.")
-
-# Review F-22: công cụ chỉ trả số liệu/cấu hình nội bộ — mọi công cụ khác (queue.*, draft.*, profile.*, social.*,
-# hub.kho_*, task.list…) trả nội dung do người ngoài viết (tin khách, mạng xã hội, Kho). Một khi lượt (hoặc lịch sử hội
-# thoại gửi kèm) có nội dung đó thì KHÔNG gửi tiếp cho Antigravity CLI (công cụ đọc tệp chưa tắt được) — đường
-# prompt-injection khách → Gen → agy đọc bí mật.
+# Phân loại công cụ theo nguồn nội dung: công cụ chỉ trả số liệu/cấu hình nội bộ — mọi công cụ khác (queue.*, draft.*,
+# profile.*, social.*, hub.kho_*, task.list…) trả nội dung do người ngoài viết (tin khách, mạng xã hội, Kho).
+# v0.1.38 (F-22) từng dùng phân loại này để KHÔNG gửi lượt đã đọc nội dung ngoài cho Antigravity CLI; v0.1.62: Owner
+# chọn mở agy cho mọi vai (16/10/2026, sau khi được báo rủi ro: nội dung ngoài có thể lừa agy đọc tệp trong container)
+# nên phân loại không còn chặn lượt nào — nội dung ngoài vẫn được bọc `wrap_untrusted`. Giữ lại cho bước kế tiếp (tách
+# agy ra container riêng không gắn khoá) và cho các test phân loại.
 # v0.1.54: coach.status cũng chỉ trả khoá / tiêu đề tĩnh / số đếm của hệ thống (không nội dung ngoài).
 AGY_SAFE_TOOLS = frozenset({"screens.list", "guide.list", "system.health", "refinery.summary", "coach.status"})
-AGY_TAINTED = ("Dữ liệu này có nội dung từ bên ngoài (tin khách, mạng xã hội, Kho…), mà nguồn AI hiện có là "
-               "Antigravity CLI — không được đọc nội dung bên ngoài (luật an toàn). {addr} thêm nguồn khác (khoá "
-               "API hoặc Claude Code CLI) cho mục \"Gen — trợ lý quản trị\" ở màn API & Model để Gen xử lý câu hỏi "
-               "này nhé.")
-
-# Lịch sử (không phải lượt này) đã có nội dung bên ngoài: câu hỏi mới dù chỉ là "Xin chào" cũng không gửi agy được
-# trong HISTORY_MESSAGES tin tới ⇒ nói rõ cách làm được ngay không cần cấu hình: mở cuộc trò chuyện mới.
-AGY_TAINTED_HISTORY = ("Cuộc trò chuyện này đã có nội dung từ bên ngoài (tin khách, mạng xã hội, Kho…), mà "
-                       "nguồn AI hiện có là Antigravity CLI — không được đọc nội dung bên ngoài (luật an toàn). "
-                       "{addr} mở cuộc trò chuyện mới để hỏi việc nội bộ, hoặc thêm nguồn khác (khoá API hoặc "
-                       "Claude Code CLI) cho mục \"Gen — trợ lý quản trị\" ở màn API & Model nhé.")
 
 ACTION_NAMES = {"navigate": "gen.navigate", "highlight": "gen.highlight", "tour": "gen.tour"}
 
@@ -344,14 +332,15 @@ TIER_LABEL = {"fast": "Nhanh", "balanced": "Cân bằng", "deep": "Kỹ hơn"}
 
 def stub_model_options() -> dict[str, Any]:
     """Khung dự phòng khi tra cứu hồ sơ tiêu chuẩn lỗi: bốn tầng đều "dùng
-    được", không mức suy nghĩ — bộ định tuyến vẫn là nơi giữ luật cứng (agy chỉ Owner, `tainted` không agy)."""
+    được", không mức suy nghĩ — bộ định tuyến vẫn là nơi giữ luật cứng (Claude Code CLI ở việc nền, F-86)."""
     return {"tiers": [{"tier": t, "available": True, "efforts": []} for t in ("auto", "fast", "balanced", "deep")]}
 
 
-async def model_options(db: AsyncSession, org_id: uuid.UUID, *, owner: bool, tainted: bool) -> dict[str, Any]:
-    """Tầng + mức suy nghĩ khung chat được mời chọn (hợp đồng G1: `gh.defaults.profiles.choice_options`)."""
+async def model_options(db: AsyncSession, org_id: uuid.UUID, *, owner: bool = True) -> dict[str, Any]:
+    """Tầng + mức suy nghĩ khung chat được mời chọn (hợp đồng G1: `gh.defaults.profiles.choice_options`). Gói G:
+    `owner=False` (nhân viên) ⇒ nguồn Antigravity CLI không được tính (Gen của nhân viên không dùng agy)."""
     try:
-        out = await profiles.choice_options(db, org_id, owner=owner, tainted=tainted)
+        out = await profiles.choice_options(db, org_id, owner=owner)
     except Exception:  # noqa: BLE001 — khung chọn model không được làm hỏng màn Gen
         log.warning("Không tra được tầng model cho khung chat Gen", exc_info=True)
         return stub_model_options()
@@ -372,25 +361,17 @@ def tier_available(options: Mapping[str, Any], tier: str) -> bool:
     return bool(row and row.get("available"))
 
 
-def _why_unavailable(tier: str, *, is_owner: bool, tainted: bool) -> str:
-    label = TIER_LABEL.get(tier, tier)
-    if not is_owner:
-        return (f"mức “{label}” chưa có nguồn AI phù hợp cho tài khoản này (Antigravity CLI chỉ dùng cho Gen của "
-                "Sếp).")
-    if tainted:
-        return (f"cuộc trò chuyện này đã có nội dung từ bên ngoài nên không dùng Antigravity CLI, mà mức “{label}” "
-                "chưa có nguồn khác.")
-    return f"mức “{label}” chưa có nguồn AI nào phục vụ."
+def _why_unavailable(tier: str) -> str:
+    return f"mức “{TIER_LABEL.get(tier, tier)}” chưa có nguồn AI nào phục vụ."
 
 
-def resolve_model_choice(choice: Mapping[str, Any] | None, *, is_owner: bool, tainted: bool,
+def resolve_model_choice(choice: Mapping[str, Any] | None, *,
                          options: Mapping[str, Any]) -> tuple[str | None, str | None, str | None]:
     """Lựa chọn của khung chat → `(tầng bộ định tuyến | None, mức suy nghĩ | None, thông báo | None)`. HÀM THUẦN.
 
     - Tự động (hoặc không chọn) ⇒ `(None, None, None)`: hồ sơ tiêu chuẩn tự chọn.
-    - Tầng không `available` cho NGƯỜI NÀY / NGỮ CẢNH NÀY (`options` đã tính theo `is_owner` và `tainted` — nhân
-      viên, hay hội thoại nhiễm nội dung ngoài mà tầng chỉ chạy bằng agy) ⇒ hạ về Tự động + câu "Em dùng chế độ Tự
-      động vì …".
+    - Tầng không `available` (chưa có nguồn AI nào phục vụ — v0.1.62: không còn phụ thuộc người hỏi / nội dung ngoài)
+      ⇒ hạ về Tự động + câu "Em dùng chế độ Tự động vì …".
     - Mức suy nghĩ chỉ giữ khi tầng đó có `efforts` chứa nó (không thì bỏ, im lặng).
     - 'deep' ↔ tầng 'strong' của bộ định tuyến."""
     tier = str((choice or {}).get("tier") or "auto")
@@ -398,16 +379,20 @@ def resolve_model_choice(choice: Mapping[str, Any] | None, *, is_owner: bool, ta
         return None, None, None
     row = _tier_row(options, tier)
     if row is None or not row.get("available"):
-        return None, None, "Em dùng chế độ Tự động vì " + _why_unavailable(tier, is_owner=is_owner, tainted=tainted)
+        return None, None, "Em dùng chế độ Tự động vì " + _why_unavailable(tier)
     effort = (choice or {}).get("effort")
     efforts = row.get("efforts") or []
     return ROUTER_TIER[tier], (str(effort) if effort in efforts else None), None
 
 
-def _tier_kw(router: Any, tier: str | None, effort: str | None) -> dict[str, str]:
-    """`tier` / `effort` chỉ truyền cho bộ định tuyến NHẬN tham số đó (bộ giả của test cũ không nhận; ModelRouter chưa
-    có tham số này cũng không) — `ModelRouter.generate(tier=, effort=)` thật luôn nhận."""
-    want = {k: v for k, v in (("tier", tier), ("effort", effort)) if v}
+def _tier_kw(router: Any, tier: str | None, effort: str | None, *, owner: bool = True) -> dict[str, Any]:
+    """`tier` / `effort` / `owner` chỉ truyền cho bộ định tuyến NHẬN tham số đó (bộ giả của test cũ không nhận;
+    ModelRouter chưa có tham số này cũng không) — `ModelRouter.generate(tier=, effort=, owner=)` thật luôn nhận.
+    Gói G: `owner=False` (nhân viên hỏi Gen) được truyền để bộ định tuyến không chạy Antigravity CLI; Owner (mặc định)
+    không cần truyền."""
+    want: dict[str, Any] = {k: v for k, v in (("tier", tier), ("effort", effort)) if v}
+    if not owner:
+        want["owner"] = False
     if not want:
         return {}
     try:
@@ -566,8 +551,6 @@ async def _run(turn: Turn, *, app: Any, router: ModelRouter, session_token: str,
     now_text = datetime.now(tz).isoformat(timespec="minutes") + f" ({tz.key})"
     # Tin cuối trong lịch sử là chính câu hỏi này (routes đã lưu) — bỏ ra, đưa riêng ở cuối.
     prior = history[:-1] if history and history[-1]["role"] == "user" else history
-    # Review F-22: nội dung bên ngoài (kết quả công cụ, hoặc lịch sử đã có) ⇒ không cho agy nữa (`tainted`).
-    history_tainted = _history_tainted(prior)
     # v0.1.55 (G3, J3): ý định → câu mẫu (out_of_scope, KHÔNG gọi model) / tầng Nhanh (data đơn giản + chế độ Tự
     # động) / đường cũ.
     intent = await _classify(turn, dec, inp.text)
@@ -582,13 +565,13 @@ async def _run(turn: Turn, *, app: Any, router: ModelRouter, session_token: str,
     route = "default"
     if not auto:
         async with turn.sm() as db:
-            options = await model_options(db, user.org_id, owner=is_owner, tainted=history_tainted)
-        tier, effort, notice = resolve_model_choice(choice, is_owner=is_owner, tainted=history_tainted, options=options)
+            options = await model_options(db, user.org_id, owner=is_owner)
+        tier, effort, notice = resolve_model_choice(choice, options=options)
         if notice:
             await turn.emit({"kind": "notice", "text": notice})  # chuỗi thuần — web hiện một dòng nhỏ
     elif intent.value == "data" and decmod.is_simple_question(inp.text):
         async with turn.sm() as db:
-            options = await model_options(db, user.org_id, owner=is_owner, tainted=history_tainted)
+            options = await model_options(db, user.org_id, owner=is_owner)
         if tier_available(options, "fast"):
             tier, route = ROUTER_TIER["fast"], "fast"
     await _log_decide(turn, intent, route)
@@ -597,15 +580,9 @@ async def _run(turn: Turn, *, app: Any, router: ModelRouter, session_token: str,
     messages = [Message("system", system_prompt(user, inp, intent.hints, now_text, notes, coach_block, kho)),
                 *_history_text(prior),
                 Message("user", inp.text[:4000])]
-    # F-22: Antigravity CLI chỉ cho Gen của Sếp (luật cứng — gh.providers.router.AGY_OWNER_ONLY_REASON). Bộ định
-    # tuyến giả (test, dữ liệu mẫu) không có tham số này và không bao giờ gọi agy → chỉ truyền cho ModelRouter thật.
-    tainted = history_tainted
-    turn_tainted = False  # lượt NÀY đã gọi công cụ trả nội dung bên ngoài
-    owner = user.role_code == rbac.OWNER
-    real = isinstance(router, ModelRouter)
-    route_kw: dict[str, Any] = {"allow_agy": owner and not tainted} if real else {}
-    # v0.1.55 (G3): tầng / mức suy nghĩ đã chọn (hoặc J3 chọn Nhanh).
-    route_kw.update(_tier_kw(router, tier, effort))
+    # v0.1.62: Antigravity CLI dùng được cho mọi người hỏi (Owner lẫn nhân viên) và cả lượt đã đọc nội dung bên ngoài
+    # (luật F-22 đã gỡ). v0.1.55 (G3): tầng / mức suy nghĩ đã chọn (hoặc J3 chọn Nhanh).
+    route_kw: dict[str, Any] = _tier_kw(router, tier, effort, owner=is_owner)
     retried = False
     for _ in range(MAX_ROUNDS):
         try:
@@ -613,22 +590,13 @@ async def _run(turn: Turn, *, app: Any, router: ModelRouter, session_token: str,
                                            json_mode=True, **route_kw)
         except ModelUnavailable as e:
             down = e.no_chain is False
-            only_agy = agy_only(e.reasons)
-            if only_agy and owner and tainted:
-                msg = AGY_TAINTED if turn_tainted or not history_tainted else AGY_TAINTED_HISTORY
-            elif only_agy:
-                msg = AGY_STAFF
-            else:
-                msg = MODEL_DOWN if down else NO_MODEL
+            msg = MODEL_DOWN if down else NO_MODEL
             await turn.emit({"kind": "say", "text": msg.format(addr=turn.addr)})
             await turn.log("gen.answer", result="failed", target_type="model", reasons=e.reasons[:5])
-            # Chỉ có agy (Sếp, nội dung bên ngoài): chuỗi "chạy" (down) nhưng vẫn cần thêm nguồn ⇒ dẫn tới màn API.
-            if (not down or (only_agy and owner)) and registry.can_see(user.permissions, "api"):
+            if not down and registry.can_see(user.permissions, "api"):
                 await _ui(turn, validator, envelope.Navigate(type="navigate", screen="api"))
                 await _ui(turn, validator, envelope.Highlight(
-                    type="highlight", target="api.bindings",
-                    message=("Thêm nguồn khác (khoá API hoặc Claude Code CLI) cho dòng \"Gen — trợ lý quản trị\""
-                             if only_agy else "Chọn model cho dòng \"Gen — trợ lý quản trị\"")))
+                    type="highlight", target="api.bindings", message="Chọn model cho dòng \"Gen — trợ lý quản trị\""))
             return
         turn.model, turn.provider = routed.model, routed.provider
         try:
@@ -655,10 +623,6 @@ async def _run(turn: Turn, *, app: Any, router: ModelRouter, session_token: str,
                                error=res.error)
                 await turn.emit({"kind": "tool", "name": step.name, "args": step.args})
                 observations.append(wrap_untrusted(step.name, res.text))
-                if _untrusted_tool(step.name):
-                    tainted = turn_tainted = True
-                    if real:
-                        route_kw["allow_agy"] = False
             elif isinstance(step, envelope.Ui):
                 err = await _ui(turn, validator, step.action)
                 if err:

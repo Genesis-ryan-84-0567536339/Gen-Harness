@@ -97,6 +97,14 @@ export interface SystemAuditQuery {
   target_id?: string;
   since?: string;
   until?: string;
+  /** Ô tìm (người/agent, hành động, đối tượng) — máy chủ tìm trên TOÀN BỘ nhật ký. */
+  q?: string;
+  /** Mã hành động (cách nhau dấu phẩy) mà nhãn tiếng Việt khớp ô tìm — máy chủ chỉ lưu mã. */
+  q_actions?: string;
+  /** Mã tác nhân hệ thống/bộ nhận tin (cách nhau dấu phẩy) mà tên tiếng Việt khớp ô tìm. */
+  q_actors?: string;
+  /** Ẩn dòng chung `http.*` và lượt kiểm chuỗi băm bình thường (mặc định của màn Nhật ký). */
+  hide_noise?: boolean;
 }
 
 // ── Dữ liệu & lưu trữ (spec I) ───────────────────────────────────────────────
@@ -364,7 +372,10 @@ export interface BackupJob {
   started_at?: string;
   finished_at?: string;
   key?: string;
+  /** Câu thân thiện cho Sếp (F106). */
   message?: string | null;
+  /** Lỗi gốc (stderr pg_dump, đã che mật khẩu) — chỉ hiện trong "Chi tiết kỹ thuật". */
+  technical?: string | null;
 }
 export type RestoreState = 'idle' | 'requested' | 'running' | 'done' | 'failed' | 'stalled';
 export interface BackupRestoreStatus {
@@ -414,11 +425,26 @@ export interface HealthIssue {
   action: string;
   raised_at: string;
 }
+export interface QueueReplayResult {
+  stream: string;
+  replayed: number;
+  remaining: number;
+}
+export interface QueueClearResult {
+  stream: string;
+  cleared: number;
+  remaining: number;
+}
 export interface SystemHealth {
   checked_at: string;
   overall: 'ok' | 'warn' | 'bad';
   worker: { state: 'ok' | 'silent' | 'unknown'; alive: boolean; last_seen_at: string | null; silent_minutes: number | null };
   browser: { state: 'ok' | 'silent' | 'off'; last_heartbeat_at: string | null };
+  /**
+   * v0.1.62 (F051): cầu nối tin nhắn (Zalo/WhatsApp). CHỈ có khi có nhịp hoặc có kênh đang "kết nối" (chưa dùng cầu nối
+   * ⇒ vắng khối). 'silent' = nhịp mất > 2 phút mà kênh vẫn ghi "Đang kết nối" (kèm sự cố bridge.silent).
+   */
+  bridge?: { state: 'ok' | 'silent'; last_seen_at: string | null; silent_minutes: number | null };
   /** `stream` là tên stream gốc (không có `.dlq`). */
   queues: Array<{ stream: string; dlq: number }>;
   crons: Array<{ name: string; last_at: string | null; ok: boolean | null }>;
@@ -634,7 +660,11 @@ export function systemEndpoints(r: ApiClient['request']) {
       patch: (code: string, body: BoundaryPatchBody) => r<Boundary>(`/boundaries/${enc(code)}`, { method: 'PATCH', body }),
     },
     systemAuditLog: {
-      list: (q: SystemAuditQuery = {}, signal?: AbortSignal) => r<AuditPage>('/audit-log', { query: q as Record<string, string | number | undefined>, signal }),
+      /**
+       * Đọc qua `/audit` (cùng `query_log` với `/audit-log`) — chỉ `/audit` nhận ô tìm phía máy chủ `q`/`q_actions`/
+       * `q_actors` và `hide_noise` (A8, F099); `/audit-log` giữ nguyên cho bản cũ và xuất CSV.
+       */
+      list: (q: SystemAuditQuery = {}, signal?: AbortSignal) => r<AuditPage>('/audit', { query: { ...q }, signal }),
       /** CSV — `data.manage` + PIN (`data.export`), cùng khuôn `raw.exportCsv`. */
       exportCsv: (q: Omit<SystemAuditQuery, 'cursor' | 'limit'> = {}) =>
         r<string>('/audit-log/export', { query: q as Record<string, string | undefined>, responseType: 'text' }),
@@ -677,6 +707,10 @@ export function systemEndpoints(r: ApiClient['request']) {
     /** v0.1.36 (F-6): sức khoẻ hệ thống + sự cố cần Sếp xử lý. */
     systemHealth: {
       get: (signal?: AbortSignal) => r<SystemHealth>('/system/health', { signal }),
+      /** v0.1.62 (F064): `system.manage` + PIN. Chỉ `gh.bridge.inbound` phát lại được (hàng khác 409 QUEUE_NOT_REPLAYABLE). */
+      replayQueue: (stream: string) => r<QueueReplayResult>(`/system/queues/${enc(stream)}/replay`, { method: 'POST' }),
+      /** v0.1.62 (F102): "Đã xem, xoá" — `system.manage` + PIN; ghi Action Log. */
+      clearQueue: (stream: string) => r<QueueClearResult>(`/system/queues/${enc(stream)}/clear`, { method: 'POST' }),
     },
     /** v0.1.41 (F-84): Chi phí AI hôm nay + trần ngân sách + giá model (sửa cần `system.manage`). */
     aiCost: {

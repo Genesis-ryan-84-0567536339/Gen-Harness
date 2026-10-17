@@ -24,6 +24,7 @@ Secret riêng `gh_bridge_key` (32 byte base64; `GH_BRIDGE_KEY_FILE` hoặc `GH_B
 |---|---|
 | `session.login` | `{channel, session_id, credential: "<transport>"\|null}` — có credential: đăng nhập lại bằng phiên đã lưu; hỏng/hết hạn → `session.ended reason=expired`. `null`: sinh QR mới. |
 | `session.logout` | `{channel, session_id}` — đăng xuất trên nền tảng, xoá phiên khỏi RAM, trả `session.ended reason=logged_out`. |
+| `session.close` | `{channel, session_id}` — (v0.1.62) ĐÓNG kết nối trong RAM của phiên cũ, không đăng xuất nền tảng, không phát `session.ended`. Lõi gửi khi một phiên mới của cùng kênh thành `active` (hoặc khi Sếp tạo QR mới huỷ phiên chờ QR cũ), để bridge không giữ kết nối ma. |
 | `directory.sync` | `{channel, session_id}` — đồng bộ nhóm ngay. |
 
 `gh.bridge.outbound`
@@ -36,10 +37,11 @@ Secret riêng `gh_bridge_key` (32 byte base64; `GH_BRIDGE_KEY_FILE` hoặc `GH_B
 `gh.bridge.status`
 | type | payload |
 |---|---|
-| `bridge.hello` | `{channels: ["zalo","whatsapp"], version}` — khi khởi động; lõi trả `session.login` cho mọi phiên đang `active` kèm credential. |
+| `bridge.hello` | `{channels: ["zalo","whatsapp"], version}` — khi khởi động; lõi trả `session.login` kèm credential cho phiên đang `active` VÀ phiên `error` còn credential (mất mạng, bị mở nơi khác) — miễn chưa có phiên nào mới hơn của kênh. Nút «Nối lại bằng phiên đã lưu» (`POST /channels/{type}/resume`) gửi đúng lệnh này. |
 | `session.qr` | `{channel, session_id, image: "data:image/png;base64,…", expires_at}` — mỗi QR mới (QR hết hạn → bridge tự xin QR mới, tối đa 5 lần rồi `session.ended reason=expired`). WhatsApp: khi máy chủ gửi `companion_reg_refresh` cho thiết bị chưa ghép cặp, bridge luôn đổi khoá ghép cặp; nếu đã có mã đang hiện thì gửi lại ĐÚNG mã đó (cùng `expires_at`, không tính vào 5 mã), chưa có mã thì chỉ đổi khoá (mã đầu mang khoá mới). Mã WhatsApp dày (≈ 57 ô, mức sửa lỗi L, vùng trắng 4 ô, ảnh 640px) nên Console vẽ ảnh lớn: tới 320px, co theo bề rộng thẻ (không dùng khối 88px như Zalo). |
 | `session.scanned` | `{channel, session_id, display_name?}` |
 | `session.active` | `{channel, session_id, account: {id, name, phone?}, credential: "<transport>"}` |
+| `session.reconnecting` | `{channel, session_id, error: "NETWORK_UNAVAILABLE"}` — (v0.1.62) mất mạng / máy chủ nền tảng chưa tới: bridge GIỮ phiên (credential còn nguyên) và tự thử nối lại không giới hạn (lùi tối đa 60 giây); báo sau 2 lần hụt liên tiếp. Chỉ khi nền tảng trả 401 / đăng xuất (`loggedOut`) mới `session.ended reason=expired`. Lõi đặt phiên `error` (giữ credential, `ended_at` rỗng); nối lại được thì bridge gửi lại `session.active`. Trong lúc này bridge ngừng `heartbeat` của phiên. |
 | `session.credential` | `{channel, session_id, credential}` — phiên được làm mới (Baileys `creds.update`, gộp tối đa 1 lần / 5 giây). |
 | `session.ended` | `{channel, session_id, reason: "expired"\|"logged_out"\|"error", error?}` — `error` là mã ngắn, Console đổi sang câu tiếng Việt thân thiện + «Chi tiết kỹ thuật»: `QR_EXPIRED` · `PAIRING_REJECTED` (401 khi đang ghép bằng QR) · `WA_NETWORK` / `WA_NO_QR_<mã>` (socket WhatsApp đóng 4 lần liên tiếp, cách nhau 2s·4s·8s, trước khi ra mã QR đầu tiên; riêng 403 không thử lại mà kết thúc ngay bằng `FORBIDDEN`) · `CREDENTIAL_REJECTED\|INVALID\|UNREADABLE` · `LOGGED_OUT_REMOTELY` · `CONNECTION_REPLACED` · `FORBIDDEN` · `MULTIDEVICE_MISMATCH` · `RECONNECT_FAILED` · `BRIDGE_KEY_MISSING` · `LOGIN_FAILED` · `NO_LOGIN_INFO` (Zalo quét xong nhưng không có thông tin đăng nhập) · `CHANNEL_UNAVAILABLE` (bridge không tạo được adapter của kênh). |
 | `heartbeat` | `{channel, session_id, latency_ms, queued}` — mỗi 15 giây cho mỗi phiên đang hoạt động. Ngoài ra bridge đặt `gh:bridge:heartbeat` (TTL 45s) như giai đoạn 1. |

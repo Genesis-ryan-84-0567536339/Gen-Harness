@@ -71,7 +71,6 @@ export function StepAiSource({ finished = false, onSaved, onLater }: StepAiSourc
   const canContinue = withModel.length > 0;
   // "Đã chạy được" chỉ khi nguồn có model hoặc vừa gọi thử xanh — đăng nhập xong mà chưa kiểm tra thì chưa nói chạy được.
   const shown = ready.filter((p) => providerHasModel(p, tested) || tested[p.id]?.ok === true);
-  const onlyAgyReady = ready.length > 0 && ready.every((p) => p.kind === 'antigravity_cli');
   const keyProviders = list.filter((p) => !isCliKind(p.kind));
   const agyRows = list.filter((p) => p.kind === 'antigravity_cli');
   const claudeRows = list.filter((p) => p.kind === 'claude_code_cli');
@@ -147,7 +146,7 @@ export function StepAiSource({ finished = false, onSaved, onLater }: StepAiSourc
             Đăng nhập Google (Antigravity)
           </h2>
           <p className="setup-one__muted">Dùng tài khoản Google của Sếp, không cần dán khoá.</p>
-          <CliLoginPanel kind="antigravity_cli" onlyAgyReady={onlyAgyReady} bare />
+          <CliLoginPanel kind="antigravity_cli" bare />
           <ProviderRows providers={agyRows} cli tested={tested} testing={test.isPending ? test.variables : null} onTest={(id) => test.mutate(id)} />
         </section>
 

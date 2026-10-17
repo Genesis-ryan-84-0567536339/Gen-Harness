@@ -5,14 +5,19 @@ Mọi client trả `Completion` hoặc ném một trong các lỗi phân loại 
 """
 
 import asyncio
+import base64
 import contextlib
+import fcntl
+import logging
 import os
 import re
 import shutil
 import signal
 import tempfile
 import time
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -299,6 +304,135 @@ class OpenAICompatClient(HttpClient):
 
 TOKEN_FILE = "antigravity-oauth-token"
 
+log = logging.getLogger("gh.providers")
+
+# ─── Khoá (flock) quanh làm mới / ghi tệp token OAuth của agy dùng chung (gói G, P3) ─────────────────
+#: Tệp khoá nằm cạnh tệp token (cùng volume api/worker). Khoá tư vấn `flock` theo mô tả tệp mở ⇒ chặn được giữa các tiến
+#: trình (api ↔ worker) và giữa các lượt gọi trong cùng tiến trình.
+TOKEN_LOCK_FILE = ".gh-token.lock"
+#: Token truy cập sắp hết hạn trong khoảng này ⇒ lượt agy kế tiếp CÓ THỂ làm mới token (refresh token xoay vòng, dùng
+#: một lần): hai tiến trình agy cùng làm mới sẽ làm hỏng phiên ⇒ các lượt như vậy chạy TUẦN TỰ (khoá độc quyền).
+TOKEN_REFRESH_WINDOW_S = 600.0
+#: Chờ khoá tối đa (giây) — hết hạn thì chạy tiếp KHÔNG khoá (ghi cảnh báo): chậm hay treo không thành chết dịch vụ.
+TOKEN_LOCK_WAIT_S = 60.0
+TOKEN_WRITER_LOCK_WAIT_S = 10.0
+
+
+def _lock_path(cli_home: str | Path) -> Path:
+    return cli_home_dir(str(cli_home)) / TOKEN_LOCK_FILE
+
+
+def _try_flock(path: Path, *, exclusive: bool, wait: float) -> int | None:
+    """Mở tệp khoá và `flock` (không chặn, thử lại mỗi 50 ms tới `wait` giây). Trả fd đang giữ khoá, hoặc None nếu hết
+    hạn / không mở được tệp khoá (thư mục chưa có, chỉ đọc…)."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError:
+        return None
+    deadline = time.monotonic() + max(0.0, wait)
+    mode = (fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH) | fcntl.LOCK_NB
+    while True:
+        try:
+            fcntl.flock(fd, mode)
+            return fd
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                os.close(fd)
+                return None
+            time.sleep(0.05)
+        except OSError:
+            os.close(fd)
+            return None
+
+
+def _release(fd: int | None) -> None:
+    if fd is not None:
+        with contextlib.suppress(OSError):
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        with contextlib.suppress(OSError):
+            os.close(fd)
+
+
+@contextlib.contextmanager
+def token_flock(cli_home: str | Path, *, exclusive: bool = True,
+                wait: float = TOKEN_WRITER_LOCK_WAIT_S) -> Iterator[bool]:
+    """Khoá tư vấn (flock) cho tệp token OAuth của agy — dùng cho mã GHI/đổi tệp (park/unpark/ghi phiên: độc quyền,
+    ngắn). Yield True nếu giữ được khoá; hết hạn chờ (`wait`) ⇒ yield False và đi tiếp không khoá (ưu tiên dịch vụ
+    không treo hơn khoá tuyệt đối)."""
+    fd = _try_flock(_lock_path(cli_home), exclusive=exclusive, wait=wait)
+    if fd is None:
+        log.warning("Không lấy được khoá tệp phiên Antigravity trong %.0fs — đi tiếp không khoá", wait)
+    try:
+        yield fd is not None
+    finally:
+        _release(fd)
+
+
+@contextlib.asynccontextmanager
+async def token_flock_async(cli_home: str | Path, *, exclusive: bool = True,
+                            wait: float = TOKEN_LOCK_WAIT_S) -> AsyncIterator[bool]:
+    """Như `token_flock` nhưng chờ khoá trong luồng phụ (không chặn vòng lặp sự kiện) — cho lượt gọi agy chạy lâu."""
+    fd = await asyncio.to_thread(_try_flock, _lock_path(cli_home), exclusive=exclusive, wait=wait)
+    if fd is None:
+        log.warning("Không lấy được khoá tệp phiên Antigravity trong %.0fs — chạy tiếp không khoá", wait)
+    try:
+        yield fd is not None
+    finally:
+        await asyncio.to_thread(_release, fd)
+
+
+def token_expiry(raw: bytes) -> float | None:
+    """Hạn của token truy cập (epoch giây) trong tệp phiên agy: `expiry` / `expires_at` (số hoặc ISO) rồi `exp` của
+    id_token. Không đọc được ⇒ None. Không đọc, không log giá trị token."""
+    try:
+        data = orjson.loads(raw)
+    except orjson.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    exp: Any = data.get("expiry") or data.get("expires_at")
+    if exp is None:
+        tok = data.get("id_token")
+        if isinstance(tok, str) and tok.count(".") >= 2:
+            part = tok.split(".")[1]
+            try:
+                claims = orjson.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
+            except (ValueError, orjson.JSONDecodeError):
+                claims = {}
+            exp = claims.get("exp") if isinstance(claims, dict) else None
+    if isinstance(exp, bool):
+        return None
+    if isinstance(exp, int | float):
+        return float(exp)
+    if isinstance(exp, str):
+        with contextlib.suppress(ValueError):
+            return datetime.fromisoformat(exp.replace("Z", "+00:00")).timestamp()
+    return None
+
+
+_REFRESH_KEYS = ("refresh_token", "refreshToken")
+
+
+def _has_refresh_token(raw: bytes) -> bool:
+    try:
+        data = orjson.loads(raw)
+    except orjson.JSONDecodeError:
+        return False
+    return isinstance(data, dict) and any(isinstance(data.get(k), str) and data.get(k) for k in _REFRESH_KEYS)
+
+
+def token_needs_refresh(raw: bytes, *, now: float | None = None, window: float = TOKEN_REFRESH_WINDOW_S) -> bool:
+    """Token truy cập đã hoặc sắp hết hạn (trong `window` giây) ⇒ lượt agy kế tiếp có thể làm mới token.
+
+    Review lần 2 v0.1.62: tệp có refresh token mà KHÔNG đọc được hạn (thiếu / sai định dạng `expiry`, `expires_at`,
+    `exp`) ⇒ coi như CÓ THỂ làm mới (khoá độc quyền, chậm hơn nhưng không làm hỏng phiên); tệp không phải JSON hoặc
+    không có refresh token thì không có gì để làm mới ⇒ không khoá."""
+    exp = token_expiry(raw)
+    if exp is None:
+        return _has_refresh_token(raw)
+    return exp - (time.time() if now is None else now) <= window
+
 
 def cli_home_dir(cli_home: str) -> Path:
     """Thư mục cấu hình CLI (…/.gemini/antigravity-cli). HOME của tiến trình CLI = cha của `.gemini`."""
@@ -332,8 +466,15 @@ class AgyClient:
     Cô lập mỗi lượt: cwd = thư mục mới rỗng 0700 (`gh-agy-*`, xoá sau lượt — kể cả hết giờ/huỷ), env sạch
     (`cli_env`: không biến GH_*, không khoá), `--model=<tên>` qua AGY_MODEL_RE. Changelog agy nói đọc tệp TRONG
     workspace được tự cho phép, ngoài workspace phải xin phép (bị từ chối trong print mode) — CHƯA kiểm được khi đã
-    đăng nhập → không dựa vào đó: LUẬT CỨNG ở gh.providers.router (AGY_OWNER_ONLY_REASON) — agy chỉ cho Gen của Sếp.
-    agy chạy cùng uid với api/worker nên các lớp cô lập ở đây chỉ là phòng thủ thêm."""
+    đăng nhập → không dựa vào đó.
+
+    Chính sách (v0.1.62): Owner chọn MỞ agy cho mọi vai — Gen của Sếp và nhân viên (kể cả lượt đã đọc nội dung bên
+    ngoài), sàng lọc & suy luận chính, soạn lại / dịch nháp, Bản tin Gen, agent tự tạo, việc nền — ngày 16/10/2026,
+    sau khi được báo rủi ro (luật v0.1.38 F-22 "agy chỉ cho Gen của Sếp" đã gỡ). RỦI RO CÒN LẠI: agy có công cụ đọc
+    tệp / chạy lệnh và chạy cùng uid, cùng container với api/worker (nơi có khoá hệ thống) nên nội dung bên ngoài
+    (tin khách…) có thể lừa agy đọc tệp trong container; các lớp cô lập ở đây (cwd rỗng 0700, env sạch, prompt qua
+    stdin, regex model, không `--dangerously-skip-permissions`) chỉ là phòng thủ thêm, KHÔNG phải rào chắn. Bước kế
+    tiếp (chưa làm): tách agy ra container riêng không gắn khoá."""
 
     kind = "antigravity_cli"
     MAX_PROMPT = 120_000   # giữ giới hạn cũ (prompt qua stdin từ v0.1.38, không còn vướng MAX_ARG_STRLEN)
@@ -352,7 +493,24 @@ class AgyClient:
             os.chmod(d, 0o700)
         return d
 
+    def _refresh_window(self) -> bool:
+        """Token agy đã/sắp hết hạn ⇒ lượt này có thể làm mới token (gói G, P3)."""
+        try:
+            return token_needs_refresh((cli_home_dir(self.cli_home) / TOKEN_FILE).read_bytes())
+        except OSError:
+            return False
+
     async def _run(self, *args: str, stdin: bytes | None = None) -> tuple[int, bytes, bytes]:
+        """Gói G (P3): token sắp hết hạn ⇒ lượt này có thể để agy LÀM MỚI token (refresh token xoay vòng, dùng một lần)
+        — nhiều tiến trình agy (api + worker, nhiều lượt song song) dùng chung một tệp token mà cùng làm mới sẽ làm hỏng
+        phiên. Những lượt như vậy giữ khoá flock ĐỘC QUYỀN trong suốt lượt (tuần tự); lượt token còn mới không khoá nên
+        vẫn chạy song song. Chờ khoá tối đa min(timeout, 60s), hết hạn thì chạy tiếp (không treo)."""
+        if self._refresh_window():
+            async with token_flock_async(self.cli_home, exclusive=True, wait=min(self.timeout, TOKEN_LOCK_WAIT_S)):
+                return await self._run_locked(*args, stdin=stdin)
+        return await self._run_locked(*args, stdin=stdin)
+
+    async def _run_locked(self, *args: str, stdin: bytes | None = None) -> tuple[int, bytes, bytes]:
         work = self._workdir()
         try:
             try:

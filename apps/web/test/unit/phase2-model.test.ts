@@ -210,11 +210,12 @@ describe('channels model', () => {
     expect(li.map((s) => s.value)).toEqual(['—', '34', '12', '—']);
   });
 
-  it('QR countdown over its 60 s life', () => {
+  it('QR countdown follows expires_at (Zalo 100 s, WhatsApp 60 s)', () => {
     const now = Date.parse('2026-09-21T08:00:00Z');
     const q = qrRemaining('2026-09-21T08:00:41Z', now);
     expect(q.label).toBe('41 giây');
-    expect(Math.round(q.pct)).toBe(68);
+    expect(Math.round(q.pct)).toBe(41);
+    expect(Math.round(qrRemaining('2026-09-21T08:00:41Z', now, 60_000).pct).toString()).toBe('68');
     expect(qrRemaining('2026-09-21T07:59:00Z', now).ms).toBe(0);
   });
 

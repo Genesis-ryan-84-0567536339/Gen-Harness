@@ -439,6 +439,15 @@ jobs:
           build --no-cache -f deploy/images/browser.Dockerfile -t gh-browser-2 .
           docker run --rm --entrypoint python3 gh-browser-2 -c "$FREEZE_PY" > /tmp/freeze-browser-2.txt
           python3 .github/scripts/check_image_lock.py --lock apps/browser/uv.lock --project gen-harness-browser /tmp/freeze-browser-1.txt /tmp/freeze-browser-2.txt
+      # Gói R (rà soát v0.1.62) — uv dùng lại wheel `gen-harness-api` cũ từ cache khi pyproject không đổi ⇒ ảnh chạy mã cũ.
+      # Băm mọi *.py của gói `gh` đã cài trong ảnh phải KHỚP băm mã nguồn trong repo (cùng bản sắp xếp C, tránh lệch locale).
+      - name: 'Ảnh api chạy đúng mã gh của commit này (không dùng lại wheel cũ từ cache)'
+        run: |
+          set -euo pipefail
+          hash_py() { find . -name '*.py' -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum; }
+          want="$(cd apps/api/gh && hash_py)"
+          got="$(docker run --rm -w / --entrypoint sh gh-api -c "$(declare -f hash_py); cd /opt/venv/lib/python3.11/site-packages/gh && hash_py")"
+          [ "$want" = "$got" ] || { echo "repo : $want"; echo "ảnh  : $got"; echo '::error::gói gh trong ảnh gh-api KHÁC mã nguồn của commit (wheel cũ từ cache?)'; exit 1; }
       # v0.1.48 (sửa sau review F-36) — uv không tự sinh .pyc như pip: thiếu UV_COMPILE_BYTECODE=1 thì mọi tiến trình python
       # (api, worker, migrate, `python -m gh.backup`…) dịch lại cả cây thư viện mỗi lần khởi động. Chạy import chính bằng
       # đúng user của ảnh (browser: rootfs chỉ-đọc như compose); `python -v` cho biết module nạp từ .pyc hay dịch lại từ .py.

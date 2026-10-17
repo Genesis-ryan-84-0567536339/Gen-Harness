@@ -140,9 +140,10 @@ async def test_model_auth_expired_rings_once(owner_api: Api, app, db, redis) -> 
     await r._set_auth_state(p, "expired")
     rows = await bells(db, "model.auth_expired")
     assert len(rows) == 1
-    assert rows[0].link == "/system?tab=brain" and rows[0].title == "Model Alpha cần đăng nhập lại"
+    # F007 (v0.1.62): 'openai_compat' là khoá API ⇒ "thêm khoá mới" → API & Model (CLI: xem test_health_bridge_dlq).
+    assert rows[0].link == "/api" and rows[0].title == "Khoá API của Alpha bị từ chối — thêm khoá mới"
     issues = await health.active_issues(db, org)
-    assert issues[0]["severity"] == "warn" and issues[0]["action"] == "Đăng nhập lại model"
+    assert issues[0]["severity"] == "warn" and issues[0]["action"] == "Thêm khoá API mới"
     await r._set_auth_state(p, "ok")
     assert await health.active_issues(db, org) == []
     await r._set_auth_state(p, "expired")
@@ -218,7 +219,7 @@ async def test_model_already_expired_is_picked_up_by_watch(owner_api: Api, app, 
     await evaluate(redis, org)
     await evaluate(redis, org)
     rows = await bells(db, "model.auth_expired")
-    assert len(rows) == 1 and rows[0].title == "Model Beta cần đăng nhập lại"
+    assert len(rows) == 1 and rows[0].title == "Khoá API của Beta bị từ chối — thêm khoá mới"
     assert [i["key"] for i in await health.active_issues(db, org)] == [f"model.auth_expired:{pid}"]
 
 

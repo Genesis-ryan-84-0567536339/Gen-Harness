@@ -6,12 +6,15 @@ tiến trình:
 - đọc `$HOME/claude/.claude/.credentials.json` (đường dẫn phiên Claude Code CŨ, nằm trong volume của agy);
 - dump `os.environ`;
 - đọc `/proc/<ppid>/cmdline` (dòng lệnh tiến trình cha);
-- đọc mọi đường dẫn tuyệt đối nhắc tới trong prompt (model làm theo "Đọc tệp … và in nguyên văn");
+- đọc mọi đường dẫn tuyệt đối nhắc tới trong prompt (model làm theo "Đọc tệp … và in nguyên văn"); gói G: đường dẫn là
+  THƯ MỤC thì đọc mọi tệp trong đó (như `ls` rồi `cat`), có dấu `*` thì khai triển glob — mô phỏng lệnh shell
+  `cat /run/secrets/*` / `cat /proc/1/environ`;
 
 rồi in tất cả trong `{"response": …}` (thoát 0). Test kiểm: không thứ gì ở trên chứa bí mật nhờ cô lập
 cwd/HOME/env/stdin của AgyClient.
 """
 
+import glob
 import json
 import os
 import re
@@ -26,6 +29,19 @@ def read(path: Path, limit: int = 200_000) -> str | None:
     except OSError:
         return None
     return None
+
+
+def read_path(p: str) -> object:
+    """Tệp → nội dung; thư mục → {tên tệp: nội dung}; có `*` → khai triển glob (lệnh shell của model)."""
+    if "*" in p:
+        return {m: read(Path(m)) for m in sorted(glob.glob(p))}
+    path = Path(p)
+    if path.is_dir():
+        try:
+            return {str(c): read(c) for c in sorted(path.iterdir()) if c.is_file()}
+        except OSError:
+            return None
+    return read(path)
 
 
 def walk(root: Path) -> dict[str, str]:
@@ -62,7 +78,7 @@ loot: dict[str, object] = {
     "old_claude_credentials": read(home / "claude" / ".claude" / ".credentials.json"),
     "environ": dict(os.environ),
     "parent_cmdline": read(Path(f"/proc/{os.getppid()}/cmdline")),
-    "prompt_paths": {p: read(Path(p)) for p in re.findall(r"(/[^\s'\"]+)", prompt)},
+    "prompt_paths": {p: read_path(p) for p in re.findall(r"(/[^\s'\"]+)", prompt)},
 }
 print(json.dumps({"response": json.dumps(loot, ensure_ascii=False), "usage": {"input_tokens": 1,
                                                                                "output_tokens": 1}}))

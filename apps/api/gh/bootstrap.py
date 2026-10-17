@@ -5,6 +5,7 @@ dòng plugin nền, trạng thái thiết lập kèm mã thiết lập một l�
 trừ các khoá cứng (ARCHITECTURE §7.4) luôn được đặt lại đúng giá trị.
 """
 
+import contextlib
 import json
 import logging
 import uuid
@@ -19,8 +20,13 @@ from gh.chassis import policy
 from gh.chassis.plugins import Manifest, read_manifests
 from gh.config import get_settings
 from gh.crypto import new_token, token_digest
+from gh.hostlink_io import run_root, write_request
 
 log = logging.getLogger("gh.bootstrap")
+
+# F128: mã thiết lập Owner tự sinh (cài tay/dev) KHÔNG vào log — ghi vào tệp quyền 0600 trong hộp thư dữ liệu `run/`
+# (Settings.host_link_dir, genh đọc); log chỉ ghi đường dẫn. Mã bị vô hiệu ⇒ tệp bị xoá.
+SETUP_CODE_FILE = "setup-code.json"
 
 DEFAULT_ORG_NAME = "Gen-Harness"
 
@@ -51,7 +57,7 @@ BOUNDARIES = (
 @dataclass
 class BootstrapResult:
     org_id: uuid.UUID
-    setup_token: str | None       # chỉ có khi vừa sinh mới (in ra log một lần)
+    setup_token: str | None       # chỉ có khi vừa sinh mới (ghi vào tệp 0600, KHÔNG vào log)
     setup_finished: bool
 
 
@@ -63,7 +69,11 @@ def plugins_root() -> Path:
     return Path("/app/plugins")
 
 
-async def bootstrap(db: AsyncSession, *, manifests: list[Manifest] | None = None) -> BootstrapResult:
+async def bootstrap(db: AsyncSession, *, manifests: list[Manifest] | None = None,
+                    mint_setup_code: bool = True) -> BootstrapResult:
+    """`mint_setup_code=False` (worker): KHÔNG sinh / ghi đè mã thiết lập — chỉ api sinh và giao mã (P2-2, A10). Worker
+    khởi động sau api mà sinh mã mới sẽ ghi đè hash ⇒ mã trong `run/setup-code.json` sai. Mọi phần khác của bootstrap
+    (quyền, ranh giới, plugin, tầng dữ liệu, vô hiệu mã khi Owner đã tạo) vẫn chạy ở cả hai tiến trình."""
     await db.execute(text("SELECT pg_advisory_xact_lock(hashtext('gh.bootstrap'))"))
     org_id = (await db.execute(text("SELECT id FROM core.organizations ORDER BY created_at LIMIT 1"))).scalar()
     if org_id is None:
@@ -76,7 +86,7 @@ async def bootstrap(db: AsyncSession, *, manifests: list[Manifest] | None = None
     await _boundaries(db, org_id)
     await _core_plugins(db, manifests if manifests is not None else read_manifests(plugins_root()))
     await _data_layer(db, org_id)
-    token, finished = await _setup_state(db, org_id)
+    token, finished = await _setup_state(db, org_id, mint=mint_setup_code)
     return BootstrapResult(org_id=org_id, setup_token=token, setup_finished=finished)
 
 
@@ -159,7 +169,7 @@ async def _data_layer(db: AsyncSession, org_id: uuid.UUID) -> None:
                                      VALUES (:o, :d, :w, '2000-01-01')"""), {"o": org_id, "d": dim, "w": pct / 100})
 
 
-async def _setup_state(db: AsyncSession, org_id: uuid.UUID) -> tuple[str | None, bool]:
+async def _setup_state(db: AsyncSession, org_id: uuid.UUID, *, mint: bool = True) -> tuple[str | None, bool]:
     row = (await db.execute(text("SELECT finished_at, completed FROM ops.setup_state WHERE org_id = :o"),
                             {"o": org_id})).one_or_none()
     if row is None:
@@ -170,15 +180,35 @@ async def _setup_state(db: AsyncSession, org_id: uuid.UUID) -> tuple[str | None,
         finished = row.finished_at is not None
         owner_created = (row.completed or {}).get("steps", {}).get("2") == "done"
     if finished or owner_created:
-        # Mã thiết lập chỉ dùng tới khi có tài khoản Owner; sau đó vô hiệu.
+        # Mã thiết lập chỉ dùng tới khi có tài khoản Owner; sau đó vô hiệu (xoá cả tệp mã nếu còn).
         await db.execute(text("UPDATE ops.setup_state SET setup_token_hash = NULL WHERE org_id = :o"), {"o": org_id})
+        with contextlib.suppress(OSError):
+            (run_root() / SETUP_CODE_FILE).unlink(missing_ok=True)
         return None, finished
+    if not mint:
+        return None, False        # worker: mã (nếu có) do api đã sinh / giao — không đụng hash, không ghi tệp
     configured = get_settings().setup_token
     token = configured or new_token(9)
     await db.execute(text("UPDATE ops.setup_state SET setup_token_hash = :h WHERE org_id = :o"),
                      {"h": token_digest(token), "o": org_id})
     if not configured:
-        log.warning("Mã thiết lập Owner (dùng một lần): %s — mở %s/setup?token=%s",
-                    token, get_settings().public_url, token)
+        _deliver_setup_code(token)
         return token, False
     return None, False
+
+
+def _deliver_setup_code(token: str) -> None:
+    """Giao mã thiết lập tự sinh cho trình cài/Owner qua tệp 0600 (không qua log — luật cứng: bí mật không vào log)."""
+    root = run_root()
+    path = root / SETUP_CODE_FILE
+    try:
+        if not root.is_dir():
+            raise OSError("không có thư mục hộp thư")
+        write_request(root, SETUP_CODE_FILE, {"setup_token": token,
+                                              "setup_url": f"{get_settings().public_url}/setup?token={token}"},
+                      mode=0o600)
+    except OSError:
+        log.warning("Đã sinh mã thiết lập Owner nhưng không ghi được tệp %s. Đặt GH_SETUP_TOKEN trong cấu hình "
+                    "hoặc chạy `genh reset-setup` để lấy mã.", path)
+        return
+    log.warning("Mã thiết lập Owner (dùng một lần) nằm trong tệp %s (quyền 0600) — không ghi vào log.", path)

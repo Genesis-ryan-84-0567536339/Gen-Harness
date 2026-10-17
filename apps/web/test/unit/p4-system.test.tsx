@@ -170,14 +170,18 @@ describe('Điều khiển hệ thống › Quyền hạn', () => {
 });
 
 describe('Điều khiển hệ thống › Nhật ký', () => {
-  it('tìm theo tên/hành động lọc bảng phía client; Xuất CSV gọi đúng GET /audit-log/export', async () => {
+  it('ô tìm gửi lên máy chủ (không lọc tại máy); Xuất CSV gọi đúng GET /audit-log/export', async () => {
     const AUDIT_ITEMS = [
       { id: '1', at: '2026-09-20T08:00:00Z', actor_type: 'user', actor_id: 'u1', actor_label: 'Anh Nguyễn Văn A', action: 'auth.pin_verified', target_type: null, target_id: null, target_label: null, autonomy_level: null, result: 'ok', detail: null },
       { id: '2', at: '2026-09-20T07:00:00Z', actor_type: 'agent', actor_id: 'a1', actor_label: 'Trợ lý thương mại', action: 'draft.created', target_type: 'draft', target_id: 'd1', target_label: 'ACT-0231', autonomy_level: 4, result: 'held', detail: null },
     ];
     const calls = mockFetch((c) => {
       if (c.url.includes('/audit-log/export')) return json(200, 'at,actor_type\n2026-09-20,user');
-      if (c.url.includes('/audit-log')) return json(200, { items: AUDIT_ITEMS, next_cursor: null });
+      if (c.url.includes('/audit?')) {
+        // Máy chủ lọc theo `q` (như gh.audit.routes.query_log); web không tự lọc lại.
+        const q = new URL(c.url, 'http://x').searchParams.get('q')?.toLowerCase();
+        return json(200, { items: q ? AUDIT_ITEMS.filter((a) => (a.actor_label ?? '').toLowerCase().includes(q)) : AUDIT_ITEMS, next_cursor: null });
+      }
       return json(404);
     });
     // jsdom không có URL.createObjectURL/revokeObjectURL — test/setup.ts đã bù trên URL thật (không stub URL ở đây:
@@ -188,7 +192,8 @@ describe('Điều khiển hệ thống › Nhật ký', () => {
     expect(screen.getByText('Anh Nguyễn Văn A')).toBeInTheDocument();
 
     await user.type(screen.getByLabelText('Tìm trong nhật ký'), 'Trợ lý');
-    expect(screen.queryByText('Anh Nguyễn Văn A')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('Anh Nguyễn Văn A')).not.toBeInTheDocument());
+    expect(calls.some((c) => c.url.includes('/audit?') && new URL(c.url, 'http://x').searchParams.get('q') === 'Trợ lý')).toBe(true);
     expect(screen.getByText('Trợ lý thương mại')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /Xuất CSV/ }));

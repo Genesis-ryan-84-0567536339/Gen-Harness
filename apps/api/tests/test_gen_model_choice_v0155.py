@@ -2,8 +2,9 @@
 
 - `TurnIn.model_choice` {tier: auto|fast|balanced|deep, effort?: low|medium|high}: giá trị lạ ⇒ 422 MODEL_CHOICE_INVALID
   (chuỗi tiếng Việt thân thiện, problem+json). GET /gen/settings trả thêm `model_options`.
-- `engine.resolve_model_choice` (THUẦN): tầng không dùng được cho người này / hội thoại này ⇒ hạ về Tự động + câu
-  "Em dùng chế độ Tự động vì …" (bước `notice`, chuỗi); mức suy nghĩ chỉ giữ khi tầng hỗ trợ; 'deep' ↔ 'strong'.
+- `engine.resolve_model_choice` (THUẦN): tầng chưa có nguồn AI nào phục vụ ⇒ hạ về Tự động + câu "Em dùng chế độ Tự
+  động vì …" (bước `notice`, chuỗi); mức suy nghĩ chỉ giữ khi tầng hỗ trợ; 'deep' ↔ 'strong'. v0.1.62: tầng không còn
+  phụ thuộc người hỏi là Owner hay nhân viên, cũng không phụ thuộc hội thoại đã đọc nội dung ngoài (agy mở cho mọi vai).
 - J3: `out_of_scope` (Jev giả hoặc quy tắc tất định) ⇒ câu mẫu, KHÔNG gọi model (0 dòng agent.model_calls mới);
   `data` đơn giản + Tự động ⇒ tầng Nhanh; Jev lỗi / chậm / độ tin thấp ⇒ đường cũ. Action Log `gen.decide` có
   route/source.
@@ -23,7 +24,7 @@ from gh.db import admin_sessionmaker, sessionmaker
 from gh.gen import decider, engine, jev
 from gh.gen.decider import Decision
 from gh.providers.clients import Message
-from gh.providers.router import AGY_OWNER_ONLY_REASON, ModelRouter, ModelUnavailable, Routed
+from gh.providers.router import ModelRouter, Routed
 from tests.conftest import Api
 from tests.phase2 import org_id
 from tests.test_background_cli_v0141 import FAKE_KEY
@@ -37,44 +38,51 @@ TURN_DONE = {"steps": [{"kind": "say", "text": "Dạ, em trả lời đây."}]}
 TIERS = ("auto", "fast", "balanced", "deep")
 
 
-def options_for(*, owner: bool, tainted: bool, deep_efforts: tuple[str, ...] = ("low", "medium", "high"),
-                balanced: bool = True) -> dict[str, Any]:
-    """Giả `gh.defaults.profiles.choice_options` (hợp đồng G1): tầng 'deep' chỉ chạy được bằng agy ⇒ chỉ Owner và hội
-    thoại chưa nhiễm nội dung ngoài mới `available` (agy chỉ cho Owner; hội thoại tainted không agy)."""
-    agy_ok = owner and not tainted
+def options_for(*, deep_efforts: tuple[str, ...] = ("low", "medium", "high"), balanced: bool = True,
+                deep: bool = True) -> dict[str, Any]:
+    """Giả `gh.defaults.profiles.choice_options` (hợp đồng G1). v0.1.62: tầng 'deep' chạy được bằng agy cho MỌI
+    người hỏi (Owner lẫn nhân viên, hội thoại đã đọc nội dung ngoài hay chưa) ⇒ `available` như nhau."""
     return {"tiers": [
         {"tier": "auto", "available": True, "efforts": []},
         {"tier": "fast", "available": True, "efforts": []},
         {"tier": "balanced", "available": balanced, "efforts": []},
-        {"tier": "deep", "available": agy_ok, "efforts": list(deep_efforts) if agy_ok else []},
+        {"tier": "deep", "available": deep, "efforts": list(deep_efforts) if deep else []},
     ]}
 
 
-@pytest.fixture
-def options(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, bool]]:
-    """Thay `engine.model_options` bằng bản giả theo (owner, tainted); trả danh sách lời gọi để kiểm."""
-    seen: list[dict[str, bool]] = []
+class Seen(list):  # type: ignore[type-arg]
+    """Danh sách tổ chức đã tra (mỗi lần gọi một phần tử) + `owners`: người hỏi có phải Owner (gói G) mỗi lần."""
 
-    async def fake(db: Any, org: Any, *, owner: bool, tainted: bool) -> dict[str, Any]:
-        seen.append({"owner": owner, "tainted": tainted})
-        return options_for(owner=owner, tainted=tainted)
+    def __init__(self) -> None:
+        super().__init__()
+        self.owners: list[bool] = []
+
+
+@pytest.fixture
+def options(monkeypatch: pytest.MonkeyPatch) -> Seen:
+    """Thay `engine.model_options` bằng bản giả; trả danh sách tổ chức đã tra (mỗi lần gọi một phần tử)."""
+    seen = Seen()
+
+    async def fake(db: Any, org: Any, *, owner: bool = True) -> dict[str, Any]:
+        seen.append(org)
+        seen.owners.append(owner)
+        return options_for()
 
     monkeypatch.setattr(engine, "model_options", fake)
     return seen
 
 
 class RecRouter(ModelRouter):
-    """ModelRouter thật về kiểu (engine truyền allow_agy / tier / effort), giả về hành vi: ghi lại lời gọi."""
+    """ModelRouter thật về kiểu (engine truyền tier / effort), giả về hành vi: ghi lại lời gọi."""
 
     def __init__(self, replies: list[Any] | None = None):  # không gọi super(): không cần CSDL/Redis
         self.replies = list(replies or [])
         self.calls: list[dict[str, Any]] = []
 
     async def generate(self, org_id: Any, *, agent_key: str, purpose: str, messages: list[Message],
-                       json_mode: bool = True, temperature: float = 0.2, allow_agy: bool = False,
+                       json_mode: bool = True, temperature: float = 0.2,
                        tier: str | None = None, effort: str | None = None) -> Routed:
-        self.calls.append({"tier": tier, "effort": effort, "allow_agy": allow_agy,
-                           "prompt": "\n".join(m.content for m in messages)})
+        self.calls.append({"tier": tier, "effort": effort, "prompt": "\n".join(m.content for m in messages)})
         r = self.replies.pop(0) if self.replies else TURN_DONE
         if isinstance(r, Exception):
             raise r
@@ -189,16 +197,16 @@ async def test_settings_returns_model_options(owner_api: Api, client: httpx.Asyn
     r = await owner_api.get("/gen/settings")
     assert r.status_code == 200
     out = r.json()
-    assert out["model_options"] == options_for(owner=True, tainted=False)
-    assert options[-1] == {"owner": True, "tainted": False}
+    assert out["model_options"] == options_for()
+    assert len(options) == 1
     assert out["available"] is True and "decider" in out                       # trường cũ giữ nguyên
-    # Nhân viên: cùng đường, owner=False ⇒ tầng chỉ-agy không available.
+    # Nhân viên: cùng đường, cùng hình dạng; gói G: máy chủ hỏi theo người hỏi (owner=False ⇒ không tính nguồn agy).
     await _enable_gen_for_manager(db)
     mgr = await login_as(client, db, "manager")
     try:
         got = (await mgr.get("/gen/settings")).json()["model_options"]
-        assert got == options_for(owner=False, tainted=False)
-        assert options[-1] == {"owner": False, "tainted": False}
+        assert got == options_for()
+        assert len(options) == 2 and options.owners == [True, False]
     finally:
         await mgr.c.aclose()
 
@@ -215,42 +223,38 @@ async def test_settings_model_options_default_shape(owner_api: Api) -> None:
 # ─── 2. resolve_model_choice (THUẦN) ───────────────────────────────────────────
 
 def test_resolve_auto_and_unknown() -> None:
-    opts = options_for(owner=True, tainted=False)
+    opts = options_for()
     for c in (None, {}, {"tier": "auto"}, {"tier": "auto", "effort": "high"}, {"tier": "xyz"}):
-        assert engine.resolve_model_choice(c, is_owner=True, tainted=False, options=opts) == (None, None, None)
+        assert engine.resolve_model_choice(c, options=opts) == (None, None, None)
 
 
 def test_resolve_maps_deep_to_strong_and_keeps_supported_effort() -> None:
-    opts = options_for(owner=True, tainted=False, deep_efforts=("medium", "high"))
+    opts = options_for(deep_efforts=("medium", "high"))
     f = engine.resolve_model_choice
-    assert f({"tier": "deep", "effort": "high"}, is_owner=True, tainted=False, options=opts) == ("strong", "high", None)
-    assert f({"tier": "deep", "effort": "low"}, is_owner=True, tainted=False, options=opts) == ("strong", None, None)
-    assert f({"tier": "deep"}, is_owner=True, tainted=False, options=opts) == ("strong", None, None)
-    assert f({"tier": "fast"}, is_owner=True, tainted=False, options=opts) == ("fast", None, None)
-    assert f({"tier": "balanced"}, is_owner=True, tainted=False, options=opts) == ("balanced", None, None)
+    assert f({"tier": "deep", "effort": "high"}, options=opts) == ("strong", "high", None)
+    assert f({"tier": "deep", "effort": "low"}, options=opts) == ("strong", None, None)
+    assert f({"tier": "deep"}, options=opts) == ("strong", None, None)
+    assert f({"tier": "fast"}, options=opts) == ("fast", None, None)
+    assert f({"tier": "balanced"}, options=opts) == ("balanced", None, None)
 
 
 def test_resolve_effort_dropped_when_tier_has_no_efforts() -> None:
-    opts = options_for(owner=True, tainted=False)
-    got = engine.resolve_model_choice({"tier": "fast", "effort": "high"}, is_owner=True, tainted=False, options=opts)
+    opts = options_for()
+    got = engine.resolve_model_choice({"tier": "fast", "effort": "high"}, options=opts)
     assert got == ("fast", None, None)
 
 
 def test_resolve_unavailable_degrades_to_auto_with_reason() -> None:
     f = engine.resolve_model_choice
-    staff = f({"tier": "deep", "effort": "high"}, is_owner=False, tainted=False,
-              options=options_for(owner=False, tainted=False))
-    assert staff[:2] == (None, None) and isinstance(staff[2], str)
-    assert staff[2].startswith("Em dùng chế độ Tự động vì ") and "Kỹ hơn" in staff[2] and "Sếp" in staff[2]
-    tainted = f({"tier": "deep"}, is_owner=True, tainted=True, options=options_for(owner=True, tainted=True))
-    assert tainted[:2] == (None, None) and tainted[2] and tainted[2].startswith("Em dùng chế độ Tự động vì ")
-    assert "bên ngoài" in tainted[2]
-    none = f({"tier": "balanced"}, is_owner=True, tainted=False,
-             options=options_for(owner=True, tainted=False, balanced=False))
+    deep = f({"tier": "deep", "effort": "high"}, options=options_for(deep=False))
+    assert deep[:2] == (None, None) and isinstance(deep[2], str)
+    assert deep[2].startswith("Em dùng chế độ Tự động vì ") and "Kỹ hơn" in deep[2]
+    assert "Antigravity" not in deep[2] and "Sếp" not in deep[2]       # v0.1.62: không còn lý do owner-only / bên ngoài
+    none = f({"tier": "balanced"}, options=options_for(balanced=False))
     assert none[:2] == (None, None) and none[2] and "Cân bằng" in none[2]
     # Bảng tuỳ chọn thiếu tầng ⇒ coi như không dùng được (không ném lỗi).
-    assert f({"tier": "fast"}, is_owner=True, tainted=False, options={"tiers": []})[2] is not None
-    assert f({"tier": "fast"}, is_owner=True, tainted=False, options={})[2] is not None
+    assert f({"tier": "fast"}, options={"tiers": []})[2] is not None
+    assert f({"tier": "fast"}, options={})[2] is not None
 
 
 # ─── 3. tier / effort tới bộ định tuyến, hạ về Tự động có thông báo ────────────
@@ -264,7 +268,7 @@ async def test_owner_choice_reaches_router(owner_api: Api, app: Any, options: An
     t = await turn(owner_api, app, r_deep, "Phân tích giúp em tình hình tuần này",
                    choice={"tier": "deep", "effort": "high"})
     c = r_deep.calls[0]
-    assert (c["tier"], c["effort"], c["allow_agy"]) == ("strong", "high", True)
+    assert (c["tier"], c["effort"]) == ("strong", "high")
     assert not steps_of(t, "notice")
     r_fast = RecRouter()
     await turn(owner_api, app, r_fast, "Xin chào lần nữa", choice={"tier": "fast", "effort": "high"})
@@ -284,71 +288,58 @@ async def test_fake_router_without_tier_params_still_works(owner_api: Api, app: 
     assert t["status"] == "done" and len(app.state.model_router.calls) == 1
 
 
-async def test_staff_deep_agy_only_downgrades_with_notice(owner_api: Api, app: Any, client: httpx.AsyncClient,
-                                                         db: Any, options: Any) -> None:
+async def test_staff_deep_choice_reaches_router_like_owner(owner_api: Api, app: Any, client: httpx.AsyncClient,
+                                                           db: Any, options: Any,
+                                                           monkeypatch: pytest.MonkeyPatch) -> None:
+    """v0.1.62: nhân viên chọn "Kỹ hơn" cũng tới bộ định tuyến (trước đây hạ về Tự động vì agy chỉ cho Owner)."""
     await _enable_gen_for_manager(db)
     mgr = await login_as(client, db, "manager")
     try:
         router = RecRouter()
         t = await turn(mgr, app, router, "Xin chào", choice={"tier": "deep", "effort": "high"})
         assert t["status"] == "done"
-        assert (router.calls[0]["tier"], router.calls[0]["effort"], router.calls[0]["allow_agy"]) == (None, None, False)
-        notice = steps_of(t, "notice")
-        assert len(notice) == 1 and isinstance(notice[0]["text"], str)
-        assert notice[0]["text"].startswith("Em dùng chế độ Tự động vì ") and "Kỹ hơn" in notice[0]["text"]
-        assert options[-1] == {"owner": False, "tainted": False}
-        # Bước notice nằm trước câu trả lời và KHÔNG vào lịch sử gửi cho model ở lượt sau.
-        assert t["steps"][0]["step"]["kind"] == "notice"
+        assert (router.calls[0]["tier"], router.calls[0]["effort"]) == ("strong", "high")
+        assert not steps_of(t, "notice")
+        # Tầng chưa có nguồn nào phục vụ ⇒ vẫn hạ về Tự động kèm thông báo (bước notice trước câu trả lời, KHÔNG vào
+        # lịch sử gửi cho model ở lượt sau).
+        async def no_deep(db: Any, org: Any, *, owner: bool = True) -> dict[str, Any]:
+            return options_for(deep=False)
+
+        monkeypatch.setattr(engine, "model_options", no_deep)
+        router1 = RecRouter()
+        t1 = await turn(mgr, app, router1, "Xin chào lần nữa", choice={"tier": "deep", "effort": "high"})
+        assert (router1.calls[0]["tier"], router1.calls[0]["effort"]) == (None, None)
+        notice = steps_of(t1, "notice")
+        assert len(notice) == 1 and notice[0]["text"].startswith("Em dùng chế độ Tự động vì ")
+        assert "Kỹ hơn" in notice[0]["text"] and t1["steps"][0]["step"]["kind"] == "notice"
         router2 = RecRouter()
-        await turn(mgr, app, router2, "Hỏi tiếp", cid=t["conversation_id"])
+        await turn(mgr, app, router2, "Hỏi tiếp", cid=t1["conversation_id"])
         assert "Em dùng chế độ Tự động vì" not in router2.calls[0]["prompt"]
-        # Nhân viên chọn tầng có nguồn khoá API (Nhanh) ⇒ dùng bình thường.
-        router3 = RecRouter()
-        t3 = await turn(mgr, app, router3, "Câu nữa", choice={"tier": "fast"})
-        assert router3.calls[0]["tier"] == "fast" and not steps_of(t3, "notice")
     finally:
         await mgr.c.aclose()
 
 
-async def test_owner_tainted_conversation_never_gets_agy_only_tier(owner_api: Api, app: Any, options: Any) -> None:
-    # Lượt 1 đọc hộp thư (nội dung khách = bên ngoài) ⇒ hội thoại nhiễm.
+async def test_tainted_conversation_keeps_deep_tier(owner_api: Api, app: Any, options: Any) -> None:
+    """v0.1.62: hội thoại đã đọc nội dung bên ngoài vẫn chọn được "Kỹ hơn" (trước đây bị hạ về Tự động, không agy)."""
+    # Lượt 1 đọc hộp thư (nội dung khách = bên ngoài) ⇒ hội thoại có nội dung ngoài.
     r1 = RecRouter([{"steps": [{"kind": "tool", "name": "queue.list", "args": {"tab": "all"}}]}, TURN_DONE])
     t1 = await turn(owner_api, app, r1, "Hộp thư có gì?")
     assert t1["status"] == "done"
     r2 = RecRouter()
     t2 = await turn(owner_api, app, r2, "Phân tích sâu hơn nhé", choice={"tier": "deep", "effort": "high"},
                     cid=t1["conversation_id"])
-    assert options[-1] == {"owner": True, "tainted": True}
-    assert (r2.calls[0]["tier"], r2.calls[0]["effort"], r2.calls[0]["allow_agy"]) == (None, None, False)
-    notice = steps_of(t2, "notice")
-    assert len(notice) == 1 and "bên ngoài" in notice[0]["text"]
-    assert notice[0]["text"].startswith("Em dùng chế độ Tự động")
-    # Hội thoại mới: tầng Kỹ hơn dùng lại được (Owner, chưa nhiễm) và agy được phép.
-    r3 = RecRouter()
-    await turn(owner_api, app, r3, "Phân tích sâu hơn nhé", choice={"tier": "deep", "effort": "medium"})
-    assert (r3.calls[0]["tier"], r3.calls[0]["effort"], r3.calls[0]["allow_agy"]) == ("strong", "medium", True)
+    assert (r2.calls[0]["tier"], r2.calls[0]["effort"]) == ("strong", "high")
+    assert not steps_of(t2, "notice")
 
 
-async def test_tool_taint_midturn_still_cuts_agy_with_deep_choice(owner_api: Api, app: Any, options: Any) -> None:
-    """Chọn Kỹ hơn rồi model gọi công cụ trả nội dung ngoài ⇒ vòng sau không agy (luật F-22 giữ nguyên)."""
-    seen: list[bool] = []
-
-    class AgyRouter(RecRouter):
-        async def generate(self, org_id: Any, *, agent_key: str, purpose: str, messages: list[Message],
-                           json_mode: bool = True, temperature: float = 0.2, allow_agy: bool = False,
-                           tier: str | None = None, effort: str | None = None) -> Routed:
-            seen.append(allow_agy)
-            if not allow_agy:
-                raise ModelUnavailable([AGY_OWNER_ONLY_REASON], no_chain=False)
-            return await super().generate(org_id, agent_key=agent_key, purpose=purpose, messages=messages,
-                                          json_mode=json_mode, temperature=temperature, allow_agy=allow_agy,
-                                          tier=tier, effort=effort)
-
-    router = AgyRouter([{"steps": [{"kind": "tool", "name": "queue.list", "args": {"tab": "all"}}]}])
+async def test_tool_output_midturn_keeps_tier_choice(owner_api: Api, app: Any, options: Any) -> None:
+    """Chọn Kỹ hơn rồi model gọi công cụ trả nội dung ngoài ⇒ vòng sau vẫn đúng tầng đã chọn, không lỗi."""
+    router = RecRouter([{"steps": [{"kind": "tool", "name": "queue.list", "args": {"tab": "all"}}]}])
     t = await turn(owner_api, app, router, "Hộp thư có gì?", choice={"tier": "deep", "effort": "high"})
-    assert seen == [True, False]
-    assert [c["tier"] for c in router.calls] == ["strong"]
-    assert any("Antigravity CLI" in s["text"] for s in steps_of(t, "say"))
+    assert t["status"] == "done"
+    assert [(c["tier"], c["effort"]) for c in router.calls] == [("strong", "high"), ("strong", "high")]
+    assert "[kết quả queue.list]" in router.calls[1]["prompt"]       # nội dung ngoài vẫn được bọc `wrap_untrusted`
+    assert not any("Antigravity CLI" in s["text"] for s in steps_of(t, "say"))
 
 
 # ─── 4. J3: định tuyến theo ý định ─────────────────────────────────────────────
@@ -496,8 +487,8 @@ async def test_simple_data_in_auto_mode_uses_fast_tier(owner_api: Api, app: Any,
 
 
 async def test_fast_tier_skipped_when_unavailable(owner_api: Api, app: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    async def none_fast(db: Any, org: Any, *, owner: bool, tainted: bool) -> dict[str, Any]:
-        o = options_for(owner=owner, tainted=tainted)
+    async def none_fast(db: Any, org: Any, *, owner: bool = True) -> dict[str, Any]:
+        o = options_for()
         o["tiers"][1]["available"] = False
         return o
 

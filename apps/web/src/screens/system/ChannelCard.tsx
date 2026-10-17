@@ -5,49 +5,67 @@ import { Button, Dialog, EmptyState, Icon, Switch, TextField } from '@gen-harnes
 import { api } from '../../lib/api';
 import { qk2, useChannelGroups } from '../../lib/dataQueries';
 import { fmtInt } from '../../lib/format';
-import { useOrgTimezone } from '../../lib/permissions';
+import { useCan, useOrgTimezone } from '../../lib/permissions';
 import { queryClient } from '../../lib/queryClient';
 import { toast } from '../../lib/toast';
 import { useNow } from '../../lib/useNow';
-import { errorText } from '../../lib/errorText';
+import { errorDetail, errorText } from '../../lib/errorText';
 import { ErrorWithDetail } from '../../social/WriteProofDialog';
 import { Bar, CardError, InlineError, SkeletonLines } from '../common';
 import { ConnectionStatusPill } from '../connections/ConnectionStatusPill';
+import { useSystemHealth } from './queries';
 import { channelConnStatus } from '../connections/connectionsModel';
 import {
+  BRIDGE_OFFLINE_TEXT,
+  BRIDGE_OFFLINE_TITLE,
   LISTEN_MODES,
   VIEW_SCOPES,
   channelAction,
   channelErrorText,
   channelIcon,
+  channelLogoutAction,
   channelMeta,
-  channelState,
+  channelResumeConfirmText,
+  channelResumeNeedsConfirm,
+  channelSecondaryAction,
   channelStats,
+  channelStatus,
   channelTileTone,
   groupKindLabel,
+  isBridgeLost,
   isDenseQr,
   isQrChannel,
   qrHint,
+  qrLifetimeMs,
   qrRemaining,
+  withBridgeHealth,
 } from './systemModel';
 
 /**
  * One channel card (design `channels`). Logging in always goes through the
  * risk warning first: the QR never appears before `accept_risk: true` is sent.
  */
-export function ChannelCard({ channel: c, canManage, large }: { channel: Channel; canManage: boolean; large?: boolean }) {
+export function ChannelCard({ channel, canManage, large }: { channel: Channel; canManage: boolean; large?: boolean }) {
+  // v0.1.62 (F051): bộ nhận tin im theo /system/health (vai có system.read) ⇒ "Mất liên lạc" thay "Đang kết nối".
+  const health = useSystemHealth(useCan('system.read'));
+  const c = withBridgeHealth(channel, health.data?.bridge?.state === 'silent');
   const tz = useOrgTimezone();
   const now = useNow(30_000);
-  const st = channelState(c.state);
+  const st = channelStatus(c);
+  const lost = isBridgeLost(c);
   const meta = channelMeta(c, now, tz);
   const act = channelAction(c);
+  const second = channelSecondaryAction(c);
+  const errLogout = channelLogoutAction(c);
   const [riskOpen, setRiskOpen] = useState(false);
   const [logoutOpen, setLogoutOpen] = useState(false);
+  /** Gói K: hỏi lại trước khi nối lại phiên bị mở nơi khác (nối sẽ ngắt nơi đó). */
+  const [resumeAsk, setResumeAsk] = useState(false);
   const [groupsOpen, setGroupsOpen] = useState(false);
   /** Set after the login request is accepted, until the first `channel.qr` arrives. */
   const [awaitingQr, setAwaitingQr] = useState(false);
-  /** 503 BRIDGE_OFFLINE on login: shown in the card (not a toast) with a retry. */
-  const [bridgeDown, setBridgeDown] = useState<string | null>(null);
+  /** 503 BRIDGE_OFFLINE on login/resume: shown in the card (not a toast) with a retry. Giữ lỗi gốc để có "Chi tiết kỹ thuật". */
+  const [bridgeDown, setBridgeDown] = useState<unknown>(null);
   const [lastLabel, setLastLabel] = useState('');
 
   const login = useMutation({
@@ -60,7 +78,20 @@ export function ChannelCard({ channel: c, canManage, large }: { channel: Channel
     },
     onError: (e) => {
       setAwaitingQr(false);
-      if (e instanceof ApiError && e.code === 'BRIDGE_OFFLINE') setBridgeDown(e.message);
+      if (e instanceof ApiError && e.code === 'BRIDGE_OFFLINE') setBridgeDown(e);
+      else toast(errorText(e), 'bad');
+    },
+  });
+  /** v0.1.62 (F046): nối lại bằng phiên đã lưu — không quét QR, không cần hộp cảnh báo rủi ro (đã chấp nhận lần đăng nhập đầu). */
+  const resume = useMutation({
+    mutationFn: () => api.channels.resume(c.type),
+    onMutate: () => setBridgeDown(null),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qk2.channels });
+      toast(`Đang nối lại ${c.name} bằng phiên đã lưu — không cần quét QR`, 'neutral');
+    },
+    onError: (e) => {
+      if (e instanceof ApiError && e.code === 'BRIDGE_OFFLINE') setBridgeDown(e);
       else toast(errorText(e), 'bad');
     },
   });
@@ -98,18 +129,36 @@ export function ChannelCard({ channel: c, canManage, large }: { channel: Channel
         ? () => setLogoutOpen(true)
         : act.action === 'configure'
           ? () => setGroupsOpen(true)
-          : () => setRiskOpen(true);
+          : act.action === 'resume'
+            ? () => (channelResumeNeedsConfirm(c) ? setResumeAsk(true) : resume.mutate())
+            : () => setRiskOpen(true);
     button = (
-      <Button
-        data-main-action
-        variant={act.accent ? 'primary' : 'secondary'}
-        className="ch-btn"
-        icon={act.icon}
-        loading={(act.action === 'logout' && logout.isPending) || (act.accent && login.isPending)}
-        onClick={onClick}
-      >
-        {act.label}
-      </Button>
+      <>
+        {errLogout ? (
+          <Button variant="secondary" className="ch-btn" icon={errLogout.icon} loading={logout.isPending} onClick={() => setLogoutOpen(true)}>
+            {errLogout.label}
+          </Button>
+        ) : null}
+        {second ? (
+          <Button variant="secondary" className="ch-btn" icon={second.icon} loading={login.isPending} onClick={() => setRiskOpen(true)}>
+            {second.label}
+          </Button>
+        ) : null}
+        <Button
+          data-main-action
+          variant={act.accent ? 'primary' : 'secondary'}
+          className="ch-btn"
+          icon={act.icon}
+          loading={
+            (act.action === 'logout' && logout.isPending) ||
+            (act.action === 'resume' && resume.isPending) ||
+            (act.accent && act.action !== 'resume' && login.isPending)
+          }
+          onClick={onClick}
+        >
+          {act.label}
+        </Button>
+      </>
     );
   }
 
@@ -123,7 +172,7 @@ export function ChannelCard({ channel: c, canManage, large }: { channel: Channel
           <div className="ch-titleline">
             <span className="ch-name">{c.name}</span>
             {/* v0.1.42 (F-7): một kiểu viên trạng thái cho mọi thẻ Kết nối; chữ chi tiết chuyển xuống dòng meta. */}
-            <ConnectionStatusPill status={channelConnStatus(c)} />
+            <ConnectionStatusPill status={channelConnStatus(lost ? { state: 'error' } : c)} />
           </div>
           <div className="ch-meta">
             <span className="ch-meta__state" style={{ color: st.tone }}>
@@ -159,19 +208,43 @@ export function ChannelCard({ channel: c, canManage, large }: { channel: Channel
         <div className="ch-alert" role="alert">
           <Icon name="ph ph-plugs" size={16} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="ch-alert__title">Bridge kênh đang tắt — chưa tạo được mã QR</div>
-            <div className="ch-alert__text">{bridgeDown}</div>
+            <div className="ch-alert__title">{BRIDGE_OFFLINE_TITLE}</div>
+            <div className="ch-alert__text">{BRIDGE_OFFLINE_TEXT}</div>
+            {errorDetail(bridgeDown) ? (
+              <details className="write-error__detail">
+                <summary>Chi tiết kỹ thuật</summary>
+                <code>{errorDetail(bridgeDown)}</code>
+              </details>
+            ) : null}
           </div>
-          <Button variant="secondary" size="sm" icon="ph ph-arrow-clockwise" loading={login.isPending} onClick={() => login.mutate(lastLabel)}>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon="ph ph-arrow-clockwise"
+            loading={login.isPending || resume.isPending}
+            onClick={() => (act.action === 'resume' ? resume.mutate() : login.mutate(lastLabel))}
+          >
             Thử lại
           </Button>
+        </div>
+      ) : null}
+
+      {lost && !bridgeDown && !showQr ? (
+        <div className="ch-alert" role="alert" data-testid={`lost-${c.type}`}>
+          <Icon name="ph ph-plugs" size={16} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="ch-alert__title">Mất liên lạc với bộ nhận tin Zalo/WhatsApp</div>
+            <div className="ch-alert__text">
+              Bộ nhận tin không còn báo nhịp tim nên tin của khách có thể đang không về. Thử lại sau ít phút; nếu vẫn lỗi, gửi Gói chẩn đoán cho người hỗ trợ.
+            </div>
+          </div>
         </div>
       ) : null}
 
       {showQr ? <QrBlock channel={c} large={large} /> : null}
 
       {!showQr && (c.state === 'expired' || c.state === 'error') && c.error ? (
-        <ErrorWithDetail className="write-error ch-fail" text={channelErrorText(c.error, c.name, c.type)} detail={c.error} />
+        <ErrorWithDetail className="write-error ch-fail" text={channelErrorText(c.error, c.name, c.type, !!c.resumable)} detail={c.error} />
       ) : null}
 
       <div className="ch-stats">
@@ -219,9 +292,34 @@ export function ChannelCard({ channel: c, canManage, large }: { channel: Channel
         }
       >
         <p className="risk-box__text">
-          Bridge ngừng nhận tin từ {fmtInt(c.groups_listening)} nhóm cho tới khi Sếp quét mã QR lại. Tin gửi đi trong hàng đợi được giữ
-          nguyên.
+          Gen ngừng nhận tin từ {fmtInt(c.groups_listening)} nhóm cho tới khi Sếp quét mã QR lại. Tin Sếp soạn gửi đi trong lúc chưa đăng
+          nhập sẽ bị từ chối, không được giữ lại để tự gửi sau.
         </p>
+      </Dialog>
+      <Dialog
+        open={resumeAsk}
+        onClose={() => setResumeAsk(false)}
+        width={420}
+        title={`Nối lại ${c.name}?`}
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => setResumeAsk(false)}>
+              Huỷ
+            </Button>
+            <Button
+              variant="primary"
+              icon="ph ph-plugs-connected"
+              onClick={() => {
+                setResumeAsk(false);
+                resume.mutate();
+              }}
+            >
+              Vẫn nối lại
+            </Button>
+          </>
+        }
+      >
+        <p className="risk-box__text">{channelResumeConfirmText(c)}</p>
       </Dialog>
       <GroupsDialog open={groupsOpen} onClose={() => setGroupsOpen(false)} channel={c} canManage={canManage} />
     </article>
@@ -236,7 +334,7 @@ export function ChannelCard({ channel: c, canManage, large }: { channel: Channel
 export function QrBlock({ channel: c, large }: { channel: Channel; large?: boolean }) {
   const now = useNow(1000, !!c.qr);
   const qr = c.qr;
-  const left = qr ? qrRemaining(qr.expires_at, now) : null;
+  const left = qr ? qrRemaining(qr.expires_at, now, qrLifetimeMs(c.type)) : null;
   const expired = !!left && left.ms <= 0;
   const dense = isDenseQr(c);
   return (
@@ -258,7 +356,7 @@ export function QrBlock({ channel: c, large }: { channel: Channel; large?: boole
         <div className="qr-text">
           {qr
             ? qrHint(c)
-            : 'Bridge đang mở phiên đăng nhập mới. Mã sẽ hiện ở đây sau vài giây.'}
+            : 'Gen đang mở phiên đăng nhập mới. Mã sẽ hiện ở đây sau vài giây.'}
         </div>
         {large || dense ? (
           <ol className="qr-steps">
@@ -330,8 +428,8 @@ export function RiskWarningDialog({
         </div>
         <ul className="risk-list">
           <li>Dùng tài khoản Sếp sở hữu, không dùng tài khoản của nhân viên hay khách.</li>
-          <li>Bridge chỉ nghe nhóm Sếp bật — nhóm mới luôn ở chế độ Không nghe.</li>
-          <li>Tin gửi đi đi qua hàng đợi và ranh giới tự trị, không gửi hàng loạt.</li>
+          <li>Gen chỉ nghe nhóm Sếp bật — nhóm mới luôn ở chế độ Không nghe.</li>
+          <li>Tin gửi đi phải qua duyệt và ranh giới tự trị, không gửi hàng loạt.</li>
           <li>Đăng xuất bất cứ lúc nào ở đây hoặc trong ứng dụng trên điện thoại.</li>
         </ul>
         <TextField

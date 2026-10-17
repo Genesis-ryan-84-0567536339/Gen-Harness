@@ -154,6 +154,8 @@ COACH_HEALTH_TITLES: dict[str, str] = {
     "update.failed": "Lần cập nhật gần nhất bị lỗi — Sếp xem và thử lại giúp em",
     "backup.stale": "Đã lâu chưa có bản sao lưu mới — Sếp mở mục Sao lưu giúp em",
     "worker.silent": "Bộ xử lý nền đang im — Sếp xem sức khoẻ hệ thống giúp em",
+    "bridge.silent": "Bộ nhận tin Zalo/WhatsApp đang im, tin khách chưa vào được — Sếp xem sức khoẻ hệ thống giúp em",
+    "dlq.inbound": "Có tin khách chưa nhập kho được — Sếp vào Sức khoẻ hệ thống bấm Phát lại giúp em",
     "disk.low": "Ổ đĩa sắp hết chỗ — Sếp giải phóng dung lượng giúp em",
     "host.autostart": "Máy chủ có thể không tự chạy lại khi bật máy — Sếp xem cách bật giúp em",
     "host.nightly": "Lịch tự cập nhật ban đêm chưa chạy được — Sếp xem giúp em",

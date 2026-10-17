@@ -39,7 +39,7 @@ def _today(h: int, m: int) -> datetime:
 
 
 class Boom:
-    """Nhà máy CLI không bao giờ được gọi."""
+    """Nhà máy CLI không bao giờ được gọi (Claude Code CLI chưa được phép cho việc nền)."""
 
     def __call__(self) -> Any:
         raise AssertionError("CLI không được dùng cho Bản tin Gen")
@@ -213,9 +213,10 @@ async def test_uses_api_source_not_cli(owner_api, db, redis) -> None:  # type: i
 
 
 async def test_no_api_key_still_sends(owner_api, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """Chỉ có Claude Code CLI (chưa được cho chạy việc nền), không khoá API, không Antigravity CLI ⇒ không có nguồn nền
+    ⇒ bản tin vẫn gửi đủ mục kèm lời nhắc dán khoá (v0.1.62: có Antigravity CLI thì KHÔNG rơi vào nhánh này)."""
     org = await org_id(db)
     await cli_provider(db, org, "claude_code_cli", 1)
-    await cli_provider(db, org, "antigravity_cli", 2)
     await briefing.run_briefing(sessionmaker(), redis, _router(redis), now=_today(7, 31))
     bells = await _bells(db)
     assert len(bells) == 1 and HINT in bells[0].body
@@ -228,6 +229,24 @@ async def test_no_api_key_still_sends(owner_api, db, redis) -> None:  # type: ig
     assert _says(c).count(HINT) == 1  # câu nhắc dán khoá chỉ một lần (nút không lặp lại)
     assert "Không có việc gì cần Sếp xử lý lúc này." in _says(c)
     assert (await db.execute(text("SELECT count(*) FROM agent.model_calls"))).scalar_one() == 0
+
+
+async def test_agy_source_summarizes_briefing(owner_api, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """v0.1.62: Owner chỉ có Antigravity CLI (không khoá API) ⇒ Bản tin Gen tóm tắt bằng agy, không nhắc dán khoá."""
+    from tests.test_background_cli_v0141 import FakeCli
+
+    org = await org_id(db)
+    await cli_provider(db, org, "antigravity_cli", 1)
+    agy = FakeCli("agy")
+    router = ModelRouter(sessionmaker(), redis, transport=transport(lambda host, key: (200, OK)),
+                         claude_factory=Boom(), cli_factory=agy)
+    await briefing.run_briefing(sessionmaker(), redis, router, now=_today(7, 31))
+    c = (await _messages(db))[0]
+    assert c["summary_source"] == "model" and c["needs_api_key"] is False
+    assert c["steps"][1] == {"kind": "say", "text": "agy-ok"} and agy.calls == 1
+    calls = (await db.execute(text("""SELECT mc.purpose, mc.agent_key, mc.status FROM agent.model_calls mc"""))).all()
+    assert [(x.purpose, x.agent_key, x.status) for x in calls] == [("gen.briefing", "core.briefing", "ok")]
+    assert HINT not in (await _bells(db))[0].body
 
 
 async def test_content_marks_untrusted(owner_api, db, redis) -> None:  # type: ignore[no-untyped-def]

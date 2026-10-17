@@ -6,6 +6,34 @@ import { silentLogger } from '../log.js';
 import { RecentIds, errorCode, toIso, toPlain } from '../util.js';
 
 export const ZALO_QR_TTL_MS = 100000; // zca-js tự hết hạn QR sau 100 giây
+export const ZALO_RETRY_MAX_MS = 60000; // lùi tối đa 60 giây giữa hai lần thử nối lại
+export const ZALO_UNKNOWN_RETRY_MAX = 5; // lỗi LẠ (không phải mạng, không phải bị từ chối) liên tiếp quá chừng này lần ⇒ dừng, báo lỗi
+export const ZALO_RETRY_NOTICE_AFTER = 2; // báo lõi "đang nối lại" sau chừng này lần hụt liên tiếp (một lần hụt lẻ không đáng báo)
+
+// Nền tảng TỪ CHỐI phiên đã lưu (hết hạn / đăng xuất / cookie sai) — khác lỗi mạng tạm. zca-js ném ZaloApiError
+// "Đăng nhập thất bại" khi máy chủ không trả thông tin đăng nhập, "Failed to fetch server info: Unauthorized" khi 401.
+// Mọi lỗi KHÁC (ENOTFOUND, ETIMEDOUT, fetch failed, 5xx…) là lỗi tạm: giữ phiên, lùi và thử lại.
+const REJECTED_RE = /Đăng nhập thất bại|Missing required params|unauthori[sz]ed|logged.?out|invalid (cookie|session|credential)/i;
+
+/** true khi lỗi nghĩa là nền tảng từ chối phiên đã lưu (HTTP 401 / loggedOut); false = lỗi mạng/tạm thời. */
+export function isCredentialRejected(err) {
+  const status = Number(err?.status ?? err?.statusCode ?? err?.response?.status ?? err?.code);
+  if (status === 401) return true;
+  return REJECTED_RE.test(String(err?.message || ''));
+}
+
+// Lỗi mạng/máy chủ tạm thời đã biết ⇒ thử lại mãi (có lùi dần). Lỗi KHÔNG khớp (lỗi mã, dữ liệu lạ…) là "lạ": chỉ thử
+// vài lần rồi dừng với RECONNECT_FAILED để Sếp thấy thẻ 'Lỗi kết nối' thay vì bridge lặng lẽ thử mỗi 60 giây mãi.
+const NETWORK_RE = /ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ECONNABORTED|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|ENETDOWN|EPIPE|certificate|time(d)?[ -]?out|socket hang up|fetch failed|network|Service Unavailable|Bad Gateway|Gateway Time|Too Many Requests|WebSocket (was )?closed/i;
+
+/** 'rejected' = nền tảng từ chối phiên · 'network' = lỗi mạng/máy chủ tạm (thử mãi) · 'unknown' = không phân loại được (thử có giới hạn). */
+export function classifyLoginError(err) {
+  if (isCredentialRejected(err)) return 'rejected';
+  const status = Number(err?.status ?? err?.statusCode ?? err?.response?.status);
+  if (status === 429 || status >= 500) return 'network';
+  if (NETWORK_RE.test(`${err?.code || ''} ${err?.message || ''}`)) return 'network';
+  return 'unknown';
+}
 
 export async function loadZaloLib() {
   const m = await import('zca-js');
@@ -36,7 +64,10 @@ function chunk(arr, n) {
 export class ZaloAdapter extends EventEmitter {
   channel = 'zalo';
 
-  constructor({ lib, sessionId, logger = silentLogger, qrMax = 5, now = Date.now, reconnectDelayMs = 5000 } = {}) {
+  constructor({
+    lib, sessionId, logger = silentLogger, qrMax = 5, now = Date.now, reconnectDelayMs = 5000,
+    retryMaxMs = ZALO_RETRY_MAX_MS, retryNoticeAfter = ZALO_RETRY_NOTICE_AFTER, unknownRetryMax = ZALO_UNKNOWN_RETRY_MAX,
+  } = {}) {
     super();
     this.lib = lib;
     this.sessionId = sessionId;
@@ -44,6 +75,12 @@ export class ZaloAdapter extends EventEmitter {
     this.qrMax = qrMax;
     this.now = now;
     this.reconnectDelayMs = reconnectDelayMs;
+    this.retryMaxMs = retryMaxMs;
+    this.retryNoticeAfter = retryNoticeAfter;
+    this.unknownRetryMax = unknownRetryMax;
+    this.retrying = false; // đã báo lõi "mất mạng, đang nối lại"
+    this.wake = null;
+    this.account = null;
     this.state = 'idle';
     this.credential = null;
     this.api = null;
@@ -64,14 +101,10 @@ export class ZaloAdapter extends EventEmitter {
       if (!credential.imei || !credential.cookie || !credential.userAgent) {
         return this.#end('expired', 'CREDENTIAL_INVALID');
       }
-      try {
-        api = await this.zalo.login(credential);
-      } catch (err) {
-        if (this.cancelled) return undefined;
-        this.log.warn('zalo: phiên đã lưu bị từ chối', { error: errorCode(err) });
-        return this.#end('expired', 'CREDENTIAL_REJECTED');
-      }
-      this.credential = credential;
+      this.credential = credential; // giữ trong RAM để thử lại khi mất mạng
+      this.state = 'connecting';
+      api = await this.#loginWithRetry(credential);
+      if (!api) return this.cancelled ? undefined : 'ended';
     } else {
       this.state = 'qr';
       this.qrCount = 0;
@@ -88,6 +121,53 @@ export class ZaloAdapter extends EventEmitter {
     }
     if (this.cancelled) return undefined;
     return this.#activate(api);
+  }
+
+  /**
+   * Nối lại bằng phiên đã lưu. CHỈ khi nền tảng từ chối thật (401 / đăng xuất) mới `expired` (lõi xoá phiên);
+   * lỗi mạng (DNS, timeout, máy chủ 5xx) → lùi dần (5s, 10s… tối đa 60s) và thử lại KHÔNG giới hạn, giữ nguyên phiên.
+   * Lỗi LẠ (không khớp mạng/từ chối) liên tiếp quá `unknownRetryMax` lần → dừng, `session.ended` error RECONNECT_FAILED
+   * (giữ credential để Sếp bấm "Nối lại"). Trả api khi xong, null khi đã kết thúc/bị huỷ.
+   */
+  async #loginWithRetry(credential) {
+    let unknown = 0;
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await this.zalo.login(credential);
+      } catch (err) {
+        if (this.cancelled) return null;
+        const kind = classifyLoginError(err);
+        if (kind === 'rejected') {
+          this.log.warn('zalo: phiên đã lưu bị từ chối', { error: errorCode(err) });
+          this.#end('expired', 'CREDENTIAL_REJECTED');
+          return null;
+        }
+        unknown = kind === 'unknown' ? unknown + 1 : 0;
+        if (unknown >= this.unknownRetryMax) {
+          this.log.warn('zalo: lỗi lạ lặp lại, dừng nối lại', { error: errorCode(err), attempt });
+          this.#end('error', 'RECONNECT_FAILED');
+          return null;
+        }
+        this.log.warn('zalo: chưa nối lại được (mạng?), sẽ thử lại', { error: errorCode(err), attempt });
+        if (attempt >= this.retryNoticeAfter) this.#noticeRetrying();
+        await this.#sleep(Math.min(this.retryMaxMs, this.reconnectDelayMs * 2 ** Math.min(attempt - 1, 10)));
+        if (this.cancelled) return null;
+      }
+    }
+  }
+
+  #noticeRetrying() {
+    if (this.retrying || this.cancelled || this.state === 'ended') return;
+    this.retrying = true;
+    this.emit('retrying', { error: 'NETWORK_UNAVAILABLE' });
+  }
+
+  #sleep(ms) {
+    return new Promise((resolve) => {
+      const t = setTimeout(() => { this.wake = null; resolve(); }, ms);
+      t.unref?.();
+      this.wake = () => { clearTimeout(t); this.wake = null; resolve(); };
+    });
   }
 
   #onQrEvent(evt) {
@@ -140,8 +220,10 @@ export class ZaloAdapter extends EventEmitter {
     if (this.cancelled) return undefined;
     this.#attach(api);
     this.state = 'active';
+    this.retrying = false;
     const account = { id: this.ownId, name };
     if (phone) account.phone = phone;
+    this.account = account;
     this.emit('active', { account, credential: this.getCredential() });
     return 'active';
   }
@@ -175,16 +257,20 @@ export class ZaloAdapter extends EventEmitter {
       this.#end('error', 'CONNECTION_REPLACED'); // tài khoản mở Zalo Web ở nơi khác
       return;
     }
-    // Thử đăng nhập lại một lần bằng phiên trong RAM.
+    // Đăng nhập lại bằng phiên trong RAM: lỗi mạng → thử mãi (không xoá phiên), chỉ bị từ chối thật mới `expired`.
     this.#stopListener();
-    await new Promise((r) => { setTimeout(r, this.reconnectDelayMs); });
+    this.state = 'connecting'; // trong lúc nối lại không nhận lệnh gửi (send() từ chối SESSION_NOT_ACTIVE)
+    await this.#sleep(this.reconnectDelayMs);
     if (this.cancelled) return;
-    try {
-      const api = await this.zalo.login(this.credential);
-      if (this.cancelled) return;
-      this.#attach(api);
-    } catch {
-      this.#end('expired', 'CREDENTIAL_REJECTED');
+    const api = await this.#loginWithRetry(this.credential);
+    if (!api || this.cancelled) return;
+    this.api = api;
+    this.#attach(api);
+    this.state = 'active';
+    if (this.retrying) {
+      // Đã báo lõi mất mạng ⇒ báo lại "đã nối" để lõi đổi trạng thái về Đang kết nối.
+      this.retrying = false;
+      this.emit('active', { account: this.account || { id: this.ownId, name: '' }, credential: this.getCredential() });
     }
   }
 
@@ -218,6 +304,7 @@ export class ZaloAdapter extends EventEmitter {
   /** Dừng không phát sự kiện (tắt tiến trình / thay phiên). */
   close() {
     this.cancelled = true;
+    this.wake?.();
     try { this.qrActions?.abort?.(); } catch { /* không còn chờ */ }
     this.#stopListener();
     this.credential = null;

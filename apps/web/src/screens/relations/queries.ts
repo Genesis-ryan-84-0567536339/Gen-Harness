@@ -1,6 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   DirBotBody,
+  DirBulkBotBody,
   DirGroupQuery,
   DirPeopleQuery,
   DocumentCreateBody,
@@ -34,8 +35,31 @@ export const useDirChannels = () =>
 export const useDirGroups = (q: DirGroupQuery) =>
   useQuery({ queryKey: qkRel.groups(q), queryFn: ({ signal }) => api.relations.directory.groups.list(q, signal) });
 
-export const useDirPeople = (q: DirPeopleQuery) =>
-  useQuery({ queryKey: qkRel.people(q), queryFn: ({ signal }) => api.relations.directory.people.list(q, signal) });
+export const useDirPeople = (q: DirPeopleQuery, enabled = true) =>
+  useQuery({ queryKey: qkRel.people(q), queryFn: ({ signal }) => api.relations.directory.people.list(q, signal), enabled });
+
+/** Cỡ một trang của Khách & Nhóm — "Xem thêm" lấy trang kế bằng con trỏ `(created_at, id)` của máy chủ. */
+export const DIR_PAGE_SIZE = 50;
+
+/** Nhóm của MỘT kênh (hoặc mọi kênh khi `channel_id` rỗng), phân trang theo con trỏ — không tự cắt ở 50 dòng đầu. */
+export const useDirGroupsPaged = (q: Omit<DirGroupQuery, 'cursor' | 'limit'>) =>
+  useInfiniteQuery({
+    queryKey: [...qkRel.groups(q), 'paged'] as const,
+    queryFn: ({ signal, pageParam }) => api.relations.directory.groups.list({ ...q, limit: DIR_PAGE_SIZE, cursor: pageParam }, signal),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
+    placeholderData: keepPreviousData,
+  });
+
+/** Con người theo bộ lọc + tìm tên của máy chủ, phân trang theo con trỏ. */
+export const useDirPeoplePaged = (q: Omit<DirPeopleQuery, 'cursor' | 'limit'>) =>
+  useInfiniteQuery({
+    queryKey: [...qkRel.people(q), 'paged'] as const,
+    queryFn: ({ signal, pageParam }) => api.relations.directory.people.list({ ...q, limit: DIR_PAGE_SIZE, cursor: pageParam }, signal),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
+    placeholderData: keepPreviousData,
+  });
 
 export const useSetGroupBot = () => {
   const qc = useQueryClient();
@@ -48,6 +72,15 @@ export const useSetPersonBot = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: DirBotBody }) => api.relations.directory.people.setBot(id, body),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['relations', 'people'] }),
+  });
+};
+
+/** Gán BOT / tự trị cho MỌI người khớp bộ lọc — một lần gọi, máy chủ làm trọn (không lặp từng người ở trình duyệt). */
+export const useBulkSetPersonBot = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: DirBulkBotBody) => api.relations.directory.people.bulkBot(body),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['relations', 'people'] }),
   });
 };

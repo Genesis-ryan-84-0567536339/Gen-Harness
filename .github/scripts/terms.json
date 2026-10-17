@@ -93,9 +93,8 @@
   "baseline": {
     "agent-model-ten-man": {
       "apps/api/gh/errors.py": 1,
-      "apps/api/gh/providers/router.py": 1,
       "apps/api/gh/shell/navigation.py": 1,
-      "apps/web/src/lib/friendlyError.ts": 2,
+      "apps/web/src/lib/friendlyError.ts": 1,
       "apps/web/src/lib/pickers.ts": 2,
       "packages/contracts/src/screens.ts": 5
     },
@@ -106,7 +105,7 @@
       "apps/web/src/screens/mcp/HubLinkCard.tsx": 1
     },
     "khoa-dau-hoi": {
-      "apps/api/gh/defaults/registry.py": 3,
+      "apps/api/gh/defaults/registry.py": 2,
       "apps/api/gh/gen/registry.json": 2,
       "apps/api/gh/refinery/jev_routes.py": 8,
       "apps/web/src/screens/system/JevCard.tsx": 3,
@@ -125,8 +124,7 @@
       "apps/web/src/setup/validation.ts": 1
     },
     "vai-tieng-anh": {
-      "apps/api/gh/system_api/routes.py": 1,
-      "apps/web/src/screens/system/LogTab.tsx": 2
+      "apps/api/gh/system_api/routes.py": 1
     }
   },
   "crawl_baseline": {

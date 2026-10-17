@@ -8,7 +8,8 @@ import { CardError, InlineError, Panel, ScreenHead, SkeletonLines } from '../com
 import { WhyButton } from '../core/Evidence';
 import { DataEmptyState } from '../DataEmptyState';
 import { TASK_STATUS_LABEL, taskPriorityTone, taskStatusTone } from './queueModel';
-import { useCreateTask, useKeepPromise, usePromises, useTasks, useUpdateTask } from './queries';
+import { LoadMore } from './LoadMore';
+import { useCreateTask, useKeepPromise, usePromises, useTaskList, useUpdateTask } from './queries';
 
 const STATUS_OPTIONS: FilterOption[] = [
   { value: '', label: 'Tất cả' },
@@ -29,7 +30,7 @@ export function TasksScreen() {
   const [status, setStatus] = useUrlState<string>('status', '');
   const [priority, setPriority] = useUrlState<string>('priority', '');
   const [overdue, setOverdue] = useUrlState<string>('overdue', '');
-  const tasks = useTasks({
+  const tasks = useTaskList({
     status: (status || undefined) as TaskStatus | undefined,
     priority: (priority || undefined) as TaskPriority | undefined,
     overdue: overdue === 'true' ? true : undefined,
@@ -68,21 +69,33 @@ export function TasksScreen() {
         <Panel title="Danh sách việc" kicker={tasks.data ? `${fmtInt(tasks.data.total)} việc` : 'Đang tải…'} bodyClass="tk-list">
           {tasks.isPending ? (
             <SkeletonLines rows={5} padding="12px 16px" />
-          ) : tasks.isError ? (
+          ) : tasks.isError && !tasks.isFetchNextPageError ? (
             <CardError error={tasks.error} onRetry={() => void tasks.refetch()} retrying={tasks.isFetching} />
           ) : tasks.data.items.length === 0 ? (
             <DataEmptyState
               filtered={status !== '' || priority !== '' || overdue !== ''}
               fallback={<EmptyState icon="ph ph-check-square" title="Không có việc nào khớp bộ lọc" />} />
           ) : (
-            tasks.data.items.map((t) => (
-              <TaskRow
-                key={t.id}
-                t={t}
-                onToggleStatus={() => update.mutate({ id: t.id, body: { status: NEXT_STATUS[t.status] } })}
-                busy={update.isPending && update.variables?.id === t.id}
+            <>
+              {tasks.data.items.map((t) => (
+                <TaskRow
+                  key={t.id}
+                  t={t}
+                  onToggleStatus={() => update.mutate({ id: t.id, body: { status: NEXT_STATUS[t.status] } })}
+                  busy={update.isPending && update.variables?.id === t.id}
+                />
+              ))}
+              <LoadMore
+                shown={tasks.data.items.length}
+                total={tasks.data.total}
+                hasMore={tasks.hasNextPage}
+                loading={tasks.isFetchingNextPage}
+                onMore={() => void tasks.fetchNextPage()}
+                error={tasks.isFetchNextPageError ? tasks.error : null}
+                unit="việc"
+                testId="tasks-xem-them"
               />
-            ))
+            </>
           )}
         </Panel>
 

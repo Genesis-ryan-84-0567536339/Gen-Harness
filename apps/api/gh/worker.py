@@ -55,6 +55,7 @@ from gh.config import get_settings
 from gh.db import admin_sessionmaker, dispose_engine, sessionmaker
 from gh.gen import briefing, kho_release
 from gh.gen.coach import cron as coach_cron
+from gh.hardening import set_not_dumpable
 from gh.hub_link import service as hub_link
 from gh.identity import service as identity
 from gh.memory import notebook
@@ -219,9 +220,12 @@ def _cron(fn: Callable[[dict[str, Any]], Awaitable[Any]], **kw: Any) -> ArqCronJ
 
 
 async def startup(ctx: dict[str, Any]) -> None:
+    # Gói G: việc ĐẦU TIÊN của tiến trình worker (trước DB, Redis, job) — agy cùng uid không đọc được
+    # /proc/<pid>/environ. Đặt ở đây (không ở mức nhập mô-đun) để test nhập gh.worker không đổi trạng thái pytest.
+    set_not_dumpable()
     configure_logging()
     async with sessionmaker()() as db:
-        await bootstrap(db)
+        await bootstrap(db, mint_setup_code=False)   # P2-2: chỉ api sinh / giao mã thiết lập, worker không sinh lại
         await db.commit()
     s = get_settings()
     ctx["redis_bus"] = Redis.from_url(s.redis_url)

@@ -684,16 +684,17 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 
 describe('Đích "Chọn model" dồn về /setup?buoc=nguon-ai', () => {
-  it('ModelUnavailableNotice: "Chọn model" → màn Thiết lập nguồn AI; chuỗi chỉ có Antigravity vẫn giữ nút Thêm nguồn AI → /api', () => {
+  it('ModelUnavailableNotice: "Chọn model" → màn Thiết lập nguồn AI (v0.1.62: không còn nhánh riêng cho chuỗi chỉ có Antigravity)', () => {
     const wrap = (ui: JSX.Element) => render(<MemoryRouter>{ui}</MemoryRouter>);
     const a = wrap(<ModelUnavailableNotice reasons="Không có nhà cung cấp" />);
     expect(screen.getByRole('link', { name: /Chọn model/ })).toHaveAttribute('href', '/setup?buoc=nguon-ai');
     a.unmount();
-    wrap(<ModelUnavailableNotice agyOnly />);
-    expect(screen.getByRole('link', { name: /Thêm nguồn AI/ })).toHaveAttribute('href', '/api');
+    wrap(<ModelUnavailableNotice reasons="Antigravity CLI: lỗi tạm" />);
+    expect(screen.getByRole('link', { name: /Chọn model/ })).toHaveAttribute('href', '/setup?buoc=nguon-ai');
+    expect(screen.queryByRole('link', { name: /Thêm nguồn AI/ })).toBeNull();
   });
 
-  it('vai không phải Owner (Quản lý, Vận hành…): KHÔNG có nút "Chọn model"/"Thêm nguồn AI" dẫn tới màn họ không vào được — chữ "Báo Sếp chọn nguồn AI" + Chi tiết kỹ thuật', () => {
+  it('vai không phải Owner (Quản lý, Vận hành…): KHÔNG có nút "Chọn model" dẫn tới màn họ không vào được — chữ "Báo Sếp chọn nguồn AI" + Chi tiết kỹ thuật', () => {
     const wrap = (ui: JSX.Element) => render(<MemoryRouter>{ui}</MemoryRouter>);
     queryClient.setQueryData(qk.me, ME('manager'));
     const a = wrap(<ModelUnavailableNotice reasons="Không có nhà cung cấp: lỗi 401" />);
@@ -701,8 +702,8 @@ describe('Đích "Chọn model" dồn về /setup?buoc=nguon-ai', () => {
     expect(screen.getByTestId('model-unavailable-ask-owner')).toHaveTextContent('Báo Sếp chọn nguồn AI');
     expect(screen.getByText('Chi tiết kỹ thuật')).toBeInTheDocument();
     a.unmount();
-    const b = wrap(<ModelUnavailableNotice agyOnly />);
-    expect(screen.queryByRole('link', { name: /Thêm nguồn AI/ })).toBeNull();
+    const b = wrap(<ModelUnavailableNotice reasons="Antigravity CLI: lỗi tạm" />);
+    expect(screen.queryByRole('link')).toBeNull();
     expect(screen.getByTestId('model-unavailable-ask-owner')).toBeInTheDocument();
     b.unmount();
     // Bàn làm việc (dịch / tạo lại nháp) dùng ActionError: Quản lý gặp MODEL_UNAVAILABLE cũng chỉ thấy chữ báo Sếp

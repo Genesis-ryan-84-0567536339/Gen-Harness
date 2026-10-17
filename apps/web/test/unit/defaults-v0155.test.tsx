@@ -452,7 +452,7 @@ const slot = (over: Partial<AgentBindingSlot> = {}): AgentBindingSlot => ({ agen
 
 describe('apiModel (bảng gán model)', () => {
   it('v0.1.58: chưa có model chuẩn ⇒ "Chuẩn: <lý do>" của máy chủ; thiếu trường / lý do rỗng / không phải chuỗi ⇒ câu cũ', () => {
-    const reason = 'cần khoá API (Antigravity chỉ dùng cho Gen)';
+    const reason = 'cần khoá API hoặc đăng nhập Antigravity CLI';
     expect(bindingModelText(slot({ source: 'standard', standard: null, standard_reason: reason }))).toBe(`Chuẩn: ${reason}`);
     expect(bindingModelText(slot({ source: 'standard', standard_reason: 'chưa có model — bấm Kiểm tra kết nối ở Antigravity CLI' }))).toBe(
       'Chuẩn: chưa có model — bấm Kiểm tra kết nối ở Antigravity CLI',

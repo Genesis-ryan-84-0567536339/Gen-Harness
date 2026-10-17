@@ -224,6 +224,8 @@ export function createEndpoints(client: ApiClient) {
       login: (type: string, body: { account_label?: string; accept_risk: true }) =>
         r<{ session_id: string }>(`/channels/${enc(type)}/login`, { method: 'POST', body }),
       logout: (type: string) => r<void>(`/channels/${enc(type)}/logout`, { method: 'POST' }),
+      /** v0.1.62 (F046): nối lại bằng phiên đã lưu, không quét QR. `system.manage`, không đòi PIN. 503 BRIDGE_OFFLINE khi bridge tắt. */
+      resume: (type: string) => r<{ session_id: string }>(`/channels/${enc(type)}/resume`, { method: 'POST' }),
       /** 🔒 PIN `policy.change`. */
       update: (type: string, body: { listen_direct: boolean }) =>
         r<Channel>(`/channels/${enc(type)}`, { method: 'PATCH', body }),

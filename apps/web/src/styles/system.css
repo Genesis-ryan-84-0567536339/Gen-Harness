@@ -117,6 +117,11 @@
 .health-card__value { flex: none; max-width: 60%; text-align: right; font-size: 11.5px; color: var(--color-text); overflow-wrap: anywhere; }
 .health-card__hint { flex: 1 0 100%; padding-left: 16px; font-size: 11px; line-height: 1.45; color: var(--color-neutral-500); }
 .health-card__tech { margin-top: 2px; }
+/* F064/F102: hàng lỗi theo loại + nút Phát lại / Đã xem, xoá — xuống dòng được ở màn hẹp (390). */
+.health-card__queues { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--color-divider); border-left: 3px solid var(--color-warn); border-radius: 6px; padding: 8px 10px; }
+.health-card__queue { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; font-size: 12px; }
+.health-card__queue-label { min-width: 0; overflow-wrap: anywhere; }
+.health-card__queue-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .health-card__tip { border: 1px solid var(--color-divider); border-left: 3px solid var(--color-bad); border-radius: 6px; padding: 8px 10px; font-size: 11.5px; line-height: 1.5; color: var(--color-text); }
 .health-card__tip-title { font-weight: 600; margin-bottom: 4px; }
 .health-card__tip-steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
@@ -272,6 +277,10 @@
   height: 30px; padding: 0 24px 0 10px; font: inherit; font-size: 11.5px; color: var(--color-text);
   background: var(--color-bg); border: 1px solid var(--color-neutral-800); border-radius: var(--radius-md);
 }
+.sys-log__filters { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid var(--color-divider); font-size: 11.5px; color: var(--color-neutral-400); }
+.sys-log__field { display: inline-flex; align-items: center; gap: 7px; }
+.sys-log__toggle { cursor: pointer; }
+.sys-log__more { display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; padding: 12px 16px; border-top: 1px solid var(--color-divider); font-size: 11.5px; color: var(--color-neutral-400); }
 .sys-log__table { width: 100%; min-width: 920px; border-collapse: collapse; }
 .sys-log__table th { text-align: left; font-size: 9.5px; font-weight: 600; letter-spacing: .13em; text-transform: uppercase; color: var(--color-neutral-500); padding: 9px 16px; }
 .sys-log__table td { padding: 10px 16px; font-size: 11.5px; color: var(--color-neutral-400); border-top: 1px solid var(--color-divider); }

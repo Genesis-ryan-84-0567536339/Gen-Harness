@@ -3,7 +3,7 @@
  * bước thiết lập 10–11 (PLAN 4.6). "Bộ não AI" dùng lại `useProviders`/`useCliProfiles` (`lib/dataQueries.ts`)
  * và `useFailoverRules` (`screens/api/queries.ts`) — không có hook riêng ở đây.
  */
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   AiBudgetBody,
   AiCost,
@@ -52,6 +52,8 @@ export const HEALTH_KINDS: ReadonlySet<string> = new Set([
   'hub.unreachable',
   // v0.1.53 (F-99): lịch tự cập nhật đêm không chạy / Sếp đã tắt mà lịch vẫn bật.
   'host.nightly',
+  // v0.1.62 (F051, F064): bộ nhận tin Zalo/WhatsApp im; tin khách nằm trong hàng lỗi.
+  'bridge.silent', 'dlq.inbound',
 ]);
 
 /** v0.1.36 (F-6): `GET /system/health` — chỉ gọi khi vai trò có `system.read` (`enabled`); tự hỏi lại mỗi 60 giây. */
@@ -97,8 +99,16 @@ export const usePatchBoundary = () => {
   });
 };
 
-export const useSystemAuditLog = (q: SystemAuditQuery) =>
-  useQuery({ queryKey: qkSystem.auditLog(q), queryFn: ({ signal }) => api.systemAuditLog.list(q, signal) });
+/** Nhật ký phân trang bằng cursor (F099): mỗi trang 50 dòng, `fetchNextPage` = nút "Xem thêm"; bộ lọc/ô tìm chạy ở máy chủ. */
+export const AUDIT_PAGE_SIZE = 50;
+export const useSystemAuditLog = (q: Omit<SystemAuditQuery, 'cursor' | 'limit'>) =>
+  useInfiniteQuery({
+    queryKey: qkSystem.auditLog(q),
+    queryFn: ({ pageParam, signal }) => api.systemAuditLog.list({ ...q, limit: AUDIT_PAGE_SIZE, cursor: pageParam ?? undefined }, signal),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.next_cursor,
+    placeholderData: keepPreviousData,
+  });
 
 export const useExportAuditLog = () => useMutation({ mutationFn: (q: Omit<SystemAuditQuery, 'cursor' | 'limit'>) => api.systemAuditLog.exportCsv(q) });
 
@@ -165,5 +175,25 @@ export const useSetBackgroundSources = () => {
       void qc.invalidateQueries({ queryKey: qkSystem.backgroundSources });
       void qc.invalidateQueries({ queryKey: qkSystem.health });
     },
+  });
+};
+
+/**
+ * v0.1.62 (F064/F102): "Phát lại" / "Đã xem, xoá" một hàng lỗi — `system.manage` + mã PIN (hộp PIN tự mở qua lib/api.ts rồi
+ * gửi lại). Xong làm mới thẻ Sức khoẻ và dải "Cần Sếp xử lý" (sự cố `dlq.inbound` đóng ngay khi hàng hết).
+ */
+export const useReplayQueue = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (stream: string) => api.systemHealth.replayQueue(stream),
+    onSettled: () => void qc.invalidateQueries({ queryKey: qkSystem.health }),
+  });
+};
+
+export const useClearQueue = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (stream: string) => api.systemHealth.clearQueue(stream),
+    onSettled: () => void qc.invalidateQueries({ queryKey: qkSystem.health }),
   });
 };

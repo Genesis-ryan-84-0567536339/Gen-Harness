@@ -36,6 +36,49 @@ JUNK_SQL = "COALESCE(t_spam OR t_dup IS NOT NULL OR t_quality < :minq, false)"
 REPLY_EVENTS = list(qsvc.REPLY_EVENTS)
 
 
+# ─── Con trỏ phân trang ─────────────────────────────────────────────────────
+# Con trỏ chỉ theo created_at làm RƠI mọi dòng cùng thời điểm ở ranh giới trang (một tin sinh nhiều đơn vị ý nghĩa
+# cùng observed_at; nhập việc hàng loạt trong một giao dịch). Khoá phụ làm thứ tự toàn phần: `<iso>|<khoá phụ>`.
+# Con trỏ kiểu cũ (chỉ thời điểm) vẫn nhận, giữ nghĩa `created_at < :c`. Hỏng ⇒ 422 (không để thành 500).
+_CURSOR_ERR = "Con trỏ phân trang không hợp lệ — hãy tải lại danh sách"
+
+
+def _bad_cursor() -> ApiError:
+    return ApiError(422, "BAD_CURSOR", _CURSOR_ERR)
+
+
+def _cursor_time(ts: str) -> datetime:
+    try:
+        return qsvc.when(ts)  # type: ignore[return-value]
+    except ValueError:
+        raise _bad_cursor() from None
+
+
+def _inbox_cursor(cursor: str | None) -> tuple[datetime, str | None, uuid.UUID | None] | None:
+    """`<iso>|<item_type>|<item_id>` hoặc `<iso>` (kiểu cũ)."""
+    if not cursor:
+        return None
+    ts, _, rest = cursor.partition("|")
+    if not rest:
+        return _cursor_time(ts), None, None
+    item_type, _, rid = rest.partition("|")
+    try:
+        return _cursor_time(ts), item_type, uuid.UUID(rid)
+    except ValueError:
+        raise _bad_cursor() from None
+
+
+def _task_cursor(cursor: str | None) -> tuple[datetime, uuid.UUID | None] | None:
+    """`<iso>|<id>` hoặc `<iso>` (kiểu cũ)."""
+    if not cursor:
+        return None
+    ts, _, rid = cursor.partition("|")
+    try:
+        return _cursor_time(ts), (uuid.UUID(rid) if rid else None)
+    except ValueError:
+        raise _bad_cursor() from None
+
+
 # ─── Hộp thư ────────────────────────────────────────────────────────────────
 
 _ITEMS_CTE = """
@@ -122,15 +165,21 @@ async def list_inbox(tab: Literal["all", "opportunity", "alert", "approval", "re
         conds.append("tab = :tab" if tab != "reply" else "tab IN ('reply', 'other')")
     if intent:
         conds.append("title = :intent")
-    if cursor:
+    cur = _inbox_cursor(cursor)
+    if cur and cur[1] is not None:
+        conds.append("(created_at, item_type, item_id) < (:c, CAST(:ct AS text), CAST(:ci AS uuid))")
+    elif cur:
         conds.append("created_at < :c")
     if hide:
         conds.append(junk_sql)
     where_page = (" AND " + " AND ".join(conds)) if conds else ""
     rows = (await db.execute(
         text(_ITEMS_CTE.format(scope=where, silence=qsvc.not_silenced_sql("i")) +
-             f" SELECT * FROM items WHERE TRUE{where_page} ORDER BY created_at DESC LIMIT :n"),  # noqa: S608
-        {**base, "tab": tab, "intent": intent, "c": qsvc.when(cursor), "n": limit + 1})).all()
+             f" SELECT * FROM items WHERE TRUE{where_page} ORDER BY created_at DESC, item_type DESC, item_id DESC"
+             " LIMIT :n"),  # noqa: S608
+        {**base, "tab": tab, "intent": intent, "n": limit + 1,
+         **({"c": cur[0], "ct": cur[1], "ci": cur[2]} if cur and cur[1] is not None else {"c": cur[0]} if cur else {})}
+    )).all()
     owner = user.role_code == rbac.OWNER
     items = [_item_payload(r, owner=owner, min_score=min_score) for r in rows[:limit]]
     hidden = 0
@@ -138,7 +187,8 @@ async def list_inbox(tab: Literal["all", "opportunity", "alert", "approval", "re
         hidden = (await db.execute(
             text(_ITEMS_CTE.format(scope=where, silence=qsvc.not_silenced_sql("i")) +
                  f" SELECT count(*) FROM items WHERE {JUNK_SQL}"), base)).scalar_one()  # noqa: S608
-    return {"items": items, "next_cursor": iso(rows[limit - 1].created_at) if len(rows) > limit else None,
+    last = rows[limit - 1] if len(rows) > limit else None
+    return {"items": items, "next_cursor": f"{iso(last.created_at)}|{last.item_type}|{last.item_id}" if last else None,
             "total": counts["all"], "counts": counts,
             "triage": {"enabled": min_score is not None, "min_score": min_score, "hidden": int(hidden)}}
 
@@ -518,18 +568,21 @@ async def list_tasks(status: str | None = None, priority: str | None = None, ove
         conds.append("t.due_at IS NOT NULL AND t.due_at < :db")
     if assignee_user_id:
         conds.append("t.assignee_user_id = :a")
-    if cursor:
+    cur = _task_cursor(cursor)
+    if cur and cur[1] is not None:
+        conds.append("(t.created_at, t.id) < (:c, :cid)")
+    elif cur:
         conds.append("t.created_at < :c")
     sql_where = " AND ".join(conds)
     due_ts = due_before.replace(tzinfo=UTC) if due_before is not None and due_before.tzinfo is None else due_before
-    base = {"o": user.org_id, "s": status, "p": priority, "a": assignee_user_id, "c": qsvc.when(cursor), "db": due_ts,
-            **params}
+    base = {"o": user.org_id, "s": status, "p": priority, "a": assignee_user_id, "db": due_ts,
+            **({"c": cur[0], **({"cid": cur[1]} if cur[1] is not None else {})} if cur else {}), **params}
     total = (await db.execute(text(f"SELECT count(*) FROM biz.tasks t WHERE {sql_where}"), base)).scalar_one()  # noqa: S608
-    rows = (await db.execute(text(_TASK_SELECT + f" WHERE {sql_where} ORDER BY t.created_at DESC LIMIT :n"),  # noqa: S608
+    rows = (await db.execute(text(_TASK_SELECT + f" WHERE {sql_where} ORDER BY t.created_at DESC, t.id DESC LIMIT :n"),  # noqa: S608
                              {**base, "n": limit + 1})).all()
     items = [_task_payload(r) for r in rows[:limit]]
-    return {"items": items, "next_cursor": iso(rows[limit - 1].created_at) if len(rows) > limit else None,
-            "total": total}
+    last = rows[limit - 1] if len(rows) > limit else None
+    return {"items": items, "next_cursor": f"{iso(last.created_at)}|{last.id}" if last else None, "total": total}
 
 
 # ─── Lời hứa ────────────────────────────────────────────────────────────────

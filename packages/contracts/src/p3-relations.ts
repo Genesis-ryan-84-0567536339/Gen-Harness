@@ -50,6 +50,9 @@ export interface DirGroupQuery {
   channel_id?: string;
   kind?: string;
   listen_mode?: string;
+  /** Tìm theo tên hoặc mã nhóm — máy chủ lọc (không lọc trong phần đã tải). */
+  q?: string;
+  /** Con trỏ `<created_at>|<id>` do máy chủ trả ở `next_cursor`. */
   cursor?: string;
   limit?: number;
 }
@@ -59,9 +62,16 @@ export interface DirPeopleQuery {
   value?: DirValueBand | '';
   priority?: DirPriority | '';
   bot?: 'assigned' | 'unassigned' | '';
+  /** Loại kênh (zalo, whatsapp, …): người có danh tính trên kênh đó. */
+  channel?: string;
+  /** Tìm theo tên hoặc mã người — máy chủ lọc. */
+  q?: string;
+  /** Con trỏ `<created_at>|<id>` do máy chủ trả ở `next_cursor`. */
   cursor?: string;
   limit?: number;
 }
+/** Bộ lọc của thao tác hàng loạt — cùng nghĩa với `DirPeopleQuery` (không có con trỏ/giới hạn). */
+export type DirPeopleFilter = Omit<DirPeopleQuery, 'cursor' | 'limit'>;
 export interface DirCursorPage<T> {
   items: T[];
   next_cursor: string | null;
@@ -70,6 +80,18 @@ export interface DirCursorPage<T> {
 export interface DirBotBody {
   agent_id?: string | null;
   autonomy_level?: number | null;
+}
+/**
+ * Gán BOT / tự trị cho MỌI người khớp bộ lọc (máy chủ tự tìm, không giới hạn ở trang đã tải). Khoá vắng ⇒ giữ nguyên;
+ * `agent_id: null` ⇒ gỡ BOT. `expected_total` = số đã hiện cho người dùng: lệch ⇒ 409 `BULK_FILTER_CHANGED`.
+ */
+export interface DirBulkBotBody extends DirBotBody {
+  filter: DirPeopleFilter;
+  expected_total?: number;
+}
+export interface DirBulkBotResult {
+  ok: true;
+  updated: number;
 }
 
 // ─── Hồ sơ sống (profile) ────────────────────────────────────────────────────
@@ -265,6 +287,7 @@ export function relationsEndpoints(r: ApiClient['request']) {
       people: {
         list: (q: DirPeopleQuery = {}, signal?: AbortSignal) => r<DirCursorPage<DirPerson>>('/directory/people', { query: q as Q, signal }),
         setBot: (id: string, body: DirBotBody) => r<DirPerson>(`/directory/people/${enc(id)}/bot`, { method: 'POST', body }),
+        bulkBot: (body: DirBulkBotBody) => r<DirBulkBotResult>('/directory/people/bulk-bot', { method: 'POST', body }),
       },
     },
     profile: {

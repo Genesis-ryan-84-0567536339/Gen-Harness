@@ -31,6 +31,9 @@ const KIND_ICON: Record<string, string> = {
   'update.failed': 'ph ph-arrow-counter-clockwise',
   'backup.stale': 'ph ph-clock-countdown',
   'worker.silent': 'ph ph-pulse',
+  // v0.1.62 (F051, F064): bộ nhận tin Zalo/WhatsApp im; tin khách nằm trong hàng lỗi.
+  'bridge.silent': 'ph ph-plugs',
+  'dlq.inbound': 'ph ph-tray',
   'disk.low': 'ph ph-hard-drives',
   // v0.1.37 (F-73): máy chủ chưa tự chạy lại Gen-Harness khi bật máy.
   'host.autostart': 'ph ph-power',

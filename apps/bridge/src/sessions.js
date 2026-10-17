@@ -82,6 +82,7 @@ export class SessionManager {
       switch (evt.type) {
         case 'session.login': return this.#login(channel, sessionId, p.credential ?? null, ctx);
         case 'session.logout': return this.#logout(channel, sessionId, ctx);
+        case 'session.close': return this.#close(channel, sessionId);
         case 'directory.sync': {
           const s = this.sessions.get(keyOf(channel, sessionId));
           if (s?.state === 'active') await this.syncDirectory(s);
@@ -169,11 +170,24 @@ export class SessionManager {
       }
       s.state = 'active';
       s.lastCredAt = this.now();
+      clearInterval(s.dirTimer); // nối lại sau mất mạng: không để lại bộ đếm cũ
       this.log.info('phiên hoạt động', base);
       this.#publish(STREAMS.status, 'session.active', { ...base, account, credential: blob }, s);
       this.syncDirectory(s);
       s.dirTimer = setInterval(() => this.syncDirectory(s), this.directoryMs);
       s.dirTimer.unref?.();
+    });
+    // Mất mạng/máy chủ nền tảng chưa tới: phiên vẫn còn (credential giữ nguyên), adapter tự thử lại. Báo lõi để thẻ kênh
+    // nói đúng "đang nối lại" thay vì giữ "Đang kết nối"; ngừng heartbeat cho tới khi nối lại (session.active).
+    adapter.on('retrying', ({ error } = {}) => {
+      if (s.state === 'ended') return;
+      s.state = 'retrying';
+      clearInterval(s.dirTimer);
+      clearTimeout(s.credTimer);
+      s.dirTimer = null;
+      s.credTimer = null;
+      this.log.warn('phiên mất kết nối, đang thử nối lại', base);
+      this.#publish(STREAMS.status, 'session.reconnecting', { ...base, error: error || 'NETWORK_UNAVAILABLE' }, s);
     });
     adapter.on('credential', () => this.#credentialChanged(s));
     adapter.on('ended', ({ reason, error }) => {
@@ -228,6 +242,18 @@ export class SessionManager {
       }
     }
     await this.#ended(channel, sessionId, 'logged_out', null, ctx);
+  }
+
+  /** Đóng kết nối trong RAM, KHÔNG đăng xuất nền tảng và KHÔNG phát session.ended (lõi đã tự ghi phiên đó là xong). */
+  async #close(channel, sessionId) {
+    const s = this.sessions.get(keyOf(channel, sessionId));
+    if (!s) return;
+    this.log.info('đóng phiên cũ theo lệnh lõi', { channel, session_id: sessionId });
+    s.state = 'ended';
+    this.#teardown(s);
+    try { s.adapter.close(); } catch (err) {
+      this.log.warn('close lỗi', { channel, session_id: sessionId, error: errorCode(err) });
+    }
   }
 
   async syncDirectory(s) {

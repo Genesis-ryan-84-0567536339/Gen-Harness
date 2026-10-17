@@ -59,15 +59,11 @@ const CORE_AGENT_KEYS: Record<string, string> = {
   'core.refinery': 'Sàng lọc & suy luận chính',
   // v0.1.43 (F-25): bỏ core.intent/core.scoring/core.indexing (không nơi nào dùng); core.reply = soạn lại / dịch nháp.
   'core.reply': 'Soạn lại / dịch nháp',
-  // v0.1.21: Gen — trợ lý quản trị (gh.gen.engine.AGENT_KEY); v0.1.38 (F-22): khoá DUY NHẤT được gán Antigravity CLI.
+  // v0.1.21: Gen — trợ lý quản trị (gh.gen.engine.AGENT_KEY). v0.1.62: Antigravity CLI gán được cho MỌI khoá.
   'core.gen': 'Gen — trợ lý quản trị',
   // v0.1.55 (G1): Bản tin Gen có khoá riêng (việc nền) — gh.gen.briefing.AGENT_KEY.
   'core.briefing': 'Bản tin Gen',
 };
-const GEN_KEY = 'core.gen';
-/** Chuỗi THẬT của máy chủ: gh/providers/router.py::AGY_OWNER_ONLY_REASON = gh/agents_api/routes.py::AGY_GEN_ONLY_MSG. */
-export const AGY_OWNER_ONLY_REASON =
-  'Antigravity CLI chỉ dùng cho Gen — trợ lý quản trị (Gen của Sếp). Sàng lọc tin và trực việc phải dùng nguồn khác (khoá API hoặc Claude Code CLI) — luật an toàn, không tắt được.';
 
 /**
  * v0.1.41 (F-86, QD-12): câu cảnh báo khi Owner cho Claude Code CLI chạy việc nền — web hiện NGUYÊN VĂN (như
@@ -108,7 +104,7 @@ export function createMock(opts: P4ApiOptions) {
         ],
   );
   const has = (ctx: P2Ctx, perm: string) => !!ctx.perms[perm] && ctx.perms[perm] !== 'none';
-  // v0.1.41 (F-86): nguồn AI cho việc nền — mặc định chỉ khoá API (CLI TẮT).
+  // v0.1.41 (F-86): nguồn AI cho việc nền — khoá API và (v0.1.62) Antigravity CLI; Claude Code CLI mặc định TẮT.
   const background: { allow_cli: string[]; accepted_at: string | null } = { allow_cli: [], accepted_at: null };
 
   /** Như API thật: chuỗi theo `failover_rank` (bỏ Jev), mỗi nguồn có dùng cho việc nền không + lý do. */
@@ -116,11 +112,11 @@ export function createMock(opts: P4ApiOptions) {
     const list = [...opts.getProviders()].filter((x) => x.kind !== 'system_one').sort((a, b) => a.failover_rank - b.failover_rank);
     const sources = list.map((pv) => {
       let reason: string | null = null;
-      if (pv.kind === 'antigravity_cli') reason = 'Antigravity CLI chỉ dùng cho Gen — trợ lý quản trị (Gen của Sếp). Sàng lọc tin và trực việc phải dùng nguồn khác (khoá API hoặc Claude Code CLI) — luật an toàn, không tắt được.';
-      else if (pv.kind === 'claude_code_cli') reason = background.allow_cli.includes('claude_code_cli') ? null : 'Claude Code CLI (gói Pro/Max của Sếp) mặc định chỉ dùng khi Sếp hỏi Gen trực tiếp — việc nền dùng khoá API';
-      else if (!API_KINDS.has(pv.kind)) reason = 'Không phải nguồn sinh chữ';
+      if (pv.kind === 'claude_code_cli') reason = background.allow_cli.includes('claude_code_cli') ? null : 'Claude Code CLI (gói Pro/Max của Sếp) mặc định chỉ dùng khi Sếp hỏi Gen trực tiếp — việc nền dùng khoá API hoặc Antigravity CLI';
+      else if (pv.kind !== 'antigravity_cli' && !API_KINDS.has(pv.kind)) reason = 'Không phải nguồn sinh chữ';
       if (!reason && !pv.enabled) reason = 'Nguồn đang tắt';
       if (!reason && API_KINDS.has(pv.kind) && !pv.keys.some((k) => k.enabled)) reason = 'Chưa có khoá API';
+      if (!reason && pv.kind === 'antigravity_cli' && !pv.models.length) reason = 'Chưa chọn model';
       return { provider_id: pv.id, name: pv.name, kind: pv.kind, used: reason === null, reason };
     });
     return {
@@ -129,6 +125,7 @@ export function createMock(opts: P4ApiOptions) {
       risk_text: BACKGROUND_RISK_TEXT,
       purposes: [...BACKGROUND_PURPOSES],
       has_api_source: sources.some((x) => x.used && API_KINDS.has(x.kind)),
+      has_agy_source: sources.some((x) => x.used && x.kind === 'antigravity_cli'),
       sources,
     };
   }
@@ -141,27 +138,26 @@ export function createMock(opts: P4ApiOptions) {
     return null;
   }
 
-  /** F-22: model thuộc nguồn Antigravity CLI (theo id, hoặc theo tên nguồn — dữ liệu mẫu gán sẵn bằng id cố định). */
-  function isAgy(b: { model_id: string; provider_name?: string }): boolean {
-    return opts
-      .getProviders()
-      .some((p) => p.kind === 'antigravity_cli' && (p.models.some((m) => m.id === b.model_id) || p.name === b.provider_name));
-  }
-
   function bindableModels(): BindableModel[] {
     const out: BindableModel[] = [];
     for (const p of opts.getProviders()) {
-      for (const m of p.models) out.push({ id: m.id, model_name: m.model_name, provider_name: p.name, enabled: p.enabled });
+      for (const m of p.models) out.push({ id: m.id, model_name: m.model_name, provider_name: p.name, kind: p.kind, enabled: p.enabled });
     }
     return out;
   }
 
-  /** Model "Chuẩn" cho một khoá: model đầu tiên của nguồn đầu tiên dùng được (agy chỉ cho Gen); không có ⇒ null. */
+  /** Gói G (16/10/2026): như `gh.providers.agy_policy.decide` — core.reply (lớp ngoại giao) chưa dùng agy; khoá khác dùng được. */
+  const AGY_DIPLOMATIC_REASON = 'Antigravity chưa dùng cho việc trả lời người ngoài — chờ hộp riêng (bản sau)';
+  const agyBlockedFor = (agentKey: string): string | null => (agentKey === 'core.reply' ? AGY_DIPLOMATIC_REASON : null);
+
+  /** Model "Chuẩn" cho một khoá: model đầu tiên của nguồn đầu tiên dùng được (agy cho khoá core, trừ lớp ngoại giao); không có ⇒ null. */
   function standardFor(agentKey: string) {
     const prof = STANDARD_PROFILE[agentKey] ?? AGENT_PROFILE;
-    const providers = [...opts.getProviders()].filter((x) => x.enabled && x.kind !== 'system_one').sort((a, b) => a.failover_rank - b.failover_rank);
+    const blocked = agyBlockedFor(agentKey) !== null;
+    const providers = [...opts.getProviders()]
+      .filter((x) => x.enabled && x.kind !== 'system_one' && !(blocked && x.kind === 'antigravity_cli'))
+      .sort((a, b) => a.failover_rank - b.failover_rank);
     for (const pv of providers) {
-      if (pv.kind === 'antigravity_cli' && agentKey !== GEN_KEY) continue;
       const m = pv.models[0];
       if (m) return { model_name: m.model_name, provider_name: pv.name, ...prof };
     }
@@ -205,7 +201,7 @@ export function createMock(opts: P4ApiOptions) {
         const allow = Array.isArray(b.allow_cli) ? b.allow_cli.map(String) : null;
         if (!allow) return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { allow_cli: 'Danh sách CLI không hợp lệ' } });
         if (allow.includes('antigravity_cli')) {
-          return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { allow_cli: 'Antigravity CLI chỉ dùng cho lượt Gen của Sếp — không chạy việc nền' } });
+          return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { allow_cli: 'Antigravity CLI luôn chạy được việc nền — không cần cho phép (chỉ Claude Code CLI cần Sếp cho phép)' } });
         }
         if (allow.some((k) => k !== 'claude_code_cli')) return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { allow_cli: 'Chỉ Claude Code CLI được cho chạy việc nền' } });
         const adding = allow.includes('claude_code_cli') && !background.allow_cli.includes('claude_code_cli');
@@ -264,16 +260,18 @@ export function createMock(opts: P4ApiOptions) {
 
     if (seg.length === 2 && m === 'GET') {
       if (!has(ctx, 'system.read')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
-      // Như gh/agents_api/routes.py::_binding_out: `blocked_reason` nằm TRONG binding (bản cài cũ gán agy cho khoá khác Gen).
+      // v0.1.62: như gh/agents_api/routes.py::_binding_out — không còn `blocked_reason` (agy gán được cho mọi khoá).
       const items = keysAndLabels().map(([agent_key, label]) => {
         const b = bindings.get(agent_key);
         return {
           agent_key,
           label,
-          binding: b ? { ...b, blocked_reason: agent_key !== GEN_KEY && isAgy(b) ? AGY_OWNER_ONLY_REASON : null } : null,
+          binding: b ?? null,
           // v0.1.55 (G1): `custom` = Sếp đã gán; `standard` = dùng hồ sơ chuẩn (+ model đang phủ).
           source: b ? 'custom' : 'standard',
           standard: b ? null : standardFor(agent_key),
+          standard_reason: b || standardFor(agent_key) ? null : agyBlockedFor(agent_key),
+          agy_blocked_reason: agyBlockedFor(agent_key),
         };
       });
       return reply(200, { items, models: bindableModels() });
@@ -289,8 +287,10 @@ export function createMock(opts: P4ApiOptions) {
       const modelId = String(b.model_id ?? '');
       const found = findModel(modelId);
       if (!found) return problem(404, 'NOT_FOUND', 'Model không tồn tại');
-      // F-22: luật cứng — model Antigravity CLI chỉ gán được cho Gen (gh.errors.conflict: chỉ title + code).
-      if (agentKey !== GEN_KEY && isAgy({ model_id: modelId })) return problem(409, 'AGY_OWNER_GEN_ONLY', AGY_OWNER_ONLY_REASON);
+      const blocked = agyBlockedFor(agentKey);
+      if (blocked && opts.getProviders().find((x) => x.models.some((mm) => mm.id === modelId))?.kind === 'antigravity_cli') {
+        return problem(422, 'VALIDATION', 'Dữ liệu chưa hợp lệ', { errors: { model_id: blocked } });
+      }
       // v0.1.55 (G1): `effort` kiểm theo nguồn — khoá API và haiku không có mức suy nghĩ (422 `effort`).
       const effort = typeof b.effort === 'string' ? b.effort : null;
       if (effort) {
@@ -308,7 +308,7 @@ export function createMock(opts: P4ApiOptions) {
         effort,
       };
       bindings.set(agentKey, binding);
-      return reply(200, { agent_key: agentKey, label, binding: { ...binding, blocked_reason: null }, source: 'custom', standard: null });
+      return reply(200, { agent_key: agentKey, label, binding, source: 'custom', standard: null });
     }
 
     if (seg.length === 3 && m === 'DELETE') {

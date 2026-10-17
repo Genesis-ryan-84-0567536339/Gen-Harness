@@ -1,8 +1,10 @@
-"""v0.1.41 (F-86) — việc nền (sàng lọc tin, trực việc, Bản tin Gen) mặc định chỉ dùng khoá API.
+"""v0.1.41 (F-86) — việc nền (sàng lọc tin, trực việc, Bản tin Gen): Claude Code CLI chỉ chạy khi Owner cho phép.
 
 Claude Code CLI (gói Pro/Max cá nhân của Sếp) chỉ chạy việc nền khi Owner cho phép: cảnh báo + tích xác nhận + PIN
-(QD-12). Antigravity CLI không bao giờ chạy việc nền (F-22). Chuỗi việc nền chỉ có CLI ⇒ sự cố
-`ai.background_no_source` (một chuông), tự đóng khi việc nền chạy lại được.
+(QD-12 — điều khoản gói Claude, GIỮ NGUYÊN). v0.1.62: Antigravity CLI chạy được việc nền, không cần cho phép (luật
+F-22 "agy không bao giờ chạy việc nền" đã gỡ theo quyết định của Owner 16/10/2026). Chuỗi việc nền chỉ còn Claude
+Code CLI chưa được phép ⇒ sự cố `ai.background_no_source` (một chuông), tự đóng khi việc nền chạy lại được (có khoá
+API, có agy chạy được, hoặc Owner cho phép Claude Code CLI).
 """
 
 import uuid
@@ -15,7 +17,6 @@ from sqlalchemy import text
 from gh.db import sessionmaker
 from gh.providers.clients import Completion, Message
 from gh.providers.router import (
-    AGY_OWNER_ONLY_REASON,
     BACKGROUND_CLI_REASON,
     BACKGROUND_CLI_RISK,
     BG_NO_SOURCE_FLAG,
@@ -110,12 +111,11 @@ async def _bells(db, kind: str) -> int:  # type: ignore[no-untyped-def]
 async def test_cli_only_opens_incident_once_and_closes(owner_api, db, redis) -> None:  # type: ignore[no-untyped-def]
     org = await org_id(db)
     await cli_provider(db, org, "claude_code_cli", 1)
-    await cli_provider(db, org, "antigravity_cli", 2)
     claude, agy = FakeCli("claude"), FakeCli("agy")
     r = make_router(redis, claude, agy)
     with pytest.raises(ModelUnavailable) as ei:
         await r.generate(org, agent_key="core.refinery", purpose="refinery", messages=MSGS)
-    assert set(ei.value.reasons) == {BACKGROUND_CLI_REASON, AGY_OWNER_ONLY_REASON}
+    assert set(ei.value.reasons) == {BACKGROUND_CLI_REASON}
     h = await _health(db, org)
     assert h is not None and h.cleared_at is None and h.kind == "ai.background_no_source"
     assert h.severity == "warn" and h.link == "/system?tab=brain"
@@ -170,7 +170,7 @@ async def test_cli_only_throttles_db_writes(owner_api, db, redis, monkeypatch) -
     assert await _bells(db, "ai.background_no_source") == 1
 
 
-@pytest.mark.parametrize("fix", ["api_key", "allow_cli"])
+@pytest.mark.parametrize("fix", ["api_key", "allow_cli", "agy_source"])
 async def test_incident_closes_on_health_evaluate_without_background_call(owner_api, db, redis, fix) -> None:  # type: ignore[no-untyped-def]
     """Sếp thêm khoá API / cho phép CLI lúc không có việc nền nào chạy ⇒ lượt theo dõi sức khoẻ kế tiếp đóng sự cố
     (không đợi tới bản tin 07:30/17:30)."""
@@ -191,6 +191,8 @@ async def test_incident_closes_on_health_evaluate_without_background_call(owner_
 
     if fix == "api_key":
         await api_provider(db, org, "alpha", 2, [FAKE_KEY])
+    elif fix == "agy_source":     # v0.1.62: Antigravity CLI đăng nhập + có model chạy được việc nền ⇒ đóng sự cố
+        await cli_provider(db, org, "antigravity_cli", 2)
     else:
         await set_background_cli(db, org, ["claude_code_cli"])
     await health.evaluate(db, redis, org, now=datetime.now(UTC), started_at=None)
@@ -201,18 +203,21 @@ async def test_incident_closes_on_health_evaluate_without_background_call(owner_
     assert not await redis.exists(BG_NO_SOURCE_TRY.format(org))
 
 
-async def test_opt_in_claude_cli_but_never_agy(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+async def test_background_uses_agy_without_opt_in_but_claude_needs_it(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """v0.1.62: agy chạy việc nền không cần cho phép; Claude Code CLI vẫn bị bỏ qua tới khi Owner cho phép (F-86)."""
     org = await org_id(db)
-    await cli_provider(db, org, "antigravity_cli", 1)
-    await cli_provider(db, org, "claude_code_cli", 2)
-    await api_provider(db, org, "alpha", 3, [FAKE_KEY])
-    # Giá trị lạ (agy) trong cấu hình bị bỏ qua — agy không bao giờ chạy việc nền, kể cả bên gọi truyền allow_agy.
-    await set_background_cli(db, org, ["claude_code_cli", "antigravity_cli"])
+    await cli_provider(db, org, "claude_code_cli", 1)
+    await cli_provider(db, org, "antigravity_cli", 2)
     claude, agy = FakeCli("claude"), FakeCli("agy")
     r = make_router(redis, claude, agy)
-    out = await r.generate(org, agent_key="core.refinery", purpose="refinery", messages=MSGS, allow_agy=True)
-    assert out.text == "claude-ok" and claude.calls == 1 and agy.calls == 0
-    assert AGY_OWNER_ONLY_REASON in out.attempts and BACKGROUND_CLI_REASON not in out.attempts
+    for key, purpose in (("core.refinery", "refinery"), ("agent:x", "duty_decide"), ("core.briefing", "gen.briefing")):
+        out = await r.generate(org, agent_key=key, purpose=purpose, messages=MSGS)
+        assert out.text == "agy-ok" and BACKGROUND_CLI_REASON in out.attempts, key
+    assert claude.calls == 0 and agy.calls == 3
+    # Giá trị lạ (agy) trong cấu hình bị bỏ qua (agy không cần công tắc); Owner cho phép Claude ⇒ Claude đứng đầu chuỗi.
+    await set_background_cli(db, org, ["claude_code_cli", "antigravity_cli"])
+    out = await r.generate(org, agent_key="core.refinery", purpose="refinery", messages=MSGS)
+    assert out.text == "claude-ok" and claude.calls == 1 and BACKGROUND_CLI_REASON not in out.attempts
 
 
 # ─── API: Nguồn AI cho việc nền ─────────────────────────────────────────────
@@ -267,7 +272,7 @@ async def test_put_background_agy_and_manager(owner_api, client, db) -> None:  #
     await verify_pin(api)
     r = await api.send("PUT", "/providers/background", {"allow_cli": ["antigravity_cli"], "accept_risk": True})
     assert r.status_code == 422, r.text
-    assert r.json()["errors"]["allow_cli"] == AGY_OWNER_ONLY_REASON
+    assert "luôn chạy được việc nền" in r.json()["errors"]["allow_cli"]
     manager = await login_as(client, db, "manager")
     try:
         r = await manager.send("PUT", "/providers/background", {"allow_cli": [], "accept_risk": False})
@@ -290,7 +295,8 @@ async def test_get_background_sources(owner_api, db) -> None:  # type: ignore[no
     by_kind = {s["kind"]: s for s in j["sources"]}
     assert by_kind["claude_code_cli"]["used"] is False
     assert by_kind["claude_code_cli"]["reason"] == BACKGROUND_CLI_REASON
-    assert by_kind["antigravity_cli"]["reason"] == AGY_OWNER_ONLY_REASON
+    assert by_kind["antigravity_cli"]["used"] is True and by_kind["antigravity_cli"]["reason"] is None   # v0.1.62
+    assert j["has_agy_source"] is True
     for s in j["sources"]:
         assert all(isinstance(s[k], str) for k in ("provider_id", "name", "kind"))
         assert isinstance(s["used"], bool) and (s["reason"] is None or isinstance(s["reason"], str))

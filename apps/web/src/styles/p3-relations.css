@@ -30,6 +30,11 @@
 .dir-filter-row__opt[aria-pressed='true'] { color: var(--color-accent-300); border-color: var(--color-accent-800); background: var(--color-accent-900); }
 .dir-filter-row__opt:focus-visible { outline: 2px solid var(--color-accent-400); outline-offset: 1px; }
 
+/* Ô tìm tên (máy chủ lọc) + chân bảng "Đang hiện X / Y" + Xem thêm. */
+.dir-search { max-width: 420px; }
+.dir-filter-row--search { flex: 0 1 260px; min-width: 200px; }
+.dir-more { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 16px; border-top: 1px solid var(--color-divider); }
+
 .dir-person-cell { display: flex; align-items: center; gap: 9px; }
 .dir-person-cell__av {
   width: 24px; height: 24px; flex: none; border-radius: 50%; display: grid; place-items: center;

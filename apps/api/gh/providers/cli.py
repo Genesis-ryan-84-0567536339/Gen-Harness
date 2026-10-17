@@ -50,6 +50,7 @@ from gh.providers.clients import (
     claude_env,
     cli_env,
     cli_home_dir,
+    token_flock,
 )
 
 CLI_MISSING = "Máy chủ chưa cài công cụ đăng nhập Google (Antigravity CLI) — dùng khoá API ở bên dưới thay thế"
@@ -135,20 +136,40 @@ def backup_path(kind: str = AGY) -> Path:
     return path.with_name(path.name + PARK_SUFFIX)
 
 
+def _guard(kind: str) -> contextlib.AbstractContextManager[bool]:
+    """Gói G (P3): đổi/ghi tệp token OAuth của agy (dùng chung api ↔ worker ↔ các lượt agy đang làm mới token) phải giữ
+    khoá flock độc quyền; Claude Code CLI có tệp riêng, không khoá."""
+    if kind == AGY:
+        return token_flock(get_settings().cli_home, exclusive=True)
+    return contextlib.nullcontext(True)
+
+
 def park_token(kind: str = AGY) -> None:
     """Gửi tạm tệp phiên đang dùng để CLI khởi động ở trạng thái CHƯA đăng nhập (mới hiện link đăng nhập)."""
     path = token_path(kind)
-    if path.exists():
-        path.replace(backup_path(kind))
+    with _guard(kind):
+        if path.exists():
+            path.replace(backup_path(kind))
 
 
 def unpark_token(kind: str = AGY) -> bool:
     """Trả tệp phiên đã gửi tạm về chỗ cũ (đăng nhập lỗi/huỷ, hoặc api chết giữa chừng). True nếu có trả."""
     bak = backup_path(kind)
-    if not bak.exists():
-        return False
-    bak.replace(token_path(kind))
-    return True
+    with _guard(kind):
+        if not bak.exists():
+            return False
+        bak.replace(token_path(kind))
+        return True
+
+
+# Bản không chặn vòng lặp sự kiện: `token_flock` thăm dò đồng bộ (time.sleep) tới 10 giây khi một lượt agy đang giữ khoá
+# làm mới token — coroutine (đăng nhập, kích hoạt hồ sơ, khôi phục khi khởi động) PHẢI gọi các bản này (review lần 2).
+async def park_token_async(kind: str = AGY) -> None:
+    await asyncio.to_thread(park_token, kind)
+
+
+async def unpark_token_async(kind: str = AGY) -> bool:
+    return await asyncio.to_thread(unpark_token, kind)
 
 
 def drop_parked_token(kind: str = AGY) -> None:
@@ -179,6 +200,10 @@ def read_session(kind: str = AGY) -> bytes | None:
         return raw
     state = _json((path.parent / CLAUDE_STATE_FILE).read_bytes()) if (path.parent / CLAUDE_STATE_FILE).exists() else {}
     return orjson.dumps({"credentials": _json(raw), "oauthAccount": state.get("oauthAccount")})
+
+
+async def write_session_async(kind: str, raw: bytes) -> None:
+    await asyncio.to_thread(write_session, kind, raw)
 
 
 def write_session(kind: str, raw: bytes) -> None:
@@ -385,7 +410,8 @@ def _atomic_write(path: Path, raw: bytes) -> None:
 def write_token_file(raw: bytes) -> None:
     path = token_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    _atomic_write(path, raw)
+    with _guard(AGY):             # gói G (P3): không ghi đè giữa lúc một lượt agy đang làm mới token
+        _atomic_write(path, raw)
 
 
 async def save_current_back(db: AsyncSession, org_id: uuid.UUID, kind: str = AGY) -> None:
@@ -437,7 +463,7 @@ async def activate(db: AsyncSession, org_id: uuid.UUID, profile_id: uuid.UUID) -
                              WHERE id = :p"""),
                      {"e": row.email, "x": row.expires_at, "p": row.provider_id})
     # Worker gọi CLI mới cho MỖI lượt, đọc tệp này từ volume chung → lượt kế tiếp dùng tài khoản vừa chọn.
-    write_session(row.kind, token)
+    await write_session_async(row.kind, token)
     return {"id": str(row.id), "email": row.email, "kind": row.kind}
 
 
@@ -650,7 +676,7 @@ async def restore_active(sm: async_sessionmaker[AsyncSession] | None, *, owns_lo
             # tệp phiên (nếu có) là của lượt đăng nhập dở ⇒ trả bản gửi tạm về, đè lên tệp dở dang, để tệp và hồ sơ
             # khớp nhau và bản gửi tạm không bị lượt đăng nhập sau ghi đè mất.
             with contextlib.suppress(OSError):
-                unpark_token(kind)
+                await unpark_token_async(kind)
         elif not token_path(kind).exists() and backup_path(kind).exists():
             continue
         elif kind == CLAUDE and legacy_claude_pending():
@@ -666,7 +692,7 @@ async def restore_active(sm: async_sessionmaker[AsyncSession] | None, *, owns_lo
                                          ORDER BY p.kind, c.updated_at DESC"""), {"k": need})).all()
     for r in rows:
         with contextlib.suppress(Exception):
-            write_session(r.kind, crypto.decrypt(bytes(r.token_enc), CLI_AAD))
+            await write_session_async(r.kind, crypto.decrypt(bytes(r.token_enc), CLI_AAD))
 
 
 # ─── Phiên đăng nhập ───────────────────────────────────────────────────────
@@ -772,7 +798,7 @@ class CliLogins:
         with contextlib.suppress(OSError):
             path.parent.mkdir(parents=True, exist_ok=True)
         # CLI đang đăng nhập sẵn sẽ không in link → gửi tạm tệp phiên (đã lưu vào hồ sơ ở start()).
-        park_token(s.kind)
+        await park_token_async(s.kind)
         before = path.stat().st_mtime if path.exists() else 0.0
         env = {**sp.env(), "TERM": "xterm", "SSH_CONNECTION": "127.0.0.1 0 127.0.0.1 22",
                "SSH_CLIENT": "127.0.0.1 0 22", "SSH_TTY": "/dev/pts/0", "COLUMNS": str(PTY_COLS),
@@ -888,7 +914,7 @@ class CliLogins:
             with contextlib.suppress(OSError):
                 if s.status == "done" or s.committed:
                     drop_parked_token(s.kind)
-                elif not unpark_token(s.kind) and path.exists() and path.stat().st_mtime > before:
+                elif not await unpark_token_async(s.kind) and path.exists() and path.stat().st_mtime > before:
                     # Chưa có tài khoản nào: bỏ tệp dở dang CLI để lại, để không thành "đã đăng nhập" giả.
                     path.unlink()
 

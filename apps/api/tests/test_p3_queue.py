@@ -357,3 +357,64 @@ async def test_early_warning_scan_generates_and_dedupes(world, db, redis) -> Non
     after = (await db.execute(text("SELECT count(*) FROM biz.alerts WHERE org_id = :o"), {"o": org})).scalar_one()
     assert after == before                                           # chạy lại không sinh trùng
     _ = u_comp
+
+
+async def _walk_pages(api: Api, path: str, limit: int) -> list[str]:
+    """Đi hết các trang bằng next_cursor, trả id theo thứ tự nhận."""
+    ids: list[str] = []
+    cursor: str | None = None
+    for _ in range(40):
+        params: dict[str, str | int] = {"limit": limit}
+        if cursor:
+            params["cursor"] = cursor
+        r = await api.get(path, params=params)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        ids += [i["id"] for i in body["items"]]
+        cursor = body["next_cursor"]
+        if not cursor:
+            return ids
+    raise AssertionError("con trỏ không dừng")
+
+
+async def test_inbox_cursor_keeps_rows_sharing_created_at(world, owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    """P2-3 (A4): một tin sinh nhiều đơn vị ý nghĩa cùng observed_at ⇒ con trỏ `created_at < :c` làm rơi dòng cùng
+    thời điểm ở ranh giới trang. Con trỏ nay kèm khoá phụ (item_type, item_id)."""
+    org = world["org"]
+    gid = (await db.execute(text("SELECT id FROM core.groups LIMIT 1"))).scalar_one()
+    same = datetime(2031, 1, 1, 12, 0, 0, tzinfo=UTC)          # mới nhất ⇒ nằm đầu danh sách
+    ids = set()
+    for k in range(7):
+        uid = (await db.execute(text("""
+            INSERT INTO clean.meaning_units (org_id, observed_at, group_id, event_type, conclusion, confidence, run_id)
+            VALUES (:o, :t, :g, 'Complained', :c, 0.9, core.uuid_v7()) RETURNING id"""),
+            {"o": org, "t": same, "g": gid, "c": f"Than phiền số {k}"})).scalar_one()
+        ids.add(str(uid))
+    await db.commit()
+    everything = (await owner_api.get("/inbox", params={"limit": 200})).json()
+    expect = [i["id"] for i in everything["items"]]
+    assert ids <= set(expect)
+    for limit in (1, 2, 3):                                     # ranh giới trang rơi giữa nhóm dòng cùng thời điểm
+        walked = await _walk_pages(owner_api, "/inbox", limit)
+        assert len(walked) == len(set(walked)), f"trùng dòng, limit={limit}"
+        assert set(walked) == set(expect), f"rơi dòng, limit={limit}"
+    old_style = (await owner_api.get("/inbox", params={"limit": 5, "cursor": "2030-01-01T00:00:00Z"})).json()
+    assert old_style["items"]                                   # con trỏ kiểu cũ (chỉ thời điểm) vẫn nhận
+    assert (await owner_api.get("/inbox", params={"cursor": "hỏng|xx"})).status_code == 422
+
+
+async def test_tasks_cursor_keeps_rows_sharing_created_at(world, owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    """P2-3 (A4): nhập hàng loạt trong một giao dịch ⇒ nhiều việc cùng created_at; con trỏ kèm id."""
+    await db.execute(text("""
+        INSERT INTO biz.tasks (org_id, code, title, priority, status, source, created_at)
+        SELECT :o, 'TSK-S' || g, 'Việc cùng giờ ' || g, 'P3', 'todo', 'manual', timestamptz '2031-01-01 12:00:00+00'
+        FROM generate_series(1, 9) g"""), {"o": world["org"]})
+    await db.commit()
+    expect = {i["id"] for i in (await owner_api.get("/tasks", params={"limit": 200})).json()["items"]}
+    for limit in (1, 2, 4):
+        walked = await _walk_pages(owner_api, "/tasks", limit)
+        assert len(walked) == len(set(walked)), f"trùng dòng, limit={limit}"
+        assert set(walked) == expect, f"rơi dòng, limit={limit}"
+    old_style = (await owner_api.get("/tasks", params={"cursor": "2030-01-01T00:00:00Z"})).json()
+    assert isinstance(old_style["items"], list)
+    assert (await owner_api.get("/tasks", params={"cursor": "hỏng|xx"})).status_code == 422
