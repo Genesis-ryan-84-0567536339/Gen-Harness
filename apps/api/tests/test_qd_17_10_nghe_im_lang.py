@@ -7,50 +7,21 @@ lắng nghe trong im lặng, KHÔNG trả lời cho dù được tag.»
 - `silent` KHÔNG BAO GIỜ trả lời, kể cả được tag: agent trực chỉ được `silent`/`note`, không `suggest`/`draft`/`send`.
   `tagged_only` («Nghe hết, chỉ trả lời khi được tag») giữ nguyên hành vi trả lời khi được tag.
 - Thẻ kênh báo «N nhóm mới đã vào Lắng nghe im lặng» (`new_groups_silent`) cho tới khi Sếp bấm «Đã biết».
-(Khi gộp lên nhánh có `test_quyet_dinh_sep.py` (lưới L6), các khẳng định này là QD 17/10 của lưới đó.)"""
+Các khẳng định cốt lõi (mặc định silent, silent không bao giờ trả lời kể cả khi được tag, tagged_only vẫn trả lời) đã
+chuyển vào lưới L6 `test_quyet_dinh_sep.py`; tệp này giữ các ca chi tiết còn lại."""
 
 from typing import Any
 
-import pytest
 from sqlalchemy import text
 
-from gh.biz.duty import engine
-from gh.data.common import DEFAULT_NEW_GROUP_MODE, NEW_GROUP_MODES, initial_group_mode, new_group_mode
 from gh.data.ingest import handle_directory, handle_group_discovered
 from gh.db import sessionmaker
 from tests.conftest import Api, verify_pin
 from tests.phase2 import msg, org_id, put
 from tests.test_p3_duty import BUY, agent_drafts, decide, decisions, hook, make_agent, refine, w  # noqa: F401
 
-SILENT_ONLY = ["silent", "note"]
-
 
 # ─── nhóm mới mặc định silent ────────────────────────────────────────────────────────────────────────────────────
-
-def test_qd1710_default_for_new_groups_is_silent_and_all_three_choices_remain() -> None:
-    assert DEFAULT_NEW_GROUP_MODE == "silent" and NEW_GROUP_MODES == ("ask", "silent", "off")
-    assert new_group_mode(None, "zalo") == "silent"
-    assert new_group_mode({}, "zalo") == "silent"                                       # bản cài cũ: không có khoá
-    assert new_group_mode({"new_group_mode": {"zalo": "bậy"}}, "zalo") == "silent"      # giá trị lạ ⇒ mặc định
-    assert new_group_mode({"new_group_mode": "ask"}, "zalo") == "silent"                # sai kiểu ⇒ mặc định
-    assert new_group_mode({"new_group_mode": {"zalo": "ask"}}, "zalo") == "ask"         # Sếp chọn thì giữ
-    assert new_group_mode({"new_group_mode": {"zalo": "off"}}, "zalo") == "off"
-    assert new_group_mode({"new_group_mode": {"zalo": "ask"}}, "whatsapp") == "silent"
-    assert initial_group_mode({}, "zalo") == "silent"
-    assert initial_group_mode({"new_group_mode": {"zalo": "ask"}}, "zalo") == "pending"
-
-
-async def test_qd1710_ingest_new_group_listens_silently_even_when_first_message_tags(app, db, redis) -> None:  # type: ignore[no-untyped-def]
-    org = await org_id(db)
-    assert "new_group_mode" not in (await db.execute(text("SELECT settings FROM core.organizations"))).scalar_one()
-    [eid] = await put(sessionmaker(), org, msg("Em hỏi giá lô này ạ", group="gQ", mentions=True))
-    assert eid is not None                                                          # lưu tin đầu tiên, không pending
-    row = (await db.execute(text("SELECT listen_mode FROM core.groups WHERE external_id = 'gQ'"))).scalar_one()
-    assert row == "silent"
-    assert (await db.execute(text("SELECT body_text FROM raw.events"))).scalar_one() == "Em hỏi giá lô này ạ"
-    # tin tag trong nhóm im lặng không đi đường nhanh (không có ai để trả lời)
-    assert (await db.execute(text("SELECT fast FROM refinery.event_state"))).scalar_one() is False
-
 
 async def test_qd1710_directory_and_discovered_default_silent_for_every_channel(app, db, redis) -> None:  # type: ignore[no-untyped-def]
     org = await org_id(db)
@@ -113,27 +84,6 @@ async def test_qd1710_card_counts_new_silent_groups_until_boss_acknowledges(owne
 
 # ─── agent trực: silent không bao giờ trả lời ─────────────────────────────────────────────────────────────────────
 
-def test_qd1710_allowed_decisions_in_silent_group_are_silent_and_note_at_every_level() -> None:
-    for level in range(0, 7):
-        assert engine.allowed_decisions(level, replies=False) == SILENT_ONLY
-    assert engine.allowed_decisions(4) == list(engine.DECISIONS)                         # nhóm có thể trả lời: như cũ
-    assert engine.allowed_decisions(3, replies=True) == ["silent", "note", "suggest"]
-
-
-@pytest.mark.parametrize("tagged", [False, True])
-@pytest.mark.parametrize("choice", ["suggest", "draft", "send"])
-async def test_qd1710_silent_group_never_replies_even_when_tagged(w, db, redis, choice: str, tagged: bool) -> None:  # type: ignore[no-untyped-def]
-    a = await make_agent(db, w, level=6)
-    await db.execute(text("UPDATE core.groups SET listen_mode = 'silent' WHERE id = :g"), {"g": w["g1"]})
-    await db.commit()
-    [u] = await refine(w, redis, msg(BUY, mentions=tagged))
-    await hook(w, redis, decide(choice), [u])
-    [d] = await decisions(db, a)
-    assert (d.decision, d.requested, d.outcome, d.draft_id) == ("silent", choice, "blocked", None)
-    assert "không bao giờ" in d.rationale and "kể cả khi được tag" in d.rationale
-    assert await agent_drafts(db) == [] and await redis.xlen("gh.bridge.outbound") == 0
-
-
 async def test_qd1710_silent_group_can_still_note_even_when_tagged(w, db, redis) -> None:  # type: ignore[no-untyped-def]
     a = await make_agent(db, w, level=6)
     await db.execute(text("UPDATE core.groups SET listen_mode = 'silent' WHERE id = :g"), {"g": w["g1"]})
@@ -156,21 +106,6 @@ async def test_qd1710_prompt_says_never_reply_even_if_tagged_and_offers_only_sil
     assert "không bao giờ soạn tin trả lời, kể cả khi được tag" in user
     assert "người gửi đang chờ bạn phản hồi" not in user                               # không giục trả lời nhóm im lặng
     assert "trừ khi được tag" not in user
-
-
-async def test_qd1710_tagged_only_group_still_replies_when_tagged(w, db, redis) -> None:  # type: ignore[no-untyped-def]
-    a = await make_agent(db, w, level=4)
-    await db.execute(text("UPDATE core.groups SET listen_mode = 'tagged_only' WHERE id = :g"), {"g": w["g1"]})
-    await db.commit()
-    plain, tagged = await refine(w, redis, msg(BUY), msg(BUY, sender="u2", mentions=True))
-    router = decide("draft")
-    await hook(w, redis, router, [plain, tagged])
-    [d] = await decisions(db, a)                                                     # tin không tag: không quyết định
-    assert d.trigger_unit_id == tagged and (d.decision, d.outcome) == ("draft", "held") and d.draft_id is not None
-    [dr] = await agent_drafts(db)
-    assert dr.status == "pending" and dr.group_id == w["g1"]
-    assert "Được chọn: silent, note, suggest, draft, send." in router.calls[0][0].content
-    assert "người gửi đang chờ bạn phản hồi" in router.calls[0][-1].content
 
 
 async def test_qd1710_bot_assigned_to_a_member_does_not_make_the_silent_group_reply(w, db, redis) -> None:  # type: ignore[no-untyped-def]
