@@ -2,7 +2,8 @@
 
 Mục đích: các việc có người ngoài (soạn trả lời khách, sàng lọc tin người lạ) chạy `agy` trong container riêng, không có khoá
 master, DB hay Redis chính. Mã: `apps/api/gh/agybox/` (`protocol.py` hợp đồng + ký, `server.py` dịch vụ, `client.py` phía api/worker).
-Cấu hình: `deploy/compose.yaml` (dịch vụ `agy-box`, mạng `agy-bus` nội bộ + `agy-out`, secret `gh_agy_key`).
+Cấu hình: `deploy/compose.yaml` (dịch vụ `agy-box` chỉ ở mạng nội bộ `agy-bus`, ra Internet qua proxy `agy-egress` — mục Nợ / ghi chú vận hành;
+secret `gh_agy_key`).
 
 ## Cho H2 (router/placement) dùng
 
