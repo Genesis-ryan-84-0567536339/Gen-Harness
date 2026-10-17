@@ -350,7 +350,10 @@ def test_q5_group_members_are_collected_for_every_group_including_off() -> None:
     """16/10 Q5 (=2): thu thành viên MỌI nhóm, kể cả "Không nghe" — nhập danh sách nhóm không xét `listen_mode`."""
     src = (GH_DIR / "data" / "ingest.py").read_text(encoding="utf-8")
     block = src[src.index("async def handle_directory"): src.index("async def handle_group_discovered")]
-    assert "listen_mode" not in block
+    # Chế độ nghe chỉ được xét ở MỘT chỗ: có ghi sự kiện «thành viên đổi» vào Nhật ký lắng nghe hay không (v0.1.68);
+    # việc THU thành viên (`_member`) không phụ thuộc chế độ nghe.
+    gated = [ln.strip() for ln in block.splitlines() if "listen_mode" in ln]
+    assert all("joined or gone" in ln and "LISTENING_MODES" in ln for ln in gated), gated
     assert "for m in members:" in block and "_member(db, row.id, ident.person_id" in block
 
 
