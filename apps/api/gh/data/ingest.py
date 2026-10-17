@@ -24,7 +24,10 @@ from gh.chassis.bus import BRIDGE_CONTROL, EventBus, uuid7
 from gh.data.common import (
     CHANNEL_NAME,
     CHANNEL_PREFIX,
+    DEFAULT_NEW_GROUP_MODE,
     LISTENING_MODES,
+    NEW_SILENT_KEY,
+    bump_channel_counter,
     direct_mode,
     fetch_raw,
     initial_group_mode,
@@ -107,9 +110,10 @@ async def upsert_group(db: AsyncSession, org_id: uuid.UUID, channel: Any, extern
                                     WHERE channel_id = :c AND external_id = :x"""),
                             {"c": channel.id, "x": external_id})).one_or_none()
     if row is None:
-        # v0.1.65: nhóm mới vào trạng thái CHỜ (`pending`) — chưa lưu tin nào cho tới khi Sếp chọn "Im lặng" hay
-        # "Không nghe" (Console hỏi ngay khi có nhóm mới); danh sách thành viên vẫn được thu (Q5=2).
-        # F1d: "Nhóm mới" theo thiết lập của kênh (`new_group_mode`): ask ⇒ pending; silent/off ⇒ vào thẳng chế độ đó.
+        # QD 17/10/2026: nhóm mới MẶC ĐỊNH vào "Lắng nghe im lặng" (`silent`: lưu hết tin, không bao giờ trả lời, kể
+        # cả khi được tag). Theo thiết lập của kênh (`new_group_mode`, F1d): silent (mặc định, kể cả khi chưa có khoá)
+        # · off ⇒ vào thẳng chế độ đó · ask ⇒ `pending` (chưa lưu tin cho tới khi Sếp chọn trong hộp «Nhóm mới»).
+        # Danh sách thành viên luôn được thu (Q5=2).
         mode = initial_group_mode(await org_settings(db, org_id), channel.type)
         code = (await db.execute(text("SELECT core.next_code(:p)"),
                                  {"p": f"GRP-{CHANNEL_PREFIX.get(channel.type, 'XX')}"})).scalar_one()
@@ -117,9 +121,11 @@ async def upsert_group(db: AsyncSession, org_id: uuid.UUID, channel: Any, extern
             INSERT INTO core.groups (org_id, code, channel_id, external_id, name, listen_mode, member_count)
             VALUES (:o, :code, :c, :x, :n, :mode, :m)
             ON CONFLICT (channel_id, external_id) DO UPDATE SET name = core.groups.name
-            RETURNING id, code, name, listen_mode, left_at"""),
+            RETURNING id, code, name, listen_mode, left_at, (xmax = 0) AS inserted"""),
             {"o": org_id, "code": code, "c": channel.id, "x": external_id, "n": name or external_id,
              "m": member_count, "mode": mode})).one()
+        if row.inserted and row.listen_mode == "silent":      # thẻ kênh báo «N nhóm mới đã vào Lắng nghe im lặng»
+            await bump_channel_counter(db, org_id, NEW_SILENT_KEY, channel.type)
     elif (name and name != row.name) or member_count is not None:
         await db.execute(text("""UPDATE core.groups SET name = COALESCE(:n, name),
                                  member_count = COALESCE(:m, member_count) WHERE id = :i"""),
@@ -273,7 +279,9 @@ async def ingest_message(db: AsyncSession, org_id: uuid.UUID, p: dict[str, Any])
     #   v0.1.65: tin 1-1 im lặng (silent) không cần nhanh — chỉ "reply" mới đi đường nhanh cho agent trực.
     #   Người được gán BOT (B8) thì tin 1-1 của họ cũng đi nhanh: BOT phụ trách đích danh dù kênh để im lặng.
     direct_fast = group is None and (dm == "reply" or await rsvc.person_has_bot(db, identity.person_id))
-    fast = direction == "inbound" and (mentions or direct_fast)
+    #   QD 17/10: nhóm "Lắng nghe im lặng" KHÔNG BAO GIỜ trả lời, kể cả khi được tag ⇒ tin tag ở đó không cần đi nhanh.
+    tag_fast = mentions and not (group is not None and group.listen_mode == "silent")
+    fast = direction == "inbound" and (tag_fast or direct_fast)
     await db.execute(text("""
         INSERT INTO refinery.event_state (event_id, event_received_at, org_id, state, fast)
         VALUES (:e, :r, :o, 'pending', :f)"""), {"e": event_id, "r": received_at, "o": org_id, "f": fast})
@@ -344,9 +352,9 @@ async def close_sessions(bus: EventBus, org_id: uuid.UUID, type: str, session_id
 
 async def _reset_new_group_mode_if_account_changed(db: AsyncSession, org_id: uuid.UUID, s: Any,
                                                    account_id: str | None) -> None:
-    """Quét QR một tài khoản KHÁC tài khoản trước đó của kênh ⇒ «Nhóm mới» về lại `ask` và hộp hỏi nhóm mới hỏi lại từ
-    đầu: lựa chọn Im lặng / Không nghe là của tài khoản cũ, không mang sang tài khoản mới (review v0.1.65 P3). Lần nối
-    đầu tiên (chưa có tài khoản nào trước) và nối lại CÙNG tài khoản thì giữ nguyên."""
+    """Quét QR một tài khoản KHÁC tài khoản trước đó của kênh ⇒ «Nhóm mới» về lại MẶC ĐỊNH (`silent`: Lắng nghe im lặng,
+    QD 17/10): lựa chọn Hỏi Sếp / Không nghe là của tài khoản cũ, không mang sang tài khoản mới (review v0.1.65 P3). Lần
+    nối đầu tiên (chưa có tài khoản nào trước) và nối lại CÙNG tài khoản thì giữ nguyên."""
     if not account_id:
         return
     prev = (await db.execute(text("""
@@ -357,9 +365,10 @@ async def _reset_new_group_mode_if_account_changed(db: AsyncSession, org_id: uui
     if prev is None or prev == account_id:
         return
     before = new_group_mode(await org_settings(db, org_id), s.type)
-    await set_channel_setting(db, org_id, "new_group_mode", s.type, "ask")
+    await set_channel_setting(db, org_id, "new_group_mode", s.type, DEFAULT_NEW_GROUP_MODE)
     await set_channel_setting(db, org_id, "new_group_asked", s.type, False)
-    if before != "ask":
+    await set_channel_setting(db, org_id, NEW_SILENT_KEY, s.type, 0)
+    if before != DEFAULT_NEW_GROUP_MODE:
         await actionlog.record(db, org_id=org_id, actor_type="system", actor_id=f"bridge:{s.type}",
                                action="channel.new_group_mode_reset", target_type="channel", target_id=s.type,
                                detail={"from": before, "reason": "account_changed"})
@@ -574,8 +583,8 @@ async def handle_directory(db: AsyncSession, redis: Redis, org_id: uuid.UUID, p:
 
 async def handle_group_discovered(db: AsyncSession, redis: Redis, org_id: uuid.UUID, p: dict[str, Any]) -> Any:
     """`group.discovered{group_id, name, member_count}`: bridge vừa thấy tin từ một nhóm chưa có trong danh bạ.
-    Tạo nhóm ở trạng thái `pending` (không lưu tin) để Console hỏi Sếp — hoặc vào thẳng `silent`/`off` nếu Sếp đã
-    đặt `new_group_mode` của kênh (F1d); nhóm đã có thì không đổi chế độ.
+    Tạo nhóm ở «Lắng nghe im lặng» (`silent`, mặc định theo QD 17/10) — hoặc `pending` (Console hỏi Sếp) / `off` nếu Sếp
+    đã đặt `new_group_mode` của kênh là `ask` / `off` (F1d); nhóm đã có thì không đổi chế độ.
     Trả `(nhóm, mới?)` hoặc None nếu kênh/nhóm không hợp lệ."""
     channel = await channel_row(db, org_id, str(p.get("channel", "")))
     gid = str(p.get("group_id") or "")
@@ -588,6 +597,19 @@ async def handle_group_discovered(db: AsyncSession, redis: Redis, org_id: uuid.U
     await db.execute(text("UPDATE core.groups SET left_at = NULL WHERE id = :i AND left_at IS NOT NULL"), {"i": row.id})
     await sync_listen_sets(db, redis, org_id)
     return row, not existed
+
+
+async def ingest_discovered_message(db: AsyncSession, org_id: uuid.UUID, p: dict[str, Any]) -> uuid.UUID | None:
+    """Tin ĐẦU TIÊN của nhóm lạ (`group.discovered.first_message`, QD 17/10 «thu hết tình báo»): bridge không đẩy tin
+    đó lên luồng inbound vì nhóm chưa có trong tập nghe, nên đi kèm sự kiện này. Gọi SAU `handle_group_discovered`.
+    Dùng chính `ingest_message` ⇒ chỉ lưu khi nhóm đang ở chế độ nghe (`silent` mặc định); `pending` / `off` thì bỏ,
+    không lưu nội dung, không tạo người gửi; `raw.event_keys` chặn lưu trùng (bus giao lại, tin đã vào đường thường).
+    Tin không thuộc đúng nhóm được báo (hoặc không phải tin nhóm) bị bỏ."""
+    first = p.get("first_message")
+    gid = str(p.get("group_id") or "")
+    if not isinstance(first, dict) or not gid or str(first.get("external_group_id") or "") != gid:
+        return None
+    return await ingest_message(db, org_id, {**first, "channel": p.get("channel")})
 
 
 # ─── Consumer ──────────────────────────────────────────────────────────────
@@ -628,7 +650,13 @@ class Ingest:
         if event.type == "group.discovered":
             async with self.sm() as db:
                 found = await handle_group_discovered(db, self.redis, self.org_id, event.payload)
+                first_id = None
+                if found is not None:
+                    first_id = await ingest_discovered_message(db, self.org_id, event.payload)
                 await db.commit()
+                first_row = await fetch_raw(db, first_id) if first_id is not None else None
+            if first_row is not None:
+                await realtime.publish(self.redis, "raw.new", raw_item(first_row), org_id=self.org_id)
             if found is not None and found[1]:   # nhóm MỚI ⇒ báo Console (nhóm `pending` mở hộp "Nhóm mới — chọn …")
                 row = found[0]
                 await realtime.publish(self.redis, "group.discovered",
@@ -667,5 +695,5 @@ async def uptime_pct(redis: Redis, type: str, since: datetime | None) -> float |
     return round(min(100.0, hits * 100 / total), 1)
 
 
-__all__ = ["Ingest", "handle_directory", "handle_group_discovered", "handle_status", "ingest_message", "iso",
-           "sync_listen_sets", "uptime_pct"]
+__all__ = ["Ingest", "handle_directory", "handle_group_discovered", "handle_status", "ingest_discovered_message",
+           "ingest_message", "iso", "sync_listen_sets", "uptime_pct"]

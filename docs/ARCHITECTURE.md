@@ -129,7 +129,7 @@ Luật cứng:
 - Gửi đi chỉ nhận từ `gh.bridge.outbound` và chỉ thực hiện khi lệnh mang **permit** hợp lệ (§7.3). Tin đã gửi quay lại `gh.bridge.inbound` như tin `outbound` → cũng vào kho thô và được sàng lọc (handoff 03).
 - Đồng bộ danh sách nhóm/thành viên định kỳ → `gh.bridge.directory`.
 - Heartbeat mỗi 15s → `core.channel_sessions.last_heartbeat_at`; mất heartbeat → plugin kênh `degraded`.
-- Ranh giới `listen_authorized_only` (khoá, không tắt được): nhóm mới mặc định **Không nghe**. Tin của nhóm chưa bật bị bridge bỏ ngay, chỉ metadata nhóm được đồng bộ để Owner quyết định.
+- Ranh giới `listen_authorized_only` (khoá, không tắt được): tin của nhóm không nằm trong tập nghe (`off`, `paused`, `pending`) bị bridge bỏ ngay, chỉ metadata nhóm được đồng bộ. **Nhóm mới (Sếp chốt 17/10/2026): khi tài khoản được add vào một nhóm, MẶC ĐỊNH vào «Lắng nghe im lặng» (`silent`) — lưu hết tin, KHÔNG BAO GIỜ trả lời, kể cả khi được tag** (mọi bản cài, kể cả cũ; nhóm cũ đang `off` giữ nguyên). `settings.new_group_mode.<kênh>` đổi được: `silent` (mặc định) · `ask` (nhóm vào `pending` + hộp hỏi) · `off`. Thẻ kênh báo «N nhóm mới đã vào Lắng nghe im lặng».
 
 ### 4.2 Ingest → Kho thô
 Consumer `ingest` (trong api) đọc `gh.bridge.inbound`, trong **một transaction**: ánh xạ nhóm/người gửi (`core.groups`, `core.person_identities`, tạo mới nếu chưa có), `INSERT raw.events` (khử trùng `(channel_id, external_msg_id)` + `content_hash`), `INSERT refinery.event_state(state='pending')`, `NOTIFY raw_ingested`; rồi `XACK`. Đẩy dòng mới tới màn Kho dữ liệu thô qua WebSocket (mục tiêu ≤ 2 giây từ lúc tin đến — handoff 07).
@@ -154,7 +154,7 @@ Consumer `ingest` (trong api) đọc `gh.bridge.inbound`, trong **một transact
 
 ## 5. Agent trực kênh (R3)
 
-Một **Agent Identity** (`agent.identities` + `agent.channel_scopes`) được gán vào kênh/nhóm với chế độ nghe (Chỉ khi được tag · Nghe im lặng · Chủ động bắt tín hiệu). Khi `gh.clean.ready` có đơn vị ý nghĩa trong phạm vi:
+Một **Agent Identity** (`agent.identities` + `agent.channel_scopes`) được gán vào kênh/nhóm với chế độ nghe (Nghe hết, chỉ trả lời khi được tag · Lắng nghe im lặng — không bao giờ trả lời, kể cả khi được tag · Chủ động bắt tín hiệu). Khi `gh.clean.ready` có đơn vị ý nghĩa trong phạm vi:
 
 1. **Dựng ngữ cảnh** (tất định, có ghi lại):
    - danh tính agent: tên, vai trò, xưng hô, giọng, được nói khi, cấm, mức tự trị;
@@ -163,7 +163,7 @@ Một **Agent Identity** (`agent.identities` + `agent.channel_scopes`) được 
    - **dữ liệu sạch liên quan**: tối đa N `meaning_units` theo cửa sổ thời gian + độ tương đồng pgvector, trong phạm vi được phép;
    - **lịch sử tương quan**: tương tác trước giữa người ↔ nhóm ↔ agent ↔ nhân viên, cơ hội/việc/lời hứa đang mở;
    - **Sổ tay nhận thức** của ID người và ID nhóm (gồm mục ghim).
-2. **Quyết định** (LLM): `silent` · `note` (ghi sổ tay) · `suggest` · `draft` · `send`. Im lặng đúng lúc là năng lực (spec C3.3).
+2. **Quyết định** (LLM): `silent` · `note` (ghi sổ tay) · `suggest` · `draft` · `send`. Im lặng đúng lúc là năng lực (spec C3.3). Nhóm «Lắng nghe im lặng» chỉ được `silent`/`note` ở mọi mức tự trị và dù được tag (QD 17/10): `suggest`/`draft`/`send` bị chặn trong `apply`; `tagged_only` được tag thì trả lời như thường.
 3. **Qua policy** (§7): `send`/`draft` thành hành động có cờ; chỉ tới bridge khi có permit.
 4. **Ghi vết**: bảng bổ sung `agent.decisions` lưu quyết định + danh sách ID ngữ cảnh đã dùng → màn "Agent đã nói gì, nhân danh gì" và khối "Dữ liệu agent đã dùng — không có chỗ nào bịa" ở Bàn làm việc đọc từ đây. Action Log ghi mọi quyết định.
 

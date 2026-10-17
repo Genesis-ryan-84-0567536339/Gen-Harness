@@ -8,7 +8,7 @@ import orjson
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from gh.data.ingest import ingest_message
+from gh.data.ingest import channel_row, ingest_message, upsert_group
 from gh.providers.clients import Message
 from gh.providers.router import ModelUnavailable, Routed
 
@@ -61,11 +61,9 @@ async def org_id(db: AsyncSession) -> uuid.UUID:
 
 async def listen(db: AsyncSession, org: uuid.UUID, external_group_id: str, mode: str = "silent",
                  channel: str = "zalo") -> uuid.UUID:
-    """Tạo nhóm (qua đường nhận tin) rồi bật lắng nghe."""
-    await ingest_message(db, org, {"channel": channel, "external_group_id": external_group_id,
-                                   "group_name": f"Nhóm {external_group_id}",
-                                   "external_msg_id": f"probe-{uuid.uuid4()}",
-                                   "sender_external_id": "probe", "body_text": "probe"})
+    """Tạo nhóm (qua đường tạo nhóm của ingest, KHÔNG có tin nào) rồi đặt chế độ nghe. Từ QD 17/10 nhóm mới mặc định
+    `silent` và lưu tin ngay, nên không còn dùng tin dò."""
+    await upsert_group(db, org, await channel_row(db, org, channel), external_group_id, f"Nhóm {external_group_id}")
     gid = (await db.execute(text("""UPDATE core.groups SET listen_mode = :m WHERE external_id = :x RETURNING id"""),
                             {"m": mode, "x": external_group_id})).scalar_one()
     await db.commit()
