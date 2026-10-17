@@ -13,6 +13,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 import tempfile
 import time
 from collections.abc import AsyncIterator, Iterator
@@ -327,7 +328,8 @@ def _try_flock(path: Path, *, exclusive: bool, wait: float) -> int | None:
     hạn / không mở được tệp khoá (thư mục chưa có, chỉ đọc…)."""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+        # Review v0.1.63 (P1-1): O_NOFOLLOW — tệp khoá là liên kết tượng trưng thì không mở (không tạo/khoá tệp lạ).
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
     except OSError:
         return None
     deadline = time.monotonic() + max(0.0, wait)
@@ -434,17 +436,198 @@ def token_needs_refresh(raw: bytes, *, now: float | None = None, window: float =
     return exp - (time.time() if now is None else now) <= window
 
 
+# ─── Tệp phiên trong volume: đọc/ghi không đi theo liên kết tượng trưng (review v0.1.63, P1-1) ───────────────────
+#: Tệp token OAuth của agy thật chỉ vài KiB; lớn hơn ⇒ không phải tệp phiên (từ chối, không đọc hết vào bộ nhớ).
+TOKEN_MAX_BYTES = 64 * 1024
+#: Tệp phiên Claude (`.credentials.json`, `.claude.json`) — `.claude.json` chứa thêm lịch sử dự án nên rộng hơn.
+SESSION_FILE_MAX_BYTES = 4 * 1024 * 1024
+
+
+def _open_dir_nofollow(path: Path) -> int:
+    """fd thư mục `path` — từ chối nếu chính `path` là liên kết tượng trưng (ELOOP/ENOTDIR ⇒ OSError)."""
+    return os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+
+
+def read_regular_nofollow(path: Path, limit: int) -> bytes | None:
+    """Nội dung tệp THƯỜNG `path` (≤ `limit` byte). Không có, là liên kết tượng trưng (kể cả thư mục chứa), không phải
+    tệp thường hoặc quá lớn ⇒ None. Không bao giờ đi theo liên kết — một tiến trình cùng uid (agy có công cụ ghi tệp)
+    không thể biến tệp phiên thành đường dẫn tới /run/secrets."""
+    try:
+        dfd = _open_dir_nofollow(path.parent)
+    except OSError:
+        return None
+    try:
+        fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=dfd)
+    except OSError:
+        return None
+    finally:
+        os.close(dfd)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > limit:
+            return None
+        chunks: list[bytes] = []
+        total = 0
+        while chunk := os.read(fd, 65536):
+            total += len(chunk)
+            if total > limit:
+                return None
+            chunks.append(chunk)
+        return b"".join(chunks)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+
+
+def is_regular_file(path: Path) -> bool:
+    """`path` có và là tệp thường (lstat — liên kết tượng trưng KHÔNG tính)."""
+    try:
+        return stat.S_ISREG(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
+def atomic_write_nofollow(path: Path, raw: bytes) -> None:
+    """Ghi `raw` vào `path` (0600) an toàn: thư mục chứa mở O_NOFOLLOW; tệp tạm tên ngẫu nhiên tạo O_CREAT|O_EXCL|
+    O_NOFOLLOW trong đúng thư mục đó; fsync rồi rename (rename THAY liên kết tượng trưng ở đích, không đi theo nó).
+    Lỗi ⇒ OSError (tệp tạm đã dọn)."""
+    dfd = _open_dir_nofollow(path.parent)
+    try:
+        tmp = f".{path.name}.{os.urandom(6).hex()}.tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=dfd)
+        try:
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(raw)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, path.name, src_dir_fd=dfd, dst_dir_fd=dfd)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp, dir_fd=dfd)
+            raise
+    finally:
+        os.close(dfd)
+
+
+def valid_token_json(raw: bytes | None) -> bool:
+    """Khuôn TỐI THIỂU của tệp token agy: ≤ TOKEN_MAX_BYTES và là một đối tượng JSON. Định dạng trường bên trong chưa
+    xác minh trên tệp thật (ROADMAP Nợ #46) nên không đòi tên khoá cụ thể — chỉ chặn tệp rác / nhị phân / quá lớn."""
+    if not raw or len(raw) > TOKEN_MAX_BYTES:
+        return False
+    try:
+        return isinstance(orjson.loads(raw), dict)
+    except orjson.JSONDecodeError:
+        return False
+
+
+def read_token_file(path: Path) -> bytes | None:
+    """Tệp token agy đã kiểm (tệp thường, không liên kết, ≤ 64 KiB, đối tượng JSON) — None nếu không đạt."""
+    raw = read_regular_nofollow(path, TOKEN_MAX_BYTES)
+    if raw is not None and not valid_token_json(raw):
+        log.warning("Tệp phiên Antigravity không đúng khuôn (không phải đối tượng JSON) — bỏ qua")
+        return None
+    return raw
+
+
+def token_email(raw: bytes) -> str | None:
+    """Email trong id_token của tệp token (không gọi mạng, không kiểm chữ ký — chỉ để so khớp định danh)."""
+    try:
+        data = orjson.loads(raw)
+    except orjson.JSONDecodeError:
+        return None
+    tok = data.get("id_token") if isinstance(data, dict) else None
+    if not isinstance(tok, str) or tok.count(".") < 2:
+        return None
+    part = tok.split(".")[1]
+    try:
+        claims = orjson.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
+    except (ValueError, orjson.JSONDecodeError):
+        return None
+    email = claims.get("email") if isinstance(claims, dict) else None
+    return email.lower() if isinstance(email, str) else None
+
+
+def sync_token_back(cli_home: str, injected: bytes, new: bytes, *, locked: bool = False,
+                    wait: float = TOKEN_WRITER_LOCK_WAIT_S) -> bool:
+    """Chép tệp token agy đã làm mới trong HOME tạm (`new`) về kho phiên — CHỈ khi: khác bản đã đưa vào, đúng khuôn
+    (`valid_token_json`), cùng email với bản đã đưa vào (nếu cả hai có id_token), và tệp trong kho VẪN là đúng bản
+    đã đưa vào (so-và-đổi: Sếp đổi tài khoản / lượt khác đã ghi giữa chừng thì không đè). Giữ flock độc quyền
+    (`locked=True` khi bên gọi đang giữ sẵn). Trả True nếu đã ghi. Không bao giờ chép tệp nào khác từ HOME tạm."""
+    if new == injected:
+        return False
+    if not valid_token_json(new):
+        log.warning("agy để lại tệp token không đúng khuôn trong HOME tạm — không chép về kho phiên")
+        return False
+    old_email, new_email = token_email(injected), token_email(new)
+    if old_email and new_email and old_email != new_email:
+        log.warning("agy để lại tệp token của tài khoản khác trong HOME tạm — không chép về kho phiên")
+        return False
+    path = cli_home_dir(cli_home) / TOKEN_FILE
+    guard = contextlib.nullcontext(True) if locked else token_flock(cli_home, exclusive=True, wait=wait)
+    with guard:
+        if read_regular_nofollow(path, TOKEN_MAX_BYTES) != injected:
+            log.info("Tệp phiên Antigravity đã đổi trong lúc chạy lượt — không chép token làm mới đè lên")
+            return False
+        try:
+            atomic_write_nofollow(path, new)
+        except OSError as e:
+            log.warning("Không chép được token Antigravity đã làm mới về kho phiên (%s)", type(e).__name__)
+            return False
+    return True
+
+
+def make_turn_home(token: bytes | None) -> Path:
+    """HOME tạm cho MỘT lượt agy: thư mục mới 0700 (mkdtemp) có `.gemini/antigravity-cli/` 0700 và — nếu có — đúng
+    một tệp token 0600. Không chép settings.json, mcp/, customizations/ hay lịch sử: cấu hình agy là mặc định của bản
+    cài."""
+    home = Path(tempfile.mkdtemp(prefix="gh-agy-home-"))
+    try:
+        cfg = home / ".gemini" / "antigravity-cli"
+        cfg.mkdir(mode=0o700, parents=True)
+        os.chmod(home / ".gemini", 0o700)
+        (home / "tmp").mkdir(mode=0o700)       # TMPDIR của lượt (cli_env) — agy ghi bộ đệm unleash… vào thư mục tạm
+        if token is not None:
+            fd = os.open(cfg / TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(token)
+    except BaseException:
+        shutil.rmtree(home, ignore_errors=True)
+        raise
+    return home
+
+
+def turn_token_path(home: Path) -> Path:
+    return home / ".gemini" / "antigravity-cli" / TOKEN_FILE
+
+
 def cli_home_dir(cli_home: str) -> Path:
     """Thư mục cấu hình CLI (…/.gemini/antigravity-cli). HOME của tiến trình CLI = cha của `.gemini`."""
     return Path(os.path.expanduser(cli_home))
 
 
-def cli_env(cli_home: str) -> dict[str, str]:
-    home = cli_home_dir(cli_home)
-    fake_home = home.parent.parent if home.parent.name == ".gemini" else home
-    return {"PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"), "HOME": str(fake_home),
-            "NO_COLOR": "1", "TERM": "dumb", "AGY_CLI_DISABLE_AUTO_UPDATE": "1",
-            "GEMINI_FORCE_FILE_STORAGE": "true", "LANG": "C.UTF-8"}
+#: Biến proxy lối ra được chuyển cho agy (hộp đặt HTTPS_PROXY tới `agy-egress` — review v0.1.63, P2-2).
+PROXY_ENV = ("HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy")
+
+
+def cli_env(cli_home: str, home: str | Path | None = None) -> dict[str, str]:
+    """Môi trường SẠCH cho agy. `home` = HOME tạm của lượt (`make_turn_home`); None ⇒ HOME suy từ `cli_home` (đăng nhập
+    trong api, canary). Biến proxy (PROXY_ENV) của tiến trình được chuyển tiếp nếu có."""
+    if home is None:
+        d = cli_home_dir(cli_home)
+        home = d.parent.parent if d.parent.name == ".gemini" else d
+        turn_tmp = None
+    else:
+        # Kiểm thật trong hộp (gói sửa review v0.1.63): agy ghi bộ đệm (unleash-repo-schema-…json) vào /tmp — chung
+        # giữa các lượt ⇒ một lượt bị lừa để lại tệp cho lượt sau đọc. TMPDIR = thư mục riêng trong HOME tạm của lượt.
+        turn_tmp = Path(home) / "tmp"
+    env = {"PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"), "HOME": str(home),
+           "NO_COLOR": "1", "TERM": "dumb", "AGY_CLI_DISABLE_AUTO_UPDATE": "1",
+           "GEMINI_FORCE_FILE_STORAGE": "true", "LANG": "C.UTF-8"}
+    if turn_tmp is not None and turn_tmp.is_dir():
+        env["TMPDIR"] = str(turn_tmp)
+    env.update({k: os.environ[k] for k in PROXY_ENV if os.environ.get(k)})
+    return env
 
 
 # v0.1.38 (F-22): tên model cho `--model=<tên>` — chỉ chữ, số và . _ : - (không khoảng trắng, tối đa 80 ký tự); ký tự
@@ -464,15 +647,22 @@ class AgyClient:
     prompt → slash command cố định viết `-p=/model`.
 
     Cô lập mỗi lượt: cwd = thư mục mới rỗng 0700 (`gh-agy-*`, xoá sau lượt — kể cả hết giờ/huỷ), env sạch
-    (`cli_env`: không biến GH_*, không khoá), `--model=<tên>` qua AGY_MODEL_RE. Changelog agy nói đọc tệp TRONG
+    (`cli_env`: không biến GH_*, không khoá), `--model=<tên>` qua AGY_MODEL_RE.
+    Review v0.1.63 (P1-1): HOME cũng là thư mục TẠM 0700 mới mỗi lượt (`make_turn_home`, xoá sau lượt) chỉ chứa
+    đúng tệp token — settings.json / mcp / customizations / lịch sử trong kho phiên (hay do một lượt trước ghi) không
+    bao giờ được nạp. Token lấy từ kho phiên (`cli_home`, đọc O_NOFOLLOW, ≤ 64 KiB, đối tượng JSON) hoặc từ `session=`
+    (hộp: token đến theo yêu cầu đã ký, hộp không có kho phiên). Sau lượt trong tiến trình, token agy làm mới được chép
+    ngược qua `sync_token_back` (đã kiểm, flock, so-và-đổi); ở chế độ `session=` không bao giờ chép ngược.
+    Changelog agy nói đọc tệp TRONG
     workspace được tự cho phép, ngoài workspace phải xin phép (bị từ chối trong print mode) — CHƯA kiểm được khi đã
     đăng nhập → không dựa vào đó.
 
     Chính sách (Sếp chốt 16/10/2026, gói G v0.1.62 + H2 v0.1.63): agy mở cho các vai nhưng MỖI VAI MỘT CHỖ CHẠY
     (`gh.providers.placement`, quyết định ở `gh.providers.agy_policy.decide`). Lớp CORE — Gen
-    của Sếp, Bản tin Gen, agent
+    của Sếp, agent
     nội bộ không gắn kênh / nhóm / người — chạy `AgyClient` này TRONG TIẾN TRÌNH. Lớp ngoại giao / người ngoài —
-    `core.reply`, agent ngoại giao, sàng lọc tin người lạ `core.refinery`, Gen của nhân viên, lượt thử agent — chạy qua
+    `core.reply`, agent ngoại giao, sàng lọc tin người lạ `core.refinery`, Bản tin Gen (review v0.1.63 P2-3), Gen của
+    nhân viên, lượt thử agent — chạy qua
     HỘP RIÊNG (`gh.agybox.client.AgyBoxClient`; chính hộp dùng lại `AgyClient` này bên trong container không khoá);
     hộp chưa cài / tắt thì các vai đó dùng nguồn AI kế, không bao giờ rơi về `AgyClient` trong tiến trình.
     RỦI RO CÒN LẠI của lớp core trong tiến trình: agy có công cụ đọc tệp / chạy lệnh và chạy
@@ -485,10 +675,21 @@ class AgyClient:
     kind = "antigravity_cli"
     MAX_PROMPT = 120_000   # giữ giới hạn cũ (prompt qua stdin từ v0.1.38, không còn vướng MAX_ARG_STRLEN)
 
-    def __init__(self, binary: str, cli_home: str, effort: str | None = None, timeout: float = 300.0):
+    def __init__(self, binary: str, cli_home: str, effort: str | None = None, timeout: float = 300.0, *,
+                 session: bytes | None = None):
         # `effort` = mức mặc định khi model không có mức riêng; None = để CLI tự chọn (không gửi --effort).
+        # `session` = nội dung tệp token cho chế độ hộp (không đọc/ghi kho phiên `cli_home`).
         self.binary, self.cli_home, self.effort, self.timeout = binary, cli_home, effort, timeout
+        self.session = session
         self.last_models_raw: str | None = None
+        #: Móc cho canary (`gh.providers.agy_canary`): gọi với HOME tạm của lượt ngay TRƯỚC khi xoá (đọc log agy).
+        self.on_home: Any = None
+
+    def _load_token(self) -> bytes | None:
+        """Tệp token của lượt: `session` (hộp) hoặc tệp trong kho phiên — đã kiểm khuôn; None = chưa đăng nhập."""
+        if self.session is not None:
+            return self.session if valid_token_json(self.session) else None
+        return read_token_file(cli_home_dir(self.cli_home) / TOKEN_FILE)
 
     @staticmethod
     def _workdir() -> str:
@@ -499,32 +700,32 @@ class AgyClient:
             os.chmod(d, 0o700)
         return d
 
-    def _refresh_window(self) -> bool:
-        """Token agy đã/sắp hết hạn ⇒ lượt này có thể làm mới token (gói G, P3)."""
-        try:
-            return token_needs_refresh((cli_home_dir(self.cli_home) / TOKEN_FILE).read_bytes())
-        except OSError:
-            return False
 
     async def _run(self, *args: str, stdin: bytes | None = None) -> tuple[int, bytes, bytes]:
         """Gói G (P3): token sắp hết hạn ⇒ lượt này có thể để agy LÀM MỚI token (refresh token xoay vòng, dùng một lần)
         — nhiều tiến trình agy (api + worker, nhiều lượt song song) dùng chung một tệp token mà cùng làm mới sẽ làm hỏng
         phiên. Những lượt như vậy giữ khoá flock ĐỘC QUYỀN trong suốt lượt (tuần tự); lượt token còn mới không khoá nên
-        vẫn chạy song song. Chờ khoá tối đa min(timeout, 60s), hết hạn thì chạy tiếp (không treo)."""
-        if self._refresh_window():
-            async with token_flock_async(self.cli_home, exclusive=True, wait=min(self.timeout, TOKEN_LOCK_WAIT_S)):
-                return await self._run_locked(*args, stdin=stdin)
-        return await self._run_locked(*args, stdin=stdin)
+        vẫn chạy song song. Chờ khoá tối đa min(timeout, 60s), hết hạn thì chạy tiếp (không treo).
+        Chế độ hộp (`session=`) không có kho phiên chung ⇒ không khoá, không chép ngược."""
+        token = self._load_token()
+        if self.session is None and token is not None and token_needs_refresh(token):
+            async with token_flock_async(self.cli_home, exclusive=True,
+                                         wait=min(self.timeout, TOKEN_LOCK_WAIT_S)) as held:
+                token = self._load_token()       # đọc lại SAU khi có khoá: lượt trước có thể vừa chép token mới về
+                return await self._run_locked(*args, stdin=stdin, token=token, locked=held)
+        return await self._run_locked(*args, stdin=stdin, token=token, locked=False)
 
-    async def _run_locked(self, *args: str, stdin: bytes | None = None) -> tuple[int, bytes, bytes]:
+    async def _run_locked(self, *args: str, stdin: bytes | None = None, token: bytes | None = None,
+                          locked: bool = False) -> tuple[int, bytes, bytes]:
         work = self._workdir()
+        home = make_turn_home(token)
         try:
             try:
                 proc = await asyncio.create_subprocess_exec(
                     self.binary, *args,
                     stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=cli_env(self.cli_home),
-                    cwd=work, start_new_session=True)
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                    env=cli_env(self.cli_home, home=home), cwd=work, start_new_session=True)
             except FileNotFoundError as e:
                 raise AuthFailed("Chưa cài Antigravity CLI trong worker") from e
             try:
@@ -542,7 +743,19 @@ class AgyClient:
             self._kill_group(proc.pid)
             return proc.returncode or 0, out, err
         finally:
+            # Kể cả hết giờ / huỷ: token agy đã làm mới (refresh token có thể xoay vòng) không được mất. Đồng bộ, nhanh:
+            # chỉ đọc một tệp ≤ 64 KiB; chờ khoá tối đa 2 giây khi chưa giữ sẵn (hiếm — token đổi ngoài cửa sổ làm mới).
+            if self.session is None and token is not None:
+                new = read_regular_nofollow(turn_token_path(home), TOKEN_MAX_BYTES)
+                if new is not None and new != token:
+                    sync_token_back(self.cli_home, token, new, locked=locked, wait=2.0)
+                elif new is None and os.path.lexists(turn_token_path(home)):  # noqa: ASYNC240 — finally, một lstat
+                    log.warning("agy để lại tệp token không đọc được trong HOME tạm — không chép về kho phiên")
+            if self.on_home is not None:
+                with contextlib.suppress(Exception):
+                    self.on_home(home)
             shutil.rmtree(work, ignore_errors=True)
+            shutil.rmtree(home, ignore_errors=True)
 
     @staticmethod
     def _kill_group(pgid: int) -> None:
@@ -568,9 +781,14 @@ class AgyClient:
         prompt = "\n\n".join(f"[{m.role}]\n{m.content}" if m.role != "user" else m.content for m in messages)
         if len(prompt.encode()) > self.MAX_PROMPT:
             raise BadRequest("Prompt quá dài cho CLI")
-        token = cli_home_dir(self.cli_home) / TOKEN_FILE
-        if not token.exists():
-            if token.with_name(TOKEN_FILE + ".before-login").exists():
+        if self._load_token() is None:
+            if self.session is not None:
+                raise AuthFailed("Phiên Antigravity gửi sang không đúng khuôn")
+            token = cli_home_dir(self.cli_home) / TOKEN_FILE
+            if os.path.lexists(token):  # noqa: ASYNC240 — một lstat
+                raise AuthFailed("Tệp phiên Antigravity không hợp lệ (không phải JSON hoặc là liên kết) — "
+                                 "đăng nhập lại")
+            if is_regular_file(token.with_name(TOKEN_FILE + ".before-login")):
                 # Console đang thêm tài khoản Google (tệp phiên gửi tạm, gh.providers.cli): tạm thời, không phải
                 # "hết hạn" — chuyển nhà cung cấp kế tiếp mà không đánh dấu CLI hết hạn.
                 raise ProviderError("CLI đang đăng nhập thêm tài khoản Google")
@@ -648,7 +866,7 @@ class AgyClient:
         model_argv = ["-p=/model"]
         effort_argv = ["-p=/effort", *base_args]
         shown = [name, *argv, "(stdin:", prompt + ")"]
-        if not (cli_home_dir(self.cli_home) / TOKEN_FILE).exists():
+        if self._load_token() is None:
             # CLI chưa đăng nhập mà chạy print mode sẽ in link đăng nhập rồi chờ 60 giây — không chạy.
             skip = "bỏ qua — CLI chưa đăng nhập"
         if skip:

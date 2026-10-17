@@ -53,9 +53,6 @@ class Settings(BaseSettings):
     # chung api/worker như agy. Không có tệp chạy ⇒ thẻ Claude Code báo "chưa cài", không ảnh hưởng nguồn khác.
     claude_home: str = "~/.claude-gh/.claude"
     claude_binary: str = "claude"
-    # F-22 (v0.1.38): đường dẫn phiên Claude cũ (≤ v0.1.37, trong HOME agy) cần chuyển sang claude_home khi api khởi
-    # động. CHỈ đặt trong api.Dockerfile; rỗng (dev/test) ⇒ không chuyển/xoá gì (gh/providers/cli.py).
-    claude_legacy_home: str = ""
 
     # Phiên đăng nhập 7 ngày, trượt (gia hạn khi còn dưới nửa — gh/auth/service.py::load_session) nhưng không quá
     # session_absolute_days kể từ lúc đăng nhập: app tự host, một Owner, không nên bắt đăng nhập lại mỗi ngày.
@@ -73,6 +70,10 @@ class Settings(BaseSettings):
     # Rỗng/khác (chạy ngoài compose, LAN) ⇒ không tin thêm header nào.
     access_mode: str = ""
     bind_addr: str = ""
+    # Review v0.1.63 (P3): chỉ tin header chuyển tiếp (X-Forwarded-For, X-Gh-Upstream-Xff, Cf-Connecting-IP) khi kết nối
+    # đến từ các địa chỉ này (IP, CIDR hoặc tên dịch vụ compose — phân giải lại mỗi 30 giây) hoặc loopback. Mặc định
+    # "proxy" = Caddy của compose; hộp agy (agy-bus) và dịch vụ khác gọi thẳng api:8000 không giả được IP.
+    trusted_proxies: str = "proxy"
     pin_session_minutes: int = 30
     pin_max_attempts: int = 5
     pin_lock_minutes: int = 15

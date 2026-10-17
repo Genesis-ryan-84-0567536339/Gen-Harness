@@ -59,7 +59,7 @@ function renderWith(ui: ReactElement, qc: QueryClient) {
 const freshClient = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
 // Gói G + H2 (16/10/2026): câu phạm vi theo chỗ chạy (apps/web/src/lib/agyLayers.ts::AGY_LAYERS_TEXT) thay câu "mọi việc" của v0.1.62.
-const SCOPE_RE = /Dùng được cho: Gen của Sếp, Bản tin và agent nội bộ \(chạy trong hệ thống\); sàng lọc tin người lạ/;
+const SCOPE_RE = /Dùng được cho: Gen của Sếp và agent nội bộ \(chạy trong hệ thống\); Bản tin, sàng lọc tin người lạ/;
 const OLD_RULE_RE = /chỉ dùng cho Gen|chỉ cho Gen|luật an toàn, không tắt được/i;
 
 const PROVIDERS: Provider[] = [
