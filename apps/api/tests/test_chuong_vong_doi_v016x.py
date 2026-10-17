@@ -246,6 +246,47 @@ async def test_update_failed_worse_outcome_rings_again(owner_api: Api, link: Pat
     assert len(await _bells(db, "update.failed")) == 2
 
 
+async def test_update_failed_nightly_slot_beyond_24h_does_not_close_and_reopen(owner_api: Api, link: Path, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """Review P2-1: lịch đêm 03:00 + RandomizedDelaySec 1800 ⇒ lần thử kế cách lần trước tới 24 giờ 30 phút. Hạn 24 giờ
+    đóng sự cố giữa hai lần thử rồi mở lại (chuông lặp mỗi đêm) ⇒ hạn 26 giờ: cách 25 giờ vẫn là MỘT sự cố mở."""
+    org = await org_id(db)
+    now = datetime.now(UTC)
+    await _update_status(link, finished_at=_iso(now - timedelta(hours=25)), message="Hết chỗ trống để cập nhật (GH-E948)")
+    await _evaluate(redis, org)
+    [alert] = await _alerts(db, "update.failed")
+    assert alert.cleared_at is None
+    # lần thử đêm sau (cùng lỗi, finished_at mới) ⇒ vẫn một chuông, một sự cố
+    await _update_status(link, finished_at=_iso(now), message="Hết chỗ trống để cập nhật (GH-E948)")
+    await _evaluate(redis, org)
+    assert len(await _bells(db, "update.failed")) == 1
+    [alert] = await _alerts(db, "update.failed")
+    assert alert.cleared_at is None
+
+
+async def test_update_failed_expiry_reads_but_does_not_label_resolved(owner_api: Api, link: Path, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """Review P2-1: lỗi tự hết hạn (không ai sửa) ⇒ chuông được đọc nhưng KHÔNG gắn "Đã xử lý" (sai sự thật);
+    lần cập nhật sau thành công (state=done) mới là "Đã xử lý"."""
+    org = await org_id(db)
+    now = datetime.now(UTC)
+    await _update_status(link, finished_at=_iso(now - timedelta(hours=1)), message="Hết chỗ trống (GH-E948)")
+    await _evaluate(redis, org)
+    await _evaluate(redis, org, now + timedelta(hours=28))  # quá hạn 26 giờ
+    [bell] = await _bells(db, "update.failed")
+    assert bell.read_at is not None
+    page = (await owner_api.get("/notifications")).json()
+    assert [i["resolved"] for i in page["items"] if i["kind"] == "update.failed"] == [False]
+
+
+async def test_update_done_after_failure_labels_resolved(owner_api: Api, link: Path, db, redis) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    await _update_status(link, finished_at=_iso(datetime.now(UTC) - timedelta(hours=1)), message="lỗi (GH-E948)")
+    await _evaluate(redis, org)
+    (link / "update-status.json").write_text(json.dumps({"state": "done", "to": "v0.1.68"}))
+    await _evaluate(redis, org)
+    page = (await owner_api.get("/notifications")).json()
+    assert [i["resolved"] for i in page["items"] if i["kind"] == "update.failed"] == [True]
+
+
 async def _break_chain(db: Any) -> None:
     from gh.db import admin_sessionmaker
 

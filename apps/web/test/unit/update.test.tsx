@@ -43,6 +43,14 @@ describe('updateView', () => {
     expect(old.kind).toBe('available');
     expect(updateView({ ...base, state: 'stalled' }, { waitingFor: null, offline: false }).kind).toBe('stalled');
   });
+  // v0.1.69 (review P2-1): lịch đêm 03:00 + trễ ngẫu nhiên tới 30 phút ⇒ lần thử kế có thể đến sau mốc 24 giờ của lần lỗi
+  // trước; hạn 26 giờ (khớp UPDATE_FAILED_RECENT của API) để thẻ/chuông không đóng rồi mở lại giữa hai đêm.
+  it('lỗi cách 25 giờ vẫn là lỗi (khe lịch đêm), quá 26 giờ mới thôi báo', () => {
+    const at = (hours: number) => new Date(NOW - hours * 3600 * 1000).toISOString();
+    const view = (hours: number) => updateView({ ...base, state: 'failed', message: 'Pull lỗi', finished_at: at(hours) }, { waitingFor: null, offline: false, now: NOW });
+    expect(view(25).kind).toBe('failed');
+    expect(view(27).kind).toBe('available');
+  });
 
   // v0.1.34: genh ghi "<việc> — <cách xử lý> (GH-E9xx)" — lời dẫn theo mã, nguyên văn vào "Chi tiết kỹ thuật".
   const failedAt = (message: string, over: Partial<SystemUpdate> = {}) =>

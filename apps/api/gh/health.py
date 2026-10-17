@@ -10,7 +10,7 @@ cả chuông (core.notifications) lẫn dải "Cần Sếp xử lý" ở Tổng 
   `/ready` để quyết rollback (apps/genh/internal/ops/update.go) — bộ xử lý nền im không được làm hỏng một bản cập
   nhật tốt.
 - `evaluate` + `watch_loop` (chạy trong api, `Settings.health_watch_seconds`): mỗi phút tính lại các sự cố theo dõi
-  định kỳ (cập nhật lỗi trong 24 giờ, quá hạn sao lưu theo tần suất bước 11, bộ xử lý nền im, ổ đĩa sắp đầy, model
+  định kỳ (cập nhật lỗi trong 26 giờ, quá hạn sao lưu theo tần suất bước 11, bộ xử lý nền im, ổ đĩa sắp đầy, model
   đang hết đăng nhập, bản sao ngoài máy cũ/lỗi — v0.1.40, chi phí AI hôm nay vượt trần — v0.1.41, lịch tự cập nhật
   đêm im quá 36 giờ — v0.1.53, cầu nối tin nhắn im quá 2 phút và hàng lỗi tin khách vào > 0 — v0.1.62) và dọn dòng sự
   kiện cũ.
@@ -46,9 +46,11 @@ BACKUP_STALE_LIMITS: dict[str, tuple[timedelta, str]] = {
     "weekly": (timedelta(days=7, hours=12), "một tuần"),
     "monthly": (timedelta(days=31, hours=12), "một tháng"),
 }
-#: Cập nhật lỗi chỉ còn là sự cố trong 24 giờ sau khi xong — khớp thẻ cập nhật ở web (updateModel.ts RECENT_MS):
-#: quá hạn thì thẻ không còn lỗi để xem/thử lại, dải "Cần Sếp xử lý" cũng thôi báo.
-UPDATE_FAILED_RECENT = timedelta(hours=24)
+#: Cập nhật lỗi chỉ còn là sự cố trong 26 giờ sau khi xong — khớp thẻ cập nhật ở web (updateModel.ts RECENT_MS):
+#: quá hạn thì thẻ không còn lỗi để xem/thử lại, dải "Cần Sếp xử lý" cũng thôi báo. 26 giờ (không phải 24): lịch đêm
+#: chạy 03:00 + trễ ngẫu nhiên tới 30 phút (genh autoupdate RandomizedDelaySec=1800) nên hai lần thử liền nhau cách tới
+#: 24 giờ 30 phút — hạn 24 giờ sẽ đóng sự cố giữa hai lần rồi mở lại (chuông lặp mỗi đêm).
+UPDATE_FAILED_RECENT = timedelta(hours=26)
 #: F103: tổ chức chưa đặt lịch sao lưu quá thời gian này (kể từ lúc tạo) ⇒ sự cố backup.stale "chưa cấu hình".
 BACKUP_UNCONFIGURED_GRACE = timedelta(hours=24)
 WORKER_SILENT_MINUTES = 10
@@ -729,7 +731,7 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
 # ─── vòng theo dõi: mở/đóng sự cố định kỳ ────────────────────────────────────────────────────────────────────
 
 def _update_failed_recent(st: dict[str, Any], now: datetime) -> bool:
-    """Lần cập nhật lỗi còn là sự cố: state 'failed' VÀ `finished_at` trong 24 giờ — cùng điều kiện với thẻ cập nhật
+    """Lần cập nhật lỗi còn là sự cố: state 'failed' VÀ `finished_at` trong 26 giờ — cùng điều kiện với thẻ cập nhật
     ở web (updateModel.ts `recent`): thiếu/hỏng `finished_at` ⇒ không tính."""
     if st.get("state") != "failed":
         return False
@@ -789,8 +791,9 @@ async def _eval_update(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
         await raise_once(db, org_id, key="update.failed", kind="update.failed", severity="bad",
                          title=f"Cập nhật lên {target} chưa thành công", body=body, link=STORAGE_LINK,
                          fingerprint=fingerprint, redis=redis)
-    elif state in ("done", "idle", "failed"):  # 'failed' quá 24 giờ: thẻ cập nhật đã thôi báo ⇒ đóng sự cố
-        await clear(db, org_id, "update.failed")
+    elif state in ("done", "idle", "failed"):  # 'failed' quá hạn: thẻ cập nhật đã thôi báo ⇒ đóng sự cố
+        # Chỉ 'done' là đã xử lý thật; 'idle'/'failed' quá hạn là tự hết hạn, vấn đề chưa chắc đã hết ⇒ không dán "Đã xử lý".
+        await clear(db, org_id, "update.failed", label=(state == "done"))
 
 
 async def _eval_backup(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: datetime) -> None:
