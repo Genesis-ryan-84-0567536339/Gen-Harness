@@ -54,6 +54,7 @@ st = await box_status()          # cache 10 giây; không tham số = đọc GH_
 | `POST /v1/generate` | có | `{request_id, model, effort\|null, prompt, json_mode, timeout_s, session}` | `{request_id, text, tokens_in, tokens_out, raw}` |
 | `POST /v1/models` | có | `{request_id, timeout_s?, session}` | `{request_id, models:[{id,…}], raw_text}` |
 
+- **Định dạng thật của tệp token agy 1.2.9** (kiểm trên phiên đăng nhập thật, v0.1.65; chỉ ghi tên trường, không ghi giá trị): JSON `{"token": {"access_token", "token_type", "refresh_token", "expiry"}, "auth_method", "id_token"}`; hạn truy cập là `token.expiry` (chuỗi RFC 3339, có phần giây lẻ tới nano giây), trùng hạn `exp` của `id_token`.
 - `session` (protocol 2, gói sửa review v0.1.63 P1-1): nội dung tệp token agy (`antigravity-oauth-token`) của hồ sơ đang hoạt động — chuỗi JSON
   đối tượng ≤ 64 KiB. Client đọc từ kho phiên của api/worker (`GH_CLI_HOME`, mở `O_NOFOLLOW`, tệp thường, đã kiểm khuôn); không có ⇒ `AuthFailed`
   ngay ở client (không gọi hộp), đang gửi tạm khi thêm tài khoản ⇒ `ProviderError`. Hộp thiếu / sai khuôn ⇒ `400 bad_request`. Hộp đặt nó vào HOME
