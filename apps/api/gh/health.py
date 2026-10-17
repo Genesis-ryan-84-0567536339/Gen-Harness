@@ -266,9 +266,8 @@ async def clear(db: AsyncSession, org_id: uuid.UUID, key: str, *, label: bool = 
                                     RETURNING kind, title"""), {"o": org_id, "k": key})).first()
     if row is None:
         return False
-    # Còn sự cố MỞ khác cùng `kind` (job.timeout:<tên>, model.auth_expired:<id>) ⇒ chỉ chuông cùng tiêu đề; không
-    # thì mọi
-    # chuông của kind (tiêu đề từng đổi theo số phút/ngày giữa các lần mở).
+    # Còn sự cố MỞ khác cùng `kind` (job.timeout:<tên>, model.auth_expired:<id>) ⇒ chỉ chuông cùng tiêu đề; không thì
+    # mọi chuông của kind (tiêu đề từng đổi theo số phút/ngày giữa các lần mở).
     others = (await db.execute(text("""SELECT EXISTS (SELECT 1 FROM ops.health_alerts
                                        WHERE org_id = :o AND kind = :kind AND key <> :k AND cleared_at IS NULL)"""),
                                {"o": org_id, "kind": row.kind, "k": key})).scalar_one()
