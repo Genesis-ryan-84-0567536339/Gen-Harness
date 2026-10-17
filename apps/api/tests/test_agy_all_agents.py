@@ -79,13 +79,20 @@ async def _agy_only(api: Api) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
 
 # ─── (a) hồ sơ tiêu chuẩn giải ra agy cho mọi vai ────────────────────────
 
-async def test_profiles_resolve_agy_for_every_role(owner_api, db, clis) -> None:  # type: ignore[no-untyped-def]
+async def test_profiles_resolve_agy_for_every_role(owner_api, db, clis, box) -> None:  # type: ignore[no-untyped-def]
     org, _pid, _mid = await _agy_only(owner_api)
     aid = await _seed_agent(db, org)
     keys = ["core.gen", "core.refinery", "core.briefing", f"agent:{aid}"]
     async with sessionmaker()() as s:
         std, why = await profiles.standard_with_reasons(s, org, [*keys, "core.reply"])
-    assert std["core.reply"] is None and why["core.reply"] and "người ngoài" in why["core.reply"]   # gói G: ngoại giao
+    assert std["core.reply"] is not None and why["core.reply"] is None             # hộp chạy ⇒ ngoại giao cũng có agy
+    box.state = "not_installed"
+    async with sessionmaker()() as s:
+        std_off, why_off = await profiles.standard_with_reasons(s, org, ["core.reply", "core.refinery", "core.gen"])
+    assert std_off["core.reply"] is None and std_off["core.refinery"] is None          # chưa cài hộp: lý do trung thực
+    assert why_off["core.reply"] == why_off["core.refinery"] and "Hộp riêng Antigravity" in why_off["core.reply"]
+    assert std_off["core.gen"] is not None                                              # vai core không phụ thuộc hộp
+    box.state = "ok"
     for k in keys:
         c = std[k]
         assert c is not None and why[k] is None, (k, why[k])
@@ -102,7 +109,7 @@ async def test_profiles_resolve_agy_for_every_role(owner_api, db, clis) -> None:
 # ─── (b) router.generate việc nền chọn được agy ──────────────────────────
 
 @pytest.mark.parametrize("agent_key,purpose", ALL_CASES)
-async def test_router_uses_agy_for_every_role_and_purpose(owner_api, app, db, clis, agent_key, purpose) -> None:  # type: ignore[no-untyped-def]
+async def test_router_uses_agy_for_every_role_and_purpose(owner_api, app, db, clis, agent_key, purpose, box) -> None:  # type: ignore[no-untyped-def]
     org, _pid, _mid = await _agy_only(owner_api)
     aid = await _seed_agent(db, org)
     n = len(_calls(clis))
@@ -112,7 +119,7 @@ async def test_router_uses_agy_for_every_role_and_purpose(owner_api, app, db, cl
     assert _calls(clis)[-1]["via_stdin"] is True
 
 
-async def test_background_purposes_are_background_but_agy_runs(owner_api, app, db, clis) -> None:  # type: ignore[no-untyped-def]
+async def test_background_purposes_are_background_but_agy_runs(owner_api, app, db, clis, box) -> None:  # type: ignore[no-untyped-def]
     """Các purpose này `is_background` (luật F-86 áp cho Claude Code CLI) mà agy vẫn chạy, không tự cho phép Claude."""
     org, _pid, _mid = await _agy_only(owner_api)
     aid = await _seed_agent(db, org)
@@ -249,14 +256,12 @@ async def test_no_model_message_no_longer_blames_agy_rule(owner_api, app) -> Non
 
 # ─── (d)(e) gán model cho agent ──────────────────────────────────────────
 
-async def test_bindings_have_no_api_key_reason_and_agy_assignable_to_every_key(owner_api, db, clis) -> None:  # type: ignore[no-untyped-def]
+async def test_bindings_have_no_api_key_reason_and_agy_assignable_to_every_key(owner_api, db, clis, box) -> None:  # type: ignore[no-untyped-def]
     api = owner_api
     org, _pid, mid = await _agy_only(api)
     aid = await _seed_agent(db, org)
     items = {i["agent_key"]: i for i in (await api.get("/agents/bindings")).json()["items"]}
     assert set(items) == {"core.gen", "core.refinery", "core.briefing", "core.reply", f"agent:{aid}"}
-    reply = items.pop("core.reply")        # gói G: lớp ngoại giao — lý do trung thực, không phải "cần khoá API"
-    assert reply["standard"] is None and "người ngoài" in reply["standard_reason"]
     for k, it in items.items():                                              # (d)
         assert it["source"] == "standard" and it["standard_reason"] is None, k
         assert it["standard"]["model_name"] == "gemini-3.8-flash", k       # "Chuẩn: <model agy>" cho mọi dòng
@@ -285,7 +290,7 @@ async def test_bindings_have_no_api_key_reason_and_agy_assignable_to_every_key(o
     assert out.status_code == 404                  # agent không tồn tại: lỗi thường, không phải 409
 
 
-async def test_binding_to_agy_is_used_by_background_call(owner_api, app, clis) -> None:  # type: ignore[no-untyped-def]
+async def test_binding_to_agy_is_used_by_background_call(owner_api, app, clis, box) -> None:  # type: ignore[no-untyped-def]
     org, _pid, mid = await _agy_only(owner_api)
     async with sessionmaker()() as db:
         await db.execute(text("""INSERT INTO agent.bindings (org_id, agent_key, model_id, context_tokens)
@@ -321,7 +326,7 @@ async def test_setup_step4_with_agy_only_completes_without_bindings(owner_api, d
     assert await _bound(org) == {}
 
 
-async def test_step8_try_with_agy_only_answers(owner_api, app, db, clis) -> None:  # type: ignore[no-untyped-def]
+async def test_step8_try_with_agy_only_answers(owner_api, app, db, clis, box) -> None:  # type: ignore[no-untyped-def]
     """Trò chuyện thử agent (purpose setup_agent_try) chạy bằng agy — trước đây trả câu giải thích luật owner-only."""
     org, _pid, _mid = await _agy_only(owner_api)
     await db.execute(text("UPDATE ops.setup_state SET completed = CAST(:c AS jsonb) WHERE org_id = :o"),
@@ -361,7 +366,7 @@ def test_model_unavailable_is_always_the_generic_message() -> None:
 
 # ─── (f) Claude Code CLI vẫn KHÔNG chạy việc nền khi Owner chưa cho phép ───
 
-async def test_claude_cli_still_not_background_without_owner_consent(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+async def test_claude_cli_still_not_background_without_owner_consent(app, db, redis, boxctl) -> None:  # type: ignore[no-untyped-def]
     org = await org_id(db)
     await cli_provider(db, org, "claude_code_cli", 1)
     claude, agy = FakeCli("claude"), FakeCli("agy")
@@ -373,7 +378,7 @@ async def test_claude_cli_still_not_background_without_owner_consent(app, db, re
     assert claude.calls == 0
     # Thêm agy: việc nền chạy bằng agy, Claude vẫn đứng ngoài.
     await cli_provider(db, org, "antigravity_cli", 2)
-    r = make_router(redis, claude, agy)
+    r = make_router(redis, claude, agy, box=agy)
     out = await r.generate(org, agent_key="core.refinery", purpose="refinery", messages=MSGS)
     assert out.text == "agy-ok" and claude.calls == 0 and agy.calls == 1
     # Lượt Gen (không phải việc nền) vẫn dùng Claude trước như cũ.
@@ -389,10 +394,11 @@ async def _incident(db, org: uuid.UUID) -> Any:  # type: ignore[no-untyped-def]
                                       AND key = 'ai.background_no_source'"""), {"o": org})).one_or_none()
 
 
-async def test_health_does_not_raise_background_no_source_when_agy_runs(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+async def test_health_does_not_raise_background_no_source_when_agy_runs(app, db, redis, boxctl) -> None:  # type: ignore[no-untyped-def]
     org = await org_id(db)
     await cli_provider(db, org, "antigravity_cli", 1)
-    r = make_router(redis, FakeCli("claude"), FakeCli("agy"))
+    fake = FakeCli("agy")
+    r = make_router(redis, FakeCli("claude"), fake, box=fake)
     for key, purpose in (("core.refinery", "refinery"), ("agent:x", "duty_decide"), ("core.briefing", "gen.briefing")):
         out = await r.generate(org, agent_key=key, purpose=purpose, messages=MSGS)
         assert out.text == "agy-ok"

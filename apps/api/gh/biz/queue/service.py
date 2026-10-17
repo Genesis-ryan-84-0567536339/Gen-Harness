@@ -36,7 +36,8 @@ ALERT_TYPE_LABELS = {
     "competitor": "Đối thủ xuất hiện", "forgotten_deadline": "Deadline bị bỏ quên",
     "data_conflict": "Dữ liệu mâu thuẫn", "model_quota_low": "Hạn mức model sắp hết",
     "model_chain_exhausted": "Hết chuỗi model",
-    # v0.1.62: không còn sinh cảnh báo này (agy mở cho mọi vai); giữ nhãn để các dòng cũ (≤ v0.1.58) vẫn hiện đúng tên.
+    # v0.1.62: không còn sinh cảnh báo này (luật "agy chỉ cho Gen" đã gỡ); giữ nhãn để các
+    # dòng cũ (≤ v0.1.58) vẫn hiện đúng tên.
     "model_chain_agy_only": "Chưa có nguồn AI phù hợp",
 }
 # Đơn vị ý nghĩa nào rơi vào tab nào của Hộp thư (mục "Chỗ tự quyết" trong docs/api/phase-3-queue.md).

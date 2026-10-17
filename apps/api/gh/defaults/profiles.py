@@ -11,15 +11,14 @@ Luật cứng còn lại (bảng A1 chỉ chọn trong phạm vi đã được p
   Owner đã cho phép việc nền (F-86 / QD-12 — điều khoản gói Claude); thiếu nguồn thì giữ hành vi cũ (hết chuỗi →
   cảnh báo), KHÔNG tự chuyển sang Claude Code CLI.
 
-v0.1.62 — Antigravity CLI mở cho MỌI vai, kể cả việc nền: Owner chọn ngày 16/10/2026 sau khi được báo rủi ro (luật
-F-22 "agy chỉ cho Gen của Owner" của v0.1.38 bị gỡ). Rủi ro còn lại: agy có công cụ đọc tệp / chạy lệnh và chạy cùng
-container với khoá hệ thống, nội dung bên ngoài có thể lừa nó đọc tệp trong container. Lớp cô lập mỗi lượt của
-`AgyClient` vẫn giữ nguyên; bước kế tiếp: tách agy ra container riêng không gắn khoá.
-
-Gói G (16/10/2026) — agy PHÂN LỚP: lớp core (core.gen của Owner, core.briefing, core.refinery, agent nội bộ) dùng được
-agy; lớp ngoại giao (core.reply, agent gắn kênh / nhóm / người) và Gen của người dùng không phải Owner thì không.
-Quyết định nằm ở MỘT hàm `gh.providers.agy_policy.decide`; `resolve` / `missing_reason` / `choice_options` nhận kết
-quả đó (`agy=`) và loại nguồn Antigravity CLI khỏi hồ sơ tiêu chuẩn của khoá bị chặn.
+Antigravity CLI (agy) — Owner mở cho các vai ngày 16/10/2026 sau khi được báo rủi ro (agy có công cụ đọc tệp / chạy
+lệnh; luật F-22 "agy chỉ cho Gen của Owner" của v0.1.38 đã gỡ). Gói G (v0.1.62) PHÂN LỚP, gói H2 (v0.1.63) cho mỗi lớp
+một chỗ chạy: core (core.gen của Owner, core.briefing, agent nội bộ) chạy agy TRONG TIẾN TRÌNH; lớp ngoại giao
+(core.reply, agent gắn kênh / nhóm / người), sàng lọc tin người lạ (core.refinery) và Gen của nhân viên chạy agy QUA
+HỘP RIÊNG (`gh.agybox`, không có khoá hệ thống). Hộp chưa cài / tắt thì các vai này dùng nguồn AI kế, KHÔNG rơi về agy
+trong tiến trình. Quyết định nằm ở MỘT điểm `gh.providers.agy_policy.decide` (luật chỗ chạy: `gh.providers.placement`);
+`resolve` / `missing_reason` / `choice_options` nhận kết quả đó (`agy=`) và loại nguồn Antigravity CLI khỏi hồ sơ tiêu
+chuẩn của khoá chưa dùng được agy.
 
 `resolve()` THUẦN (không DB) để test ma trận; phần truy vấn DB nằm ở `load_rows` / `standard_for` / `choice_options`.
 """
@@ -167,9 +166,9 @@ def _rank_key(p: Any) -> tuple[int, int]:
 
 def provider_allowed(kind: str, *, bg: bool, bg_cli_allowed: set[str] | frozenset[str],
                      agy_ok: bool = True) -> bool:
-    """Luật cứng F-86 cho MỘT loại nguồn (hồ sơ tiêu chuẩn chỉ chọn trong phạm vi này). v0.1.62: Antigravity CLI dùng
-    được ở mọi vai kể cả việc nền (Owner chọn mở ngày 16/10/2026); Claude Code CLI vẫn chỉ khi Owner cho phép việc
-    nền. Gói G: `agy_ok=False` (quyết định `agy_policy.decide` cho khoá này là KHÔNG) ⇒ loại Antigravity CLI."""
+    """Luật cứng F-86 cho MỘT loại nguồn (hồ sơ tiêu chuẩn chỉ chọn trong phạm vi này). Antigravity CLI không cần Owner
+    cho phép việc nền (Claude Code CLI thì có); `agy_ok=False` (quyết định `agy_policy.decide` cho khoá này là KHÔNG:
+    vai phải qua hộp mà hộp chưa cài / tắt) ⇒ loại Antigravity CLI."""
     if kind == KIND_AGY:
         return agy_ok
     if kind == KIND_CLAUDE:
@@ -188,8 +187,9 @@ def resolve(providers_rows: Sequence[Any], models_rows: Sequence[Any], agent_key
       nền.
     - `bg_cli_allowed`: CLI Owner đã cho chạy việc nền (chỉ `claude_code_cli`; Antigravity CLI không cần cho phép).
     - `tier_override`: ép tầng (chat chọn Nhanh / Cân bằng / Kỹ hơn) — vẫn tôn trọng mọi luật trên.
-    - `agy`: quyết định `agy_policy.decide` cho khoá này (gói G). Bỏ trống ⇒ tính tĩnh từ khoá (`core.reply` bị chặn;
-      agent ngoại giao / Gen nhân viên cần bên gọi truyền vì phải tra DB).
+    - `agy`: quyết định `agy_policy.decide` cho khoá này. Bỏ trống ⇒ tính tĩnh từ khoá với hộp coi như CHƯA CÀI (đóng
+      an toàn: vai phải qua hộp bị loại); bên gọi thật truyền `verdict_for` (cần DB: agent ngoại giao + trạng thái
+      hộp).
     Hàm thuần: không DB, không Redis. Thiếu tầng ⇒ tầng gần nhất; KHÔNG tự thêm dòng model."""
     role = role_of(agent_key)
     if role is None:
@@ -225,7 +225,8 @@ def resolve(providers_rows: Sequence[Any], models_rows: Sequence[Any], agent_key
 
 
 REASON_NEED_API = "cần khoá API hoặc đăng nhập Antigravity CLI"
-REASON_NEED_API_OR_CLAUDE = "cần khoá API hoặc Claude Code CLI"      # core.reply: agy chưa dùng (gói G)
+# core.reply, khi chưa có nguồn agy nào để nêu lý do hộp
+REASON_NEED_API_OR_CLAUDE = "cần khoá API hoặc Claude Code CLI"
 REASON_NO_SOURCE = "chưa có nguồn phù hợp"
 
 
@@ -239,9 +240,9 @@ def missing_reason(providers_rows: Sequence[Any], models_rows: Sequence[Any], ag
        ở <nguồn>" (đường tự sửa của Sếp);
     2. vai nền không có nguồn dùng được ⇒ "cần khoá API hoặc đăng nhập Antigravity CLI" (v0.1.62: Antigravity CLI
        chạy được việc nền; Claude Code CLI chỉ khi Owner cho phép nên không gợi ý ở đây);
-    3. (gói G) khoá bị chặn agy mà có nguồn Antigravity CLI đang bật ⇒ nêu đúng lý do chặn (`agy.reason`: ngoại giao /
-       Gen nhân viên) thay vì gợi ý đăng nhập lại Antigravity;
-    4. trả lời lại / soạn nháp (core.reply) ⇒ "cần khoá API hoặc Claude Code CLI" (agy chưa dùng cho việc này);
+    3. khoá chưa dùng được agy mà có nguồn Antigravity CLI đang bật ⇒ nêu đúng lý do (`agy.reason`: "Hộp riêng
+       Antigravity chưa chạy / chưa được cài" cho vai phải qua hộp) thay vì gợi ý đăng nhập lại Antigravity;
+    4. trả lời lại / soạn nháp (core.reply) ⇒ "cần khoá API hoặc Claude Code CLI" (chưa có nguồn Antigravity nào);
     5. còn lại ⇒ "chưa có nguồn phù hợp"."""
     role = role_of(agent_key)
     if role is None:
@@ -314,8 +315,9 @@ async def standard_with_reasons(
         db: AsyncSession, org_id: uuid.UUID, agent_keys: Sequence[str],
 ) -> tuple[dict[str, dict[str, Any] | None], dict[str, str | None]]:
     """Như `standard_for` + (v0.1.58) LÝ DO khi một vai chưa có model chuẩn (`missing_reason`; vai đã có ⇒ None).
-    Gói G: mỗi khoá được hỏi `agy_policy.decide` (agent ngoại giao tra DB một lần) — khoá bị chặn không nhận Antigravity
-    CLI làm model chuẩn. Hiển thị (tên "Chuẩn: …") là mặt nhìn của Owner nên `owner=True`."""
+    Mỗi khoá được hỏi `agy_policy.verdicts_for` (agent ngoại giao tra DB một lần, trạng thái hộp đọc một lần) — khoá
+    phải qua hộp mà hộp chưa chạy không nhận Antigravity CLI làm model chuẩn. Hiển thị "Chuẩn: …" là mặt nhìn của Owner
+    nên `owner=True`."""
     from gh.providers.router import background_cli_allowed
 
     providers, models = await load_rows(db, org_id)
@@ -358,11 +360,11 @@ async def choice_options(db: AsyncSession, org_id: uuid.UUID, *, owner: bool = T
     `{'tiers': [{'tier': 'auto'|'fast'|'balanced'|'deep', 'available': bool, 'efforts': [...]}]}`; 'deep' ↔ tầng
     'strong'. Một tầng `available` khi có nguồn DÙNG ĐƯỢC (đang bật; khoá API có khoá; CLI chưa hết hạn đăng nhập) có
     model đã bật ở đúng tầng đó. v0.1.62: Antigravity CLI không phụ thuộc nội dung bên ngoài (không còn `tainted`).
-    Gói G: `owner=False` (người hỏi là nhân viên) ⇒ `agy_policy.decide("core.gen", owner=False)` chặn Antigravity CLI
-    nên mọi tầng chỉ tính nguồn khác. 'auto' (Tự động, chuẩn) khả dụng khi có bất kỳ nguồn nào. `efforts` ⊆
-    low/medium/high mà các model CLI của tầng ấy hỗ trợ (khoá API: rỗng)."""
+    `owner=False` (người hỏi là nhân viên) ⇒ Gen của nhân viên chạy agy qua hộp (`agy_policy.verdict_for`): hộp không
+    chạy thì Antigravity CLI bị loại và mọi tầng chỉ tính nguồn khác. 'auto' (Tự động, chuẩn) khả dụng khi có bất kỳ
+    nguồn nào. `efforts` ⊆ low/medium/high mà các model CLI của tầng ấy hỗ trợ (khoá API: rỗng)."""
     providers, models = await load_rows(db, org_id)
-    agy_ok = agy_policy.decide("core.gen", owner=owner).allowed
+    agy_ok = (await agy_policy.verdict_for(db, org_id, ROLE_GEN, owner=owner)).allowed
     by_provider: dict[str, list[dict[str, Any]]] = {}
     for m in models:
         by_provider.setdefault(str(m["provider_id"]), []).append(m)

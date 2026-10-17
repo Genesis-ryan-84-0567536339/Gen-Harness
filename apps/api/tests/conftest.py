@@ -31,6 +31,8 @@ import psycopg
 import pytest
 from redis.asyncio import Redis
 
+from tests.box_fakes import box, boxctl  # noqa: F401 — hộp riêng Antigravity giả (v0.1.63 H2), dùng chung nhiều bộ test
+
 API_DIR = Path(__file__).resolve().parents[1]
 PG = os.environ.get("GH_TEST_PG", "postgresql://postgres:postgres@localhost:5432")
 REDIS_URL = os.environ.get("GH_TEST_REDIS", "redis://localhost:6379/15")

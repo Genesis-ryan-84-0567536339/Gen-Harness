@@ -165,10 +165,11 @@ async def _agent_key_label(db: AsyncSession, org_id: uuid.UUID, agent_key: str) 
 
 
 def _binding_out(r: Any) -> dict[str, Any]:
-    # v0.1.62: Antigravity CLI gán được cho MỌI khoá (luật F-22 owner-only đã gỡ, Owner chọn mở 16/10/2026) ⇒ không
-    # còn `blocked_reason` và không còn lỗi 409 AGY_OWNER_GEN_ONLY ở PUT /bindings. Gói G (16/10/2026): ngoại lệ có chủ
-    # đích là lớp ngoại giao (core.reply, agent gắn kênh / nhóm / người) — xem `agy_blocked_reason` ở từng mục danh
-    # sách và 422 ở PUT khi gán model agy cho khoá đó (một hàm quyết định: `gh.providers.agy_policy.decide`).
+    # Antigravity CLI gán được cho mọi khoá (luật F-22 owner-only đã gỡ ở v0.1.62 ⇒ không còn `blocked_reason` hay 409
+    # AGY_OWNER_GEN_ONLY). v0.1.63 (H2): khoá của lớp ngoại giao / người ngoài (core.reply, core.refinery, agent gắn
+    # kênh / nhóm / người, Gen của nhân viên) chạy agy QUA HỘP RIÊNG — hộp chưa chạy / chưa cài thì xem
+    # `agy_blocked_reason` ở từng mục danh sách và PUT trả 422 khi gán model agy cho khoá đó (một điểm quyết định:
+    # `gh.providers.agy_policy.decide`, luật chỗ chạy ở `gh.providers.placement`).
     return {"model_id": str(r.model_id), "model_name": r.model_name, "provider_name": r.provider_name,
             "temperature": float(r.temperature), "context_tokens": r.context_tokens,
             "rule_codes": list(r.rule_codes or []), "effort": getattr(r, "effort", None)}
@@ -196,8 +197,8 @@ async def list_bindings(user: service.CurrentUser = Depends(READ), db: AsyncSess
               "source": "custom" if k in by_key else "standard",
               "standard": None if k in by_key else profiles.standard_public(standard.get(k)),
               "standard_reason": None if k in by_key else reasons.get(k),
-              # Gói G: lý do Antigravity CLI không dùng được cho khoá này (chuỗi) hoặc null — web làm mờ model agy ở
-              # ô chọn; dòng gán agy cũ của khoá bị chặn vẫn hiện để Sếp gỡ / đổi.
+              # Lý do Antigravity CLI chưa dùng được cho khoá này (chuỗi: hộp riêng chưa chạy / chưa cài) hoặc null —
+              # web làm mờ model agy ở ô chọn; dòng gán agy cũ của khoá chưa dùng được vẫn hiện để Sếp gỡ / đổi.
               "agy_blocked_reason": verdicts[k].reason}
              for k, label in keys]
     models = (await db.execute(text("""
@@ -244,10 +245,11 @@ async def set_binding(agent_key: str, body: BindingIn, request: Request,
         raise not_found("Model")
     _check_effort(m.kind, m.model_name, body.effort)
     if m.kind == agy_policy.KIND_AGY:
-        # Gói G: lớp ngoại giao (core.reply, agent gắn kênh / nhóm / người) chưa dùng agy ⇒ không nhận dòng gán agy.
+        # H2: khoá phải qua hộp riêng mà hộp chưa chạy / chưa cài ⇒ chưa nhận dòng gán agy (lượt gọi sẽ không dùng được
+        # agy và KHÔNG rơi về agy trong tiến trình); lý do là câu trung thực của `agy_policy`.
         verdict = await agy_policy.verdict_for(db, user.org_id, agent_key)
         if not verdict.allowed:
-            raise field_errors({"model_id": verdict.reason or agy_policy.REASON_DIPLOMATIC})
+            raise field_errors({"model_id": verdict.reason or agy_policy.REASON_BOX_DOWN})
     await db.execute(text("""
         INSERT INTO agent.bindings (org_id, agent_key, model_id, temperature, context_tokens, rule_codes, effort)
         VALUES (:o, :k, :m, :t, :ct, :rc, :e)

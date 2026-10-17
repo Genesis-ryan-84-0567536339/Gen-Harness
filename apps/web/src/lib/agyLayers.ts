@@ -1,17 +1,17 @@
 /**
- * Gói G (Sếp chốt 16/10/2026) — Antigravity CLI (agy) PHÂN LỚP, nói đúng với người dùng:
- * - lớp core (Gen của Sếp, sàng lọc tin, Bản tin, agent nội bộ) dùng được agy;
- * - lớp ngoại giao (soạn lại / dịch nháp tin gửi khách, agent gắn kênh / nhóm / người) CHƯA dùng agy — chờ hộp riêng (bản sau);
- * - Gen của nhân viên không dùng agy.
- * Câu lý do của từng dòng do máy chủ trả (`agy_blocked_reason`, một hàm quyết định `gh.providers.agy_policy.decide`);
+ * Antigravity CLI (agy) — MỖI VAI MỘT CHỖ CHẠY (Sếp chốt 16/10/2026; gói G v0.1.62, gói H2 v0.1.63), nói đúng với người dùng:
+ * - chạy TRONG hệ thống: Gen của Sếp, Bản tin, agent nội bộ (không gắn kênh / nhóm / người);
+ * - chạy QUA HỘP RIÊNG (không có khoá hệ thống): soạn lại / dịch nháp tin gửi khách, sàng lọc tin người lạ, agent gắn kênh /
+ *   nhóm / người, Gen của nhân viên, lượt thử agent. Hộp chưa chạy / chưa cài ⇒ các việc này dùng nguồn AI kế.
+ * Câu lý do của từng dòng do máy chủ trả (`agy_blocked_reason`, một điểm quyết định `gh.providers.agy_policy.decide`);
  * file này chỉ giữ câu phạm vi chung cho thẻ Antigravity CLI và hàm nhận biết model agy.
  */
 
 export const AGY_LAYERS_TEXT =
-  'Dùng được cho: Gen của Sếp, sàng lọc tin, Bản tin và agent nội bộ. Chưa dùng cho việc trả lời người ngoài (soạn lại / dịch nháp, agent gắn kênh hoặc nhóm chat) và Gen của nhân viên — chờ hộp riêng (bản sau). Lưu ý: Antigravity CLI chạy cùng máy chủ với khoá hệ thống.';
+  'Dùng được cho: Gen của Sếp, Bản tin và agent nội bộ (chạy trong hệ thống); sàng lọc tin người lạ, soạn lại / dịch nháp, agent gắn kênh hoặc nhóm chat và Gen của nhân viên (chạy qua hộp riêng, không có khoá hệ thống — hộp chưa chạy thì dùng nguồn AI kế). Lưu ý: phần chạy trong hệ thống dùng chung máy chủ với khoá hệ thống.';
 
 export const AGY_BACKGROUND_NOTE =
-  'Antigravity CLI chạy được sàng lọc tin và Bản tin, không cần Sếp cho phép. Agent trực kênh trả lời người ngoài chưa dùng Antigravity (chờ hộp riêng, bản sau) — cần khoá API.';
+  'Antigravity CLI chạy được Bản tin (trong hệ thống) và sàng lọc tin người lạ (qua hộp riêng), không cần Sếp cho phép. Hộp riêng chưa chạy thì sàng lọc tin và agent trực kênh trả lời người ngoài dùng nguồn khác — cần khoá API.';
 
 export const AGY_KIND = 'antigravity_cli';
 

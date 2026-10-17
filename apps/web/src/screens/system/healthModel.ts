@@ -10,7 +10,7 @@ import { offsiteNextStep, type OffsiteViewer } from './offsiteModel';
 export type HealthTone = 'ok' | 'warn' | 'bad' | 'muted';
 
 export interface HealthRow {
-  key: 'worker' | 'browser' | 'bridge' | 'dlq' | 'backup' | 'offsite' | 'update' | 'disk' | 'autostart' | 'nightly' | 'watcher';
+  key: 'worker' | 'browser' | 'bridge' | 'agy_box' | 'dlq' | 'backup' | 'offsite' | 'update' | 'disk' | 'autostart' | 'nightly' | 'watcher';
   label: string;
   value: string;
   tone: HealthTone;
@@ -108,6 +108,22 @@ export function healthRows(
             tone: 'bad',
           }
         : { key: 'bridge', label: 'Bộ nhận tin Zalo/WhatsApp', value: br.last_seen_at ? `Đang chạy · lần cuối ${fmtAgo(br.last_seen_at, now, tz)}` : 'Đang chạy', tone: 'ok' },
+    );
+  }
+
+  // v0.1.63 (H1): hộp riêng Antigravity — khối chỉ có khi hộp đã được cấu hình ⇒ vắng khối thì không dòng.
+  const ab = h.agy_box;
+  if (ab) {
+    rows.push(
+      ab.state === 'ok'
+        ? { key: 'agy_box', label: 'Hộp riêng Antigravity', value: ab.agy_version ? `Đang chạy · Antigravity ${ab.agy_version}` : 'Đang chạy', tone: 'ok' }
+        : {
+            key: 'agy_box',
+            label: 'Hộp riêng Antigravity',
+            value: 'Chưa chạy — việc có người ngoài tạm dùng nguồn AI khác',
+            tone: 'warn',
+            hint: 'Thường tự hết sau khi hộp khởi động lại. Kéo dài thì xem hướng dẫn bên dưới.',
+          },
     );
   }
 
@@ -269,7 +285,7 @@ export interface HealthTipStep {
   cmd?: string;
 }
 export interface HealthTip {
-  key: 'disk' | 'worker' | 'bridge' | 'autostart' | 'nightly' | 'watcher';
+  key: 'disk' | 'worker' | 'bridge' | 'agy_box' | 'autostart' | 'nightly' | 'watcher';
   title: string;
   steps: HealthTipStep[];
   /** Cảnh báo rủi ro (Sếp tự quyết, nhưng phải thấy rõ). */
@@ -322,6 +338,18 @@ export function healthTips(h: SystemHealth): HealthTip[] {
         { text: 'Dừng rồi bật lại toàn bộ dịch vụ (không mất dữ liệu, Console tạm gián đoạn khoảng 1 phút):', cmd: 'genh stop' },
         { text: 'Rồi:', cmd: 'genh start' },
         { text: 'Tin khách gửi trong lúc bộ nhận tin dừng có thể không về — hỏi lại khách nếu cần. Chạy lại xong, thẻ kênh và dòng này tự về bình thường.' },
+      ],
+    });
+  }
+  if (h.agy_box?.state === 'down') {
+    // v0.1.63 (H1): đích của nút "Xem sức khoẻ" (agy_box.down) — hộp chạy riêng, dựng lại không mất dữ liệu.
+    tips.push({
+      key: 'agy_box',
+      title: 'Cách bật lại Hộp riêng Antigravity',
+      steps: [
+        { text: 'Trên máy chủ, xem lỗi của hộp (dịch vụ agy-box) và gửi kèm khi báo lỗi nếu cần (Trợ giúp › Báo lỗi):', cmd: 'genh logs agy-box' },
+        { text: 'Dựng lại hộp bằng cách cập nhật (không mất dữ liệu, giữ nguyên đăng nhập Antigravity):', cmd: 'genh update' },
+        { text: 'Trong lúc hộp chưa chạy, soạn trả lời khách và sàng lọc tin người lạ dùng nguồn AI khác — không dùng Antigravity chạy chung với khoá hệ thống.' },
       ],
     });
   }
