@@ -16,6 +16,7 @@ import {
 } from '@gen-harness/contracts';
 import { reportClientError } from './clientErrors';
 import { qk2 } from './dataQueries';
+import { LISTEN_LOG_SIGNALS, scheduleListenLogRefresh } from './listenLogQueries';
 import { newErrorId } from './errorId';
 import { currentPath, navigateTo } from './navigation';
 import { qk } from './queries';
@@ -278,6 +279,8 @@ export function onRealtimeEvent(type: string, fn: ExtraHandler): () => void {
 /** Apply one server frame to the cached queries. Pure w.r.t. the given client. */
 export function applyEvent(qc: QueryClient, e: RealtimeEvent): void {
   for (const fn of extraHandlers.get(e.type) ?? []) fn(qc, e.data);
+  // v0.1.71: Nhật ký lắng nghe — tín hiệu có gì mới ⇒ tải lại (gom nhịp), không vá bộ đệm tại chỗ.
+  if (LISTEN_LOG_SIGNALS.has(e.type)) scheduleListenLogRefresh(qc);
   switch (e.type) {
     case 'raw.new': {
       const item = e.data;
@@ -341,7 +344,7 @@ export function applyEvent(qc: QueryClient, e: RealtimeEvent): void {
       return;
     }
     case 'group.discovered': {
-      // v0.1.65: nhóm mới chờ Sếp chọn ⇒ hộp "Nhóm mới" hiện ngay, số nhóm trên thẻ kênh cập nhật.
+      // v0.1.65: nhóm mới ⇒ thẻ kênh cập nhật ngay: hộp "Nhóm mới" (chỉ khi Sếp đặt Hỏi Sếp) hoặc khối «N nhóm mới đã vào Lắng nghe im lặng».
       void qc.invalidateQueries({ queryKey: qk2.channels });
       void qc.invalidateQueries({ queryKey: qk2.channelGroups(e.data.channel) });
       return;

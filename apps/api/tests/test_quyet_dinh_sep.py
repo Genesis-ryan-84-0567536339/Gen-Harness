@@ -1,3 +1,4 @@
+# ruff: noqa: F811 — fixture `w` nhập từ test_p3_duty (tham số test trùng tên là cách pytest dùng fixture)
 """L6 (v0.1.69, gói D3) — quyết định của Sếp thành test: trôi khỏi ý Sếp mà không ai biết thì CI đỏ.
 
 Mỗi quyết định (QD) đang hiệu lực có ít nhất một khẳng định; docstring/tên test ghi mã QD. Quyết định MỚI của Sếp ⇒ thêm
@@ -13,6 +14,8 @@ khẳng định trong cùng PR (kế hoạch sửa sau kiểm kê 16/10/2026, l�
 - 16/10 Telegram: Gen chỉ ĐỀ XUẤT — không nút Duyệt, không nhận mã PIN, không ghi ra ngoài từ Telegram.
 - 16/10 Q5 (=2): thu thành viên MỌI nhóm, kể cả nhóm "Không nghe". Q6 (=1): chế độ "chỉ khi được tag" vẫn lưu tin,
   chỉ sửa chữ.
+- 17/10 (thay quyết định «hỏi khi kết nối kênh»): nhóm MỚI (add vào) mặc định «Lắng nghe im lặng» — lưu hết tin, KHÔNG
+  trả lời kể cả khi được tag; `tagged_only` vẫn trả lời khi được tag. Ca chi tiết còn ở test_qd_17_10_nghe_im_lang.py.
 - 16/10 Q4 (=2): vai Quản lý thấy việc được giao cho mình (không hứa "team"); Q7 (=1): giữ Jev; Q8 (=1): ghi
   hệ thống ngoài
   chặn và nói rõ; Q2/Q3: xem test_*_quyet_dinh_* của gói liên quan.
@@ -30,18 +33,22 @@ import psycopg
 import pytest
 from sqlalchemy import text
 
+from gh.biz.duty import engine as duty_engine
 from gh.boss_checks import service as boss_service
+from gh.data.common import DEFAULT_NEW_GROUP_MODE, NEW_GROUP_MODES, initial_group_mode, new_group_mode
+from gh.db import sessionmaker
 from gh.gen import proposals
 from gh.gen.coach import engine
 from gh.hub_link import service as hub
 from gh.providers import agy_policy
 from tests.conftest import PG, Api
-from tests.phase2 import org_id
+from tests.phase2 import msg, org_id, put
 from tests.test_no_personal_info_v0156 import OLD_NAME
+from tests.test_p3_duty import BUY, agent_drafts, decide, decisions, hook, make_agent, refine, w  # noqa: F401
 
 ROOT = Path(__file__).resolve().parents[3]
 GH_DIR = ROOT / "apps" / "api" / "gh"
-SQL_0040 = ROOT / "db" / "sql" / "0040_v016x_theo_qd.sql"
+SQL_0041 = ROOT / "db" / "sql" / "0041_v016x_theo_qd.sql"
 VN = ZoneInfo("Asia/Ho_Chi_Minh")
 
 
@@ -89,7 +96,7 @@ async def test_qd20_new_owner_prefs_default_21_and_bell_once_a_day(owner_api: Ap
     assert await store.claim_bell(db, uid, today, ["todo:a"], datetime.now(UTC)) is False
 
 
-async def test_qd20_migration_0040_moves_default_rows_only_and_is_rerunnable(owner_api: Api, db: Any,
+async def test_qd20_migration_0041_moves_default_rows_only_and_is_rerunnable(owner_api: Api, db: Any,
                                                                              fresh_db: str) -> None:
     """QD-20: migration đổi hàng còn mặc định cũ 22→21; giá trị Sếp đã chỉnh (lệch hoặc có trong Nhật ký) được giữ."""
     org = await org_id(db)
@@ -98,7 +105,7 @@ async def test_qd20_migration_0040_moves_default_rows_only_and_is_rerunnable(own
                                {"o": org, "e": f"u{i}@example.test", "n": f"Owner {i}"})).scalar_one()
              for i in range(4)]
     await db.commit()
-    sql = SQL_0040.read_text(encoding="utf-8")
+    sql = SQL_0041.read_text(encoding="utf-8")
     with psycopg.connect(f"{PG}/{fresh_db}", autocommit=True) as c:
         ins = "INSERT INTO agent.gen_coach_prefs (user_id, org_id, quiet_start, quiet_end) VALUES (%s, %s, %s, %s)"
         c.execute("ALTER TABLE agent.gen_coach_prefs ALTER COLUMN quiet_start SET DEFAULT 22")   # máy v0.1.54–v0.1.68
@@ -150,7 +157,7 @@ def test_qd18_hub_server_note_says_write_needs_confirm_and_pin() -> None:
         assert "(chỉ đọc, chỉ Sếp)" not in raw
 
 
-async def test_qd18_migration_0040_updates_old_server_note_only_and_is_rerunnable(owner_api: Api, db: Any,
+async def test_qd18_migration_0041_updates_old_server_note_only_and_is_rerunnable(owner_api: Api, db: Any,
                                                                                   fresh_db: str) -> None:
     """QD-18 (F124): ghi chú máy chủ Gen-hub cũ "(chỉ đọc)" đã lưu → ghi chú mới (kể cả khi Owner đặt tên Kho khác);
     ghi chú Owner tự sửa, máy chủ khác, bản mới: giữ nguyên."""
@@ -159,7 +166,7 @@ async def test_qd18_migration_0040_updates_old_server_note_only_and_is_rerunnabl
     old = "Liên kết Gen-hub — Gen đọc {k}, lịch, mail, việc, Drive (chỉ đọc). Quản lý ở thẻ Gen-hub."
     ins = ("INSERT INTO agent.mcp_servers (org_id, name, transport, endpoint, note) "
            "VALUES (%s, %s, 'streamable_http', 'https://mcp.example.test/mcp', %s)")
-    sql = SQL_0040.read_text(encoding="utf-8")
+    sql = SQL_0041.read_text(encoding="utf-8")
     with psycopg.connect(f"{PG}/{fresh_db}", autocommit=True) as c:
         c.execute(ins, (org, "Gen-hub", old.format(k="Kho dữ liệu")))
         c.execute(ins, (org, "Gen-hub", old.format(k="Kho nhà tôi")))               # Owner tự đặt tên Kho (v0.1.57)
@@ -183,7 +190,7 @@ async def test_qd18_migration_0040_updates_old_server_note_only_and_is_rerunnabl
 
 # ─── QD-22 · không còn tên riêng trong dữ liệu đã lưu ─────────────────────────────────────────────────────────
 
-async def test_qd22_migration_0040_cleans_stored_old_kho_name_and_is_rerunnable(owner_api: Api, db: Any,
+async def test_qd22_migration_0041_cleans_stored_old_kho_name_and_is_rerunnable(owner_api: Api, db: Any,
                                                                                 fresh_db: str) -> None:
     """QD-22 (F122): hội thoại Gen + chuông đã lưu chữ "Kho <tên riêng cũ>" (v0.1.50–55) được thay bằng "Kho dữ liệu";
     dòng khác giữ nguyên; chạy lại không đổi gì."""
@@ -191,7 +198,7 @@ async def test_qd22_migration_0040_cleans_stored_old_kho_name_and_is_rerunnable(
     uid = (await db.execute(text("SELECT id FROM core.users WHERE org_id = :o LIMIT 1"), {"o": org})).scalar_one()
     await db.rollback()
     old = f"Kho {OLD_NAME.removeprefix('Kho ')}"
-    sql = SQL_0040.read_text(encoding="utf-8")
+    sql = SQL_0041.read_text(encoding="utf-8")
     with psycopg.connect(f"{PG}/{fresh_db}", autocommit=True) as c:
         conv = c.execute("""INSERT INTO agent.gen_conversations (org_id, user_id, title) VALUES (%s, %s, 'T')
                             RETURNING id""", (org, uid)).fetchone()
@@ -218,15 +225,15 @@ async def test_qd22_migration_0040_cleans_stored_old_kho_name_and_is_rerunnable(
         assert dump() == first
 
 
-async def test_qd22_migration_0040_only_rewrites_assistant_text_on_word_boundary(owner_api: Api, db: Any,
+async def test_qd22_migration_0041_only_rewrites_assistant_text_on_word_boundary(owner_api: Api, db: Any,
                                                                                  fresh_db: str) -> None:
-    """Review P3: 0040 mục c chỉ sửa lời Gen (role='assistant') — lời Sếp gõ (role='user') nguyên văn; chỉ khớp cả từ
+    """Review P3: 0041 mục c chỉ sửa lời Gen (role='assistant') — lời Sếp gõ (role='user') nguyên văn; chỉ khớp cả từ
     ("Kho Ryanx", "xKho Ryan" giữ nguyên) nhưng vẫn khớp sau xuống dòng (JSON lưu "\\n" ngay trước chữ Kho)."""
     org = await org_id(db)
     uid = (await db.execute(text("SELECT id FROM core.users WHERE org_id = :o LIMIT 1"), {"o": org})).scalar_one()
     await db.rollback()
     old = f"Kho {OLD_NAME.removeprefix('Kho ')}"
-    sql = SQL_0040.read_text(encoding="utf-8")
+    sql = SQL_0041.read_text(encoding="utf-8")
     rows = [("user", f"Sếp gõ: ghi vào {old} nhé"),
             ("assistant", f"Dòng một\n{old} là nơi lưu"),
             ("assistant", f"Không đụng {old}x hay x{old} hay {old}y"),
@@ -333,7 +340,7 @@ def test_telegram_modules_cannot_execute_writes() -> None:
                         names.append(sub.attr)
                     elif isinstance(sub, ast.Constant) and isinstance(sub.value, str):
                         names.append(sub.value)
-            bad += [f"{path.relative_to(ROOT)}:{node.lineno}: {w}" for w in banned if any(w in n for n in names)]
+            bad += [f"{path.relative_to(ROOT)}:{node.lineno}: {x}" for x in banned if any(x in n for n in names)]
     assert bad == []
 
 
@@ -351,9 +358,10 @@ def test_q6_tagged_only_group_messages_are_still_stored() -> None:
     """16/10 Q6 (=1): "chỉ khi được tag" chỉ đổi cách TRẢ LỜI — tin của nhóm vẫn được lưu và phân tích (chỉ sửa chữ)."""
     from gh.data import common
 
-    assert "tagged_only" in common.LISTENING_MODES
+    assert "tagged_only" in common.LISTENING_MODES and "silent" in common.LISTENING_MODES
     assert "off" not in common.LISTENING_MODES and "paused" not in common.LISTENING_MODES
-    assert "pending" not in common.LISTENING_MODES      # F1: nhóm mới chờ Sếp chọn chưa lưu tin (khác tagged_only)
+    # `pending` (chưa lưu tin) chỉ còn khi Sếp đặt «Nhóm mới: Hỏi Sếp» — nhóm mới mặc định vào `silent` (QD 17/10).
+    assert "pending" not in common.LISTENING_MODES
     # Chữ trên giao diện: chế độ này nói đúng «nghe hết» (vẫn lưu mọi tin), chỉ việc trả lời cần được tag.
     label = "Nghe hết, chỉ trả lời khi được tag"
     web = ROOT / "apps" / "web" / "src"
@@ -378,3 +386,59 @@ def test_q7_jev_stays_enabled_as_decided() -> None:
     from gh.refinery import triage
 
     assert triage.DEFAULTS["enabled"] is True
+
+
+# ─── 17/10 · nhóm mới Lắng nghe im lặng, không bao giờ trả lời kể cả khi được tag ─────────────────────────────
+
+def test_qd1710_new_group_default_is_silent_and_choices_remain() -> None:
+    """17/10 (thay «hỏi khi kết nối kênh»): add vào một group ⇒ MẶC ĐỊNH lắng nghe im lặng, mọi bản cài kể cả cũ
+    (không có khoá `new_group_mode`); Sếp vẫn đổi được sang «Hỏi Sếp» (`ask` ⇒ pending) hoặc «Không nghe» (`off`)."""
+    assert DEFAULT_NEW_GROUP_MODE == "silent" and NEW_GROUP_MODES == ("ask", "silent", "off")
+    assert new_group_mode(None, "zalo") == "silent" and new_group_mode({}, "zalo") == "silent"
+    assert initial_group_mode({}, "zalo") == "silent"
+    assert initial_group_mode({"new_group_mode": {"zalo": "ask"}}, "zalo") == "pending"
+    assert initial_group_mode({"new_group_mode": {"zalo": "off"}}, "zalo") == "off"
+
+
+async def test_qd1710_ingest_new_group_stores_silently_even_when_first_message_tags(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """17/10: nhóm lạ đầu tiên nhắn (kể cả tag) vào thẳng `silent`: lưu tin, không đi đường nhanh (không ai trả lời)."""
+    org = await org_id(db)
+    [eid] = await put(sessionmaker(), org, msg("Em hỏi giá lô này ạ", group="gQ", mentions=True))
+    assert eid is not None
+    mode = (await db.execute(text("SELECT listen_mode FROM core.groups WHERE external_id = 'gQ'"))).scalar_one()
+    assert mode == "silent"
+    assert (await db.execute(text("SELECT fast FROM refinery.event_state"))).scalar_one() is False
+
+
+def test_qd1710_allowed_decisions_in_silent_group_are_silent_and_note_at_every_level() -> None:
+    """17/10: nhóm silent ⇒ agent trực chỉ được `silent`/`note`, ở mọi mức tự trị; nhóm khác như cũ."""
+    for level in range(0, 7):
+        assert duty_engine.allowed_decisions(level, replies=False) == ["silent", "note"]
+    assert duty_engine.allowed_decisions(4) == list(duty_engine.DECISIONS)
+    assert duty_engine.allowed_decisions(3, replies=True) == ["silent", "note", "suggest"]
+
+
+@pytest.mark.parametrize("tagged", [False, True])
+@pytest.mark.parametrize("choice", ["suggest", "draft", "send"])
+async def test_qd1710_silent_group_never_replies_even_when_tagged(w, db, redis, choice: str, tagged: bool) -> None:  # type: ignore[no-untyped-def]
+    """17/10: model đòi gợi ý/soạn/gửi ở nhóm silent (kể cả được tag) ⇒ chặn, không nháp, không tin ra ngoài."""
+    a = await make_agent(db, w, level=6)
+    await db.execute(text("UPDATE core.groups SET listen_mode = 'silent' WHERE id = :g"), {"g": w["g1"]})
+    await db.commit()
+    [u] = await refine(w, redis, msg(BUY, mentions=tagged))
+    await hook(w, redis, decide(choice), [u])
+    [d] = await decisions(db, a)
+    assert (d.decision, d.requested, d.outcome, d.draft_id) == ("silent", choice, "blocked", None)
+    assert "không bao giờ" in d.rationale and "kể cả khi được tag" in d.rationale
+    assert await agent_drafts(db) == [] and await redis.xlen("gh.bridge.outbound") == 0
+
+
+async def test_qd1710_tagged_only_group_still_replies_when_tagged(w, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """17/10 (đối chiếu Q6): «Nghe hết, chỉ trả lời khi được tag» vẫn trả lời khi được tag — khác `silent`."""
+    a = await make_agent(db, w, level=4)
+    await db.execute(text("UPDATE core.groups SET listen_mode = 'tagged_only' WHERE id = :g"), {"g": w["g1"]})
+    await db.commit()
+    plain, tagged = await refine(w, redis, msg(BUY), msg(BUY, sender="u2", mentions=True))
+    await hook(w, redis, decide("draft"), [plain, tagged])
+    [d] = await decisions(db, a)
+    assert d.trigger_unit_id == tagged and (d.decision, d.outcome) == ("draft", "held") and d.draft_id is not None

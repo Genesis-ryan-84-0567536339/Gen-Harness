@@ -238,8 +238,9 @@ export class SessionManager {
 
   /**
    * Khoá cứng: chỉ XADD tin của nhóm trong gh:bridge:listen:<channel>, tin 1-1 trừ khi Sếp chọn "không lưu"
-   * (gh:bridge:listen_direct = "0"). Tin của nhóm LẠ (chưa từng thấy trong danh bạ) không được lưu nhưng báo
-   * `group.discovered` để Console hỏi Sếp Im lặng/Không nghe.
+   * (gh:bridge:listen_direct = "0"). Tin của nhóm LẠ (chưa từng thấy trong danh bạ) KHÔNG đi luồng inbound mà báo
+   * `group.discovered` kèm chính tin đó (`first_message`): lõi tạo nhóm rồi chỉ lưu tin khi nhóm mới vào chế độ nghe
+   * (mặc định «Lắng nghe im lặng», QĐ 17/10); nhóm chờ chọn / không nghe thì lõi bỏ, không lưu nội dung.
    */
   async #inbound(s, payload) {
     try {
@@ -258,13 +259,18 @@ export class SessionManager {
     }
   }
 
-  /** Nhóm chưa có trong danh bạ của phiên: báo lõi một lần, rồi hẹn quét lại để lấy thành viên. Không gửi nội dung tin. */
+  /**
+   * Nhóm chưa có trong danh bạ của phiên: báo lõi một lần, rồi hẹn quét lại để lấy thành viên. Tin ĐẦU TIÊN đi kèm
+   * (`first_message`, cùng dạng tin inbound) để không mất khi lõi cho nhóm vào chế độ nghe; các tin sau chờ tập nghe
+   * được đồng bộ như thường. Không ghi nội dung tin vào log.
+   */
   #discovered(s, payload) {
     const gid = String(payload.external_group_id);
     if (s.knownGroups.has(gid)) return;
     s.knownGroups.add(gid);
     this.#publish(STREAMS.directory, 'group.discovered', {
       channel: s.channel, session_id: s.sessionId, group_id: gid, name: payload.group_name || '', member_count: null,
+      first_message: payload,
     }, s);
     this.log.info('phát hiện nhóm mới', { channel: s.channel, session_id: s.sessionId });
     s.pendingDiscover = true;

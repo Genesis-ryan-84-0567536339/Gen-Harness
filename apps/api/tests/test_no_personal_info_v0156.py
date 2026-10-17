@@ -39,7 +39,7 @@ OLD_NOTE = _OLD_NOTE_MATCH.group(1)
 _OLD_NAME_MATCH = re.search(r"Gen đọc (.+?), lịch", OLD_NOTE)
 assert _OLD_NAME_MATCH is not None
 OLD_NAME = _OLD_NAME_MATCH.group(1)
-# Ghi chú ĐÍCH của migration 0035 (còn "(chỉ đọc)"); v0.1.69 (F124, migration 0040) đổi sang `CURRENT_NOTE` bên dưới.
+# Ghi chú ĐÍCH của migration 0035 (còn "(chỉ đọc)"); v0.1.69 (F124, migration 0041) đổi sang `CURRENT_NOTE` bên dưới.
 NEW_NOTE = "Liên kết Gen-hub — Gen đọc Kho dữ liệu, lịch, mail, việc, Drive (chỉ đọc). Quản lý ở thẻ Gen-hub."
 CURRENT_NOTE = ("Liên kết Gen-hub — Gen đọc Kho dữ liệu, lịch, mail, việc, Drive "
                 "(đọc; ghi Kho chỉ khi Sếp Xác nhận + mã PIN). Quản lý ở thẻ Gen-hub.")

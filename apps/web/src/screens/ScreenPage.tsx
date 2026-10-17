@@ -6,6 +6,7 @@ import { useNavigation } from '../lib/queries';
 import { screenKeys } from '../shell/navModel';
 import { CleanScreen } from './data/CleanScreen';
 import { IdentityScreen } from './data/IdentityScreen';
+import { ListenLogScreen } from './data/ListenLogScreen';
 import { RawScreen } from './data/RawScreen';
 import { RulesScreen } from './data/RulesScreen';
 import { SystemScreen } from './system/SystemScreen';
@@ -25,6 +26,7 @@ import { SCREENS as TEAM } from './team';
 /** Screens built so far (phase 2, then each phase-3 cluster registers its own). Every other key keeps the placeholder. */
 const BUILT: Record<string, ComponentType> = {
   raw: RawScreen,
+  listenlog: ListenLogScreen,
   rules: RulesScreen,
   clean: CleanScreen,
   identity: IdentityScreen,

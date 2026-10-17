@@ -58,6 +58,7 @@ NAV: list[dict[str, Any]] = [
      "groups": [
          _g("Tầng dữ liệu", "ph ph-database", [
              _s("raw", "ph ph-database", "Kho dữ liệu thô", "Tin gốc các kênh gom về", WARN),
+             _s("listenlog", "ph ph-ear", "Nhật ký lắng nghe", "Mọi kênh đang nghe, hệ thống đã làm gì"),
              _s("rules", "ph ph-funnel", "Quy tắc sàng lọc", "Lọc, phân loại, chấm điểm"),
              _s("clean", "ph ph-check-circle", "Kho sạch", "Dữ liệu đã lọc & bộ nhớ làm việc"),
              _s("identity", "ph ph-git-merge", "Hợp nhất danh tính", "Gộp một người nhiều tài khoản", WARN),

@@ -113,7 +113,7 @@ Việc đã hứa hoặc đã biết mà chưa làm. Mỗi dòng ghi điều ki�
 | 55 | **Nhãn `chat_id` / Token ở thẻ Telegram** (v0.1.70, F144 phần Telegram): vẫn "Tìm chat_id", "chat_id" (nhãn bị test/e2e của gói T khoá) | Chưa làm — đổi thành "Mã cuộc trò chuyện" sau khi tích hợp gói T |
 
 ### Câu hỏi mở — mặc định đã chọn (16/10/2026; Sếp sửa nếu muốn khác)
-- Tin riêng 1-1: lưu im lặng, không tự trả lời (làm cùng v0.1.65). Nhóm mới: Console hỏi khi kết nối kênh (Im lặng / Không nghe); chưa chọn = `pending` — không lưu tin, vẫn thu thành viên. Ô «Áp dụng cho các nhóm mới sau này» ở hộp hỏi + «Nhóm mới: Hỏi Sếp / Im lặng / Không nghe» ở thẻ kênh (`settings.new_group_mode.<kênh>`, mặc định `ask`, đổi cần PIN) — F1d.
+- Tin riêng 1-1: lưu im lặng, không tự trả lời (làm cùng v0.1.65). Nhóm mới (Sếp chốt 17/10, thay «hỏi khi kết nối kênh»): MẶC ĐỊNH «Lắng nghe im lặng» (`silent`) — lưu hết tin, KHÔNG BAO GIỜ trả lời kể cả khi được tag; mọi bản cài kể cả cũ, nhóm cũ đang `off` giữ nguyên. «Nhóm mới: Lắng nghe im lặng / Hỏi Sếp / Không nghe» ở thẻ kênh (`settings.new_group_mode.<kênh>`, mặc định `silent`, đổi cần PIN); hộp hỏi + `pending` chỉ khi Sếp chọn Hỏi Sếp; thẻ kênh báo «N nhóm mới đã vào Lắng nghe im lặng» — F1d.
 - Gen của nhân viên (không phải Owner): dùng Antigravity qua hộp riêng (v0.1.63). Agent không gắn kênh/nhóm/người = nội bộ ⇒ agy trong tiến trình. Hộp tắt ⇒ chuyển nguồn AI kế, không quay về agy trong tiến trình.
 - Sàng lọc tin người lạ (`core.refinery`): chạy agy qua hộp riêng (v0.1.63).
 - Nút "Nối lại" Zalo/WhatsApp: không đòi mã PIN; có bước hỏi lại khi phiên bị thay chỗ.

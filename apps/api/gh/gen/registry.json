@@ -65,6 +65,10 @@
       "path": "/raw",
       "title": "Kho dữ liệu thô"
     },
+    "listenlog": {
+      "path": "/listenlog",
+      "title": "Nhật ký lắng nghe"
+    },
     "rules": {
       "path": "/rules",
       "title": "Quy tắc sàng lọc"
@@ -932,10 +936,10 @@
     {
       "n": 6,
       "title": "Chọn nhóm cho agent lắng nghe",
-      "why": "Mọi nhóm mới đều “Chờ Sếp chọn” (chưa lưu tin nào) để bảo vệ riêng tư — Sếp chọn nhóm nào agent được nghe.",
+      "why": "Nhóm mới mặc định vào “Lắng nghe im lặng”: Gen lưu hết tin nhưng không bao giờ trả lời, kể cả khi được tag — Sếp chọn nhóm nào cho agent trả lời khi được tag, hoặc tắt hẳn.",
       "steps": [
         "Bấm \"Làm bước này\".",
-        "Trong bảng nhóm, ở cột \"Chế độ lắng nghe\" của nhóm muốn theo dõi, chọn một chế độ: \"Nghe hết, chỉ trả lời khi được tag\" (an toàn nhất: vẫn lưu mọi tin của nhóm, chỉ trả lời khi được gọi tên), \"Lắng nghe im lặng\" (ghi nhận, không trả lời) hoặc \"Chủ động bắt tín hiệu\". Thiếu nhóm vừa vào? Bấm \"Cập nhật danh sách nhóm\".",
+        "Trong bảng nhóm, ở cột \"Chế độ lắng nghe\", mỗi nhóm mới đã ở \"Lắng nghe im lặng — lưu hết, không bao giờ trả lời (kể cả khi được tag)\". Muốn Gen trả lời một nhóm, đổi sang \"Nghe hết, chỉ trả lời khi được tag\" (vẫn lưu mọi tin, chỉ trả lời khi được gọi tên) hoặc \"Chủ động bắt tín hiệu\"; muốn ngừng lưu thì chọn \"Không nghe\". Thiếu nhóm vừa vào? Bấm \"Cập nhật danh sách nhóm\".",
         "Ở cột \"Phạm vi xem\", ghi lại ý Sếp muốn ai được xem nhóm đó (mặc định \"Chỉ Sếp\"). Cột này hiện mới là ghi chú — quyền xem thật vẫn theo vai trò (Cài đặt › Quyền hạn).",
         "Bấm \"Tiếp tục\"."
       ],
