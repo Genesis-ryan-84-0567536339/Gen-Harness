@@ -2,6 +2,7 @@
 
 import ipaddress
 import socket
+import threading
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -56,6 +57,8 @@ def _local_proxy_ip(request: Request) -> str | None:
 _TRUST_TTL_S = 30.0
 _LOOPBACK = (ipaddress.ip_network("127.0.0.0/8"), ipaddress.ip_network("::1/128"))
 _trust_cache: dict[str, tuple[float, tuple[Any, ...]]] = {}
+_trust_lock = threading.Lock()
+_trust_refreshing: set[str] = set()
 
 
 def reset_trusted_proxy_cache() -> None:
@@ -66,30 +69,62 @@ def _resolve(host: str) -> list[str]:
     return [str(i[4][0]) for i in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)]
 
 
-def _trusted_networks() -> tuple[Any, ...]:
-    """Mạng tin cậy để đọc header chuyển tiếp: loopback + `Settings.trusted_proxies` (IP / CIDR / tên dịch vụ). Tên
-    được phân giải lại mỗi 30 giây (proxy tạo lại đổi IP); không phân giải được ⇒ chỉ loopback (đóng an toàn)."""
-    raw = get_settings().trusted_proxies
-    now = time.monotonic()
-    hit = _trust_cache.get(raw)
-    if hit is not None and now - hit[0] < _TRUST_TTL_S:
-        return hit[1]
-    nets: list[Any] = list(_LOOPBACK)
+def _split_trusted(raw: str) -> tuple[list[Any], list[str]]:
+    """`Settings.trusted_proxies` → (mạng ghi sẵn bằng IP/CIDR, tên cần phân giải)."""
+    nets: list[Any] = []
+    names: list[str] = []
     for item in (x.strip() for x in raw.split(",")):
         if not item:
             continue
         try:
             nets.append(ipaddress.ip_network(item, strict=False))
-            continue
         except ValueError:
-            pass
+            names.append(item)
+    return nets, names
+
+
+def refresh_trusted_proxies(raw: str | None = None) -> tuple[Any, ...]:
+    """Tính lại mạng tin cậy (CÓ phân giải DNS — có thể chặn) và lưu bộ đệm. Gọi từ luồng nền / `asyncio.to_thread`
+    (api làm ấm lúc khởi động), không bao giờ từ luồng xử lý yêu cầu."""
+    raw = get_settings().trusted_proxies if raw is None else raw
+    literal, names = _split_trusted(raw)
+    nets: list[Any] = [*_LOOPBACK, *literal]
+    for name in names:
         try:
-            nets += [ipaddress.ip_network(ip) for ip in _resolve(item)]
+            nets += [ipaddress.ip_network(ip) for ip in _resolve(name)]
         except (OSError, ValueError):
             continue
     out = tuple(nets)
-    _trust_cache[raw] = (now, out)
+    _trust_cache[raw] = (time.monotonic(), out)
     return out
+
+
+def _refresh_in_background(raw: str) -> None:
+    try:
+        refresh_trusted_proxies(raw)
+    finally:
+        with _trust_lock:
+            _trust_refreshing.discard(raw)
+
+
+def _trusted_networks() -> tuple[Any, ...]:
+    """Mạng tin cậy để đọc header chuyển tiếp: loopback + `Settings.trusted_proxies` (IP / CIDR / tên dịch vụ). Tên
+    được phân giải lại mỗi 30 giây (proxy tạo lại đổi IP) — review lần 2 v0.1.63 (P3-2): trong LUỒNG NỀN, yêu cầu dùng
+    kết quả gần nhất và không bao giờ chờ `getaddrinfo` (trước đây chặn vòng lặp sự kiện). Chưa từng phân giải xong
+    hoặc không phân giải được ⇒ chỉ loopback + IP/CIDR ghi sẵn (đóng an toàn)."""
+    raw = get_settings().trusted_proxies
+    hit = _trust_cache.get(raw)
+    if hit is not None and time.monotonic() - hit[0] < _TRUST_TTL_S:
+        return hit[1]
+    literal, names = _split_trusted(raw)
+    if not names:
+        return refresh_trusted_proxies(raw)                 # chỉ IP/CIDR: không cần DNS
+    with _trust_lock:
+        if raw not in _trust_refreshing:
+            _trust_refreshing.add(raw)
+            threading.Thread(target=_refresh_in_background, args=(raw,), name="gh-trusted-proxies",
+                             daemon=True).start()
+    return hit[1] if hit is not None else (*_LOOPBACK, *literal)
 
 
 def _from_trusted_proxy(peer: str | None) -> bool:

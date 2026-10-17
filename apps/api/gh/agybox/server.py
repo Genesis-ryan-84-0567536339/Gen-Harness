@@ -4,9 +4,12 @@
 Cô lập (docs/api/agybox-protocol.md): tiến trình này chỉ đọc các biến môi trường trong ALLOWED_ENV, tự xoá mọi
 biến GH_* khác khỏi môi trường của mình, KHÔNG import `gh.config`/DB/Redis/crypto, chỉ giữ một khoá `gh_agy_key`
 (ký yêu cầu). Review v0.1.63 (P1-1): hộp KHÔNG có volume / kho phiên nào — tệp token agy đến trong từng yêu cầu đã
-ký (`session`), được đặt vào HOME tạm 0700 của đúng lượt đó (xoá sau lượt) và không bao giờ được ghi lại đâu cả;
-lượt sau không thấy gì lượt trước để lại. Hộp không bao giờ gọi ngược api. Nhật ký chỉ ghi mã yêu cầu + kết quả,
-không ghi prompt hay token."""
+ký (`session`), được đặt vào HOME tạm 0700 của đúng lượt đó (xoá sau lượt) và không bao giờ được ghi lại đâu cả.
+Review lần 2 (P2-1): sau MỖI lượt (generate, models, cả `agy --version` của /healthz) hộp dọn sạch — giết mọi tiến
+trình agy để lại kể cả tiến trình đã `setsid` thoát nhóm, rồi xoá nội dung /tmp và /dev/shm (`gh.agybox.reaper`) — nên
+lượt sau không còn tiến trình hay tệp nào lượt trước để lại. Mọi lần chạy agy và lần dọn đi qua MỘT khoá (không bao giờ
+dọn khi đang có lượt chạy). Hộp không bao giờ gọi ngược api. Nhật ký chỉ ghi mã yêu cầu + kết quả, không ghi prompt
+hay token."""
 
 import asyncio
 import logging
@@ -27,6 +30,7 @@ from starlette.responses import Response
 from starlette.routing import Route
 
 from gh.agybox import protocol as P
+from gh.agybox import reaper
 from gh.providers.clients import (
     AgyClient,
     AuthFailed,
@@ -48,9 +52,11 @@ ENV_MAX_JOBS = "GH_AGYBOX_MAX_JOBS"
 ENV_HOST = "GH_AGYBOX_HOST"
 ENV_PORT = "GH_AGYBOX_PORT"
 ENV_CLI_BINARY = "GH_CLI_BINARY"
+#: "1" ⇒ dọn hộp sau mỗi lượt (P2-1). Chỉ compose của hộp đặt; thiếu ⇒ không dọn (chạy nhầm ngoài container vô hại).
+ENV_REAP = "GH_AGYBOX_REAP"
 #: Toàn bộ biến GH_* hộp được phép đọc. Mọi biến GH_* khác (DB, Redis, khoá master/bridge/browser…, cả GH_CLI_HOME của
 #: ảnh api — hộp không có kho phiên) bị bỏ qua và xoá.
-ALLOWED_ENV = frozenset({ENV_KEY_FILE, ENV_MAX_JOBS, ENV_HOST, ENV_PORT, ENV_CLI_BINARY})
+ALLOWED_ENV = frozenset({ENV_KEY_FILE, ENV_MAX_JOBS, ENV_HOST, ENV_PORT, ENV_CLI_BINARY, ENV_REAP})
 VERSION_TTL_S = 300.0
 #: Số chữ ký còn trong cửa sổ chống phát lại (2 × MAX_SKEW_S) tối đa được nhớ. Đầy ⇒ TỪ CHỐI yêu cầu mới (bận, thử lại)
 #: thay vì ngừng ghi — review v0.1.63 (P3): trước đây đầy thì chữ ký mới không được nhớ nên phát lại được.
@@ -67,6 +73,9 @@ class Config:
     max_jobs: int = 1
     host: str = "0.0.0.0"  # noqa: S104 — chỉ nghe trong mạng nội bộ agy-bus, không publish cổng ra máy chủ
     port: int = P.DEFAULT_PORT
+    #: Review lần 2 (P2-1): dọn hộp sau mỗi lượt (`gh.agybox.reaper.clean_box`). main() chỉ giữ True khi là tiến trình
+    #: chính của container (`reaper.reap_allowed`).
+    reap: bool = False
 
 
 def load_config(env: "MutableMapping[str, str] | dict[str, str]") -> Config:
@@ -82,7 +91,7 @@ def load_config(env: "MutableMapping[str, str] | dict[str, str]") -> Config:
     except ValueError as e:
         raise RuntimeError("GH_AGYBOX_MAX_JOBS / GH_AGYBOX_PORT phải là số nguyên") from e
     return Config(key_file=key_file, cli_binary=env.get(ENV_CLI_BINARY) or "agy", max_jobs=jobs,
-                  host=env.get(ENV_HOST) or "0.0.0.0", port=port)  # noqa: S104
+                  host=env.get(ENV_HOST) or "0.0.0.0", port=port, reap=env.get(ENV_REAP) == "1")  # noqa: S104
 
 
 def scrub_environ(env: MutableMapping[str, str]) -> list[str]:
@@ -152,10 +161,24 @@ async def until_disconnect(request: Request, job: "Coroutine[Any, Any, dict[str,
         await asyncio.gather(work, watch, return_exceptions=True)
 
 
-def create_app(cfg: Config, *, clock: Callable[[], float] = time.time) -> Starlette:
+def create_app(cfg: Config, *, clock: Callable[[], float] = time.time,
+               cleaner: Callable[[], None] | None = None) -> Starlette:
+    """`cleaner` = việc dọn sau mỗi lượt; None ⇒ `reaper.clean_box` nếu `cfg.reap`, không thì không dọn (test, dev)."""
     key = P.load_key(cfg.key_file)
     state: dict[str, Any] = {"active": 0, "seen": {}, "version": None, "version_at": -1e18}
-    version_lock = asyncio.Lock()
+    clean = cleaner if cleaner is not None else (reaper.clean_box if cfg.reap else None)
+    #: P2-1: MỌI lần chạy agy (lượt, `--version`) + lần dọn sau nó giữ khoá này — dọn (giết mọi tiến trình khác) không
+    #: bao giờ trúng một lượt đang chạy, và `--version` không chạy chen giữa một lượt.
+    box_lock = asyncio.Lock()
+
+    def after_turn() -> None:
+        """Dọn hộp sau một lần chạy agy. ĐỒNG BỘ (nhanh: /proc ≤ pids_limit, tmpfs) ⇒ không bị huỷ giữa chừng khi
+        client ngắt; khoá hộp chỉ nhả sau khi dọn xong."""
+        if clean is not None:
+            try:
+                clean()
+            except Exception:  # noqa: BLE001 — dọn lỗi không làm hỏng trả lời
+                log.exception("agy-box: lỗi khi dọn sau lượt")
 
     def reply(status: int, obj: dict[str, Any], req_sig: str | None = None, headers: dict[str, str] | None = None
               ) -> Response:
@@ -268,7 +291,11 @@ def create_app(cfg: Config, *, clock: Callable[[], float] = time.time) -> Starle
                     models = await agy.discover_models()
                     return {"request_id": rid, "models": models, "raw_text": agy.last_models_raw}
 
-                out = await until_disconnect(request, work())
+                async with box_lock:
+                    try:
+                        out = await until_disconnect(request, work())
+                    finally:
+                        after_turn()
             finally:
                 state["active"] -= 1
             if out is None:
@@ -291,7 +318,11 @@ def create_app(cfg: Config, *, clock: Callable[[], float] = time.time) -> Starle
                      int((time.monotonic() - started) * 1000))
 
     async def agy_version() -> str | None:
-        async with version_lock:
+        if box_lock.locked():
+            # Đang có lượt (hay đang hỏi phiên bản): trả kết quả gần nhất (có thể null — chỉ để hiển thị), không chờ
+            # lượt xong (healthcheck chỉ đợi 5 giây) và không chạy agy chen vào lượt.
+            return state["version"]
+        async with box_lock:
             now = time.monotonic()
             if now - state["version_at"] < VERSION_TTL_S:
                 return state["version"]
@@ -313,6 +344,7 @@ def create_app(cfg: Config, *, clock: Callable[[], float] = time.time) -> Starle
                 version = None
             finally:
                 shutil.rmtree(home, ignore_errors=True)
+                after_turn()                 # P2-1: dọn cả sau `agy --version`
             state["version"], state["version_at"] = version, now
             return version
 
@@ -343,6 +375,11 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     cfg = load_config(os.environ)
+    if cfg.reap and not reaper.reap_allowed(True):
+        log.warning("agy-box: %s=1 nhưng không phải tiến trình chính của container — KHÔNG dọn sau lượt", ENV_REAP)
+        cfg.reap = False
+    elif not cfg.reap:
+        log.warning("agy-box: thiếu %s=1 — không dọn tiến trình/tệp sót lại sau lượt", ENV_REAP)
     scrubbed = scrub_environ(os.environ)
     if scrubbed:
         log.info("agy-box: đã xoá %d biến GH_* ngoài danh sách khỏi môi trường tiến trình", len(scrubbed))

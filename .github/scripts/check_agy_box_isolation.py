@@ -33,6 +33,7 @@ ALLOWED_ENV = {
     "HTTPS_PROXY",
     "HTTP_PROXY",
     "NO_PROXY",
+    "GH_AGYBOX_REAP",
 }
 # Review v0.1.63 (P2-2): hộp CHỈ ở agy-bus (internal); ra Internet duy nhất qua proxy agy-egress (chặn IP nội bộ).
 ALLOWED_NETWORKS = {"agy-bus"}
@@ -157,6 +158,9 @@ def check(compose: dict[str, Any], release: bool) -> list[str]:
     env_map = env if isinstance(env, dict) else dict(str(e).split("=", 1) for e in env if "=" in str(e))
     if str(env_map.get("HTTPS_PROXY", "")) != EGRESS_URL:
         errs.append(f"{BOX} thiếu HTTPS_PROXY={EGRESS_URL} (agy phải ra ngoài qua proxy lối ra)")
+    # Review lần 2 v0.1.63 (P2-1): hộp phải dọn tiến trình agy để lại (kể cả đã setsid) + /tmp, /dev/shm sau mỗi lượt.
+    if str(env_map.get("GH_AGYBOX_REAP", "")) != "1":
+        errs.append(f"{BOX} thiếu GH_AGYBOX_REAP=\"1\" (dọn tiến trình/tệp agy để lại sau mỗi lượt)")
 
     errs += _check_egress(services, release)
 

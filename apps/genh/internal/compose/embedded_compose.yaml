@@ -162,8 +162,10 @@ services:
   # Review v0.1.63 (P2-2): CHỈ mạng agy-bus (internal — api/worker gọi vào); ra Internet DUY NHẤT qua proxy agy-egress
   # (HTTPS_PROXY): proxy chặn đích là / phân giải ra IP nội bộ (gateway Docker, LAN của máy chủ, loopback, link-local, CGNAT).
   # Review v0.1.63 (P1-1): hộp KHÔNG mount volume nào (kể cả agy_state) — tệp token OAuth của hồ sơ đang hoạt động đến trong
-  # từng yêu cầu đã ký, đặt vào HOME tạm của đúng lượt đó (tmpfs /tmp, xoá sau lượt); agy trong hộp có bị lừa cũng không
-  # ghi được gì mà api/worker hay lượt sau đọc lại. Không claude_state, gh_objects hay run/ của máy chủ. Hộp KHÔNG gọi ngược api.
+  # từng yêu cầu đã ký, đặt vào HOME tạm của đúng lượt đó (tmpfs /tmp, xoá sau lượt). Review lần 2 (P2-1, GH_AGYBOX_REAP=1):
+  # sau MỖI lượt hộp giết mọi tiến trình agy để lại (kể cả đã setsid thoát nhóm — tini nhận nuôi) rồi xoá sạch /tmp và
+  # /dev/shm ⇒ agy có bị lừa cũng không để lại gì cho api/worker hay lượt sau. Không claude_state, gh_objects hay run/ của
+  # máy chủ. Hộp KHÔNG gọi ngược api.
   # Nợ: proxy mặc định cho mọi tên miền công khai (GH_AGY_EGRESS_ALLOW rỗng) — allowlist chặt khi đã đo đủ tên miền agy dùng.
   agy-box:
     build: { context: .., dockerfile: deploy/images/api.Dockerfile }
@@ -181,6 +183,8 @@ services:
       HTTP_PROXY: http://agy-egress:3128
       # Healthcheck (urllib) gọi 127.0.0.1:8090 — phải đi thẳng, không qua proxy (proxy chỉ nhận CONNECT ⇒ 405).
       NO_PROXY: 127.0.0.1,localhost
+      # Dọn sau mỗi lượt (gh.agybox.reaper): chỉ có tác dụng khi server là tiến trình chính của container (init: true).
+      GH_AGYBOX_REAP: "1"
     secrets: [gh_agy_key]
     networks: [agy-bus]
     depends_on:
