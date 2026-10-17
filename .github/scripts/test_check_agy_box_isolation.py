@@ -200,6 +200,19 @@ class IsolationRules(unittest.TestCase):
         self.assertFlags(mutated(lambda d: box(d)["environment"].update(GH_CLI_HOME="/var/lib/gh/agy/x")),
                          "GH_CLI_HOME")
 
+    def test_volumes_from_extends_sysctls_refused(self) -> None:
+        """Review v0.1.63 (P3): volumes_from (lấy volume của api), extends (kế thừa cấu hình dịch vụ khác), sysctls,
+        cgroup_parent — ở hộp lẫn proxy lối ra."""
+        for k, v in (("volumes_from", ["api"]), ("extends", {"service": "api"}), ("sysctls", {"net.ipv4.ip_forward": 1}),
+                     ("cgroup_parent", "x")):
+            self.assertFlags(mutated(lambda d, k=k, v=v: box(d).update({k: v})), k)
+            self.assertFlags(mutated(lambda d, k=k, v=v: d["services"]["agy-egress"].update({k: v})), k)
+
+    def test_privileged_pid_ipc_host_also_on_egress(self) -> None:
+        for k, v in (("privileged", True), ("pid", "host"), ("ipc", "host"), ("network_mode", "host")):
+            self.assertFlags(mutated(lambda d, k=k, v=v: box(d).update({k: v})), k)
+            self.assertFlags(mutated(lambda d, k=k, v=v: d["services"]["agy-egress"].update({k: v})), k)
+
     def test_published_ports(self) -> None:
         self.assertFlags(mutated(lambda d: box(d).update(ports=["8090:8090"])), "ports")
 

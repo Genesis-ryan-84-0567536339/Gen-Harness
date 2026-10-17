@@ -42,7 +42,10 @@ EGRESS_ENV = {"GH_AGY_EGRESS_ALLOW", "GH_AGY_EGRESS_PORTS", "GH_AGY_EGRESS_PORT"
 BUS_MEMBERS = {"api", "worker", BOX, EGRESS}
 KEY_HOLDERS = {"api", "worker", BOX}
 # Khoá/trường tuyệt đối không được có ở hộp.
-FORBIDDEN_KEYS = ("privileged", "cap_add", "devices", "pid", "ipc", "userns_mode", "network_mode", "ports", "env_file")
+# Review v0.1.63 (P3): thêm volumes_from (mượn volume của api/worker), extends (kế thừa cấu hình dịch vụ khác), sysctls,
+# cgroup_parent. Áp cho cả hộp lẫn proxy lối ra.
+FORBIDDEN_KEYS = ("privileged", "cap_add", "devices", "pid", "ipc", "userns_mode", "network_mode", "ports", "env_file",
+                  "volumes_from", "extends", "sysctls", "cgroup_parent")
 BIND_PREFIXES = ("/", ".", "~", "$")
 
 
