@@ -141,3 +141,33 @@ export function useUrlState<T extends string>(key: string, fallback: T): [T, (v:
   );
   return [value ?? fallback, set];
 }
+
+/**
+ * Đổi NHIỀU khoá URL-state trong một lần (`null`/'' = bỏ khoá). `useUrlState` chỉ đổi một khoá mỗi lần nên gọi liên tiếp
+ * nhiều cái trong cùng một sự kiện sẽ ghi đè nhau (mỗi lần dựng URL từ `location.search` cũ) — dùng hàm này khi một thao tác
+ * đổi từ hai khoá trở lên (xoá bộ lọc, đổi kênh kèm bỏ nhóm).
+ */
+export function useUrlPatch(): (patch: Record<string, string | null>) => void {
+  const navigate = useNavigate();
+  const location = useLocation();
+  return useCallback(
+    (patch) => {
+      const qs = new URLSearchParams(location.search);
+      for (const [k, v] of Object.entries(patch)) {
+        if (v === null || v === '') qs.delete(k);
+        else qs.set(k, v);
+      }
+      useUrlStateStore.setState((st) => {
+        const params = { ...st.params };
+        for (const [k, v] of Object.entries(patch)) {
+          if (v === null || v === '') delete params[k];
+          else params[k] = v;
+        }
+        return { params };
+      });
+      const s = qs.toString();
+      navigate({ pathname: location.pathname, search: s ? `?${s}` : '' }, { replace: true });
+    },
+    [location.pathname, location.search, navigate],
+  );
+}

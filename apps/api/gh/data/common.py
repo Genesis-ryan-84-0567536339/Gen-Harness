@@ -22,25 +22,31 @@ ALL_LISTEN_MODES = ("pending", "off", "tagged_only", "silent", "proactive", "pau
 SETTABLE_LISTEN_MODES = ("off", "tagged_only", "silent", "proactive", "paused")
 NEW_GROUP_MODE = "pending"
 
-# Nhóm MỚI phát hiện sau này (theo kênh, `core.organizations.settings.new_group_mode.<kênh>`; Sếp chốt 17/10/2026):
-#   ask = nhóm vào `pending` + hộp hỏi Sếp (MẶC ĐỊNH, cũng là bản cài cũ — không tự bật nghe ngầm) · silent = vào
-#   "Im lặng" ngay (lưu tin, không trả lời) · off = vào "Không nghe" (không lưu tin). Cả ba vẫn thu thành viên.
-#   Chỉ áp cho nhóm tạo SAU khi đặt — không bao giờ đổi nhóm đã có.
+# Nhóm MỚI phát hiện sau này (theo kênh, `core.organizations.settings.new_group_mode.<kênh>`; Sếp chốt 17/10/2026, thay
+# quyết định «hỏi khi kết nối kênh»: «khi được add vào một group thì MẶC ĐỊNH lắng nghe trong im lặng, KHÔNG trả lời cho
+# dù được tag»):
+#   silent = vào "Lắng nghe im lặng" ngay (lưu hết tin, không bao giờ trả lời kể cả khi được tag) — MẶC ĐỊNH, kể cả bản
+#   cài cũ chưa có khoá · ask = nhóm vào `pending` + hộp hỏi Sếp · off = vào "Không nghe" (không lưu tin). Cả ba vẫn thu
+#   thành viên. Chỉ áp cho nhóm tạo SAU khi đặt — không bao giờ đổi nhóm đã có (nhóm cũ đang `off` vẫn `off`).
 NEW_GROUP_MODES = ("ask", "silent", "off")
-DEFAULT_NEW_GROUP_MODE = "ask"
+DEFAULT_NEW_GROUP_MODE = "silent"
+#: Bộ đếm theo kênh `settings.new_groups_silent.<kênh>`: số nhóm MỚI vừa tự vào «Lắng nghe im lặng» mà Sếp chưa bấm
+#: «Đã biết» (thẻ kênh báo «N nhóm mới đã vào Lắng nghe im lặng»).
+NEW_SILENT_KEY = "new_groups_silent"
 
 
 def new_group_mode(settings: dict[str, Any] | None, channel_type: str) -> str:
-    """Thiết lập nhóm mới của một kênh; thiếu/sai kiểu/giá trị lạ ⇒ `ask`."""
+    """Thiết lập nhóm mới của một kênh; thiếu/sai kiểu/giá trị lạ ⇒ `silent` (mặc định)."""
     block = (settings or {}).get("new_group_mode")
     v = block.get(channel_type) if isinstance(block, dict) else None
     return str(v) if v in NEW_GROUP_MODES else DEFAULT_NEW_GROUP_MODE
 
 
 def initial_group_mode(settings: dict[str, Any] | None, channel_type: str) -> str:
-    """Chế độ nghe của một nhóm VỪA được tạo: ask ⇒ pending, còn lại ⇒ đúng giá trị Sếp đã chọn (silent | off)."""
+    """Chế độ nghe của một nhóm VỪA được tạo: ask ⇒ pending, còn lại ⇒ đúng giá trị đang đặt (silent | off)."""
     m = new_group_mode(settings, channel_type)
     return NEW_GROUP_MODE if m == "ask" else m
+
 
 # Tin riêng 1-1 (theo kênh, lưu ở `core.organizations.settings.direct_mode.<kênh>`): off = không lưu; silent = lưu nhưng
 # không tự trả lời và không đưa cho agent trực (MẶC ĐỊNH); reply = lưu + agent trực được phép trả lời (= `listen_direct`
@@ -155,6 +161,18 @@ async def set_channel_setting(db: AsyncSession, org_id: uuid.UUID, key: str, cha
                ELSE jsonb_set(settings, ARRAY[CAST(:k AS text)], '{}'::jsonb) END,
           ARRAY[CAST(:k AS text), CAST(:t AS text)], CAST(:v AS jsonb)) WHERE id = :o"""),
         {"k": key, "t": channel_type, "v": json.dumps(value), "o": org_id})
+
+
+async def bump_channel_counter(db: AsyncSession, org_id: uuid.UUID, key: str, channel_type: str) -> None:
+    """Tăng nguyên tử `settings.<key>.<kênh>` (số nguyên, thiếu = 0) thêm 1. Chỉ gọi với `key` là hằng."""
+    await db.execute(text("""
+        UPDATE core.organizations SET settings = jsonb_set(
+          CASE WHEN jsonb_typeof(settings -> CAST(:k AS text)) = 'object' THEN settings
+               ELSE jsonb_set(settings, ARRAY[CAST(:k AS text)], '{}'::jsonb) END,
+          ARRAY[CAST(:k AS text), CAST(:t AS text)],
+          to_jsonb(CASE WHEN jsonb_typeof(settings #> ARRAY[CAST(:k AS text), CAST(:t AS text)]) = 'number'
+                        THEN (settings #>> ARRAY[CAST(:k AS text), CAST(:t AS text)])::int ELSE 0 END + 1))
+        WHERE id = :o"""), {"k": key, "t": channel_type, "o": org_id})
 
 
 async def live_person(db: AsyncSession, person_id: uuid.UUID) -> uuid.UUID:

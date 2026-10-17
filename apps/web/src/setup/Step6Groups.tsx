@@ -14,7 +14,7 @@ import { anyListening, applyGroupDraft, step6Payload, type GroupDraft } from './
 import { StepFrame } from './StepFrame';
 import { describeError, type StepProps } from './types';
 
-/** Bước 6 — every synced group starts "Chờ Sếp chọn" (chưa lưu tin); the owner picks a mode group by group. */
+/** Bước 6 — every synced group starts "Lắng nghe im lặng" (QD 17/10; "Chờ Sếp chọn" chỉ khi Sếp đặt Nhóm mới = Hỏi Sếp); the owner can change a mode group by group. */
 export function Step6Groups({ meta, description, onBack, onSaved, formRef, onSkip, skipping, skipError }: StepProps) {
   const channels = useChannels();
   const types = (channels.data ?? []).filter((c) => c.state !== 'not_installed' && c.state !== 'identity_only').map((c) => c.type);

@@ -146,7 +146,7 @@ const SCREEN_PERMISSION: Record<string, string[]> = {
   documents: ['profile.read'],
   opportunity: ['opportunity.read'], supply: ['opportunity.read'], search: ['opportunity.read'],
   people: ['people_review.read'], care: ['care.read'],
-  raw: ['data.read'], rules: ['data.read'], clean: ['data.read'], identity: ['data.read'],
+  listenlog: ['data.read'], raw: ['data.read'], rules: ['data.read'], clean: ['data.read'], identity: ['data.read'],
   agents: ['system.read'], api: ['system.read'], mcp: ['system.read'], plugins: ['system.read'],
   system: ['system.read', 'audit.read'],
   // v0.1.42: Kết nối (system.read), Đội ngũ (roles.manage).
@@ -169,6 +169,7 @@ export function hiddenScreens(role: RoleCode): Set<string> {
 const EVENT_PERMISSION: Array<[string, string | null]> = [
   ['social.', 'system.manage'],
   ['raw.', 'data.read'],
+  ['listen.', 'data.read'],
   ['refinery.', 'data.read'],
   ['channel.', 'system.read'],
   ['cli.', 'system.manage'],
@@ -1576,11 +1577,15 @@ export function createMockApi(opts: MockOptions = {}) {
           return done(res);
         case 'raw':
           return done(res, 200, current.phase2.hooks.pushRaw());
+        case 'listenevent':
+          // v0.1.71: thêm một sự kiện kênh vào Nhật ký lắng nghe + WS `listen.event`.
+          return done(res, 200, current.phase2.hooks.pushEvent());
         case 'scan':
           return done(res, current.phase2.hooks.scan(String(body.type ?? 'zalo')) ? 204 : 409);
         case 'discover':
-          // v0.1.65: {"type"?:"zalo"} — bridge phát hiện nhóm mới: 3 nhóm `pending` + WS `group.discovered`.
-          return done(res, 200, { added: current.phase2.hooks.discover(body.type === 'whatsapp' ? 'whatsapp' : 'zalo') });
+          // v0.1.65: {"type"?:"zalo","ask"?:true} — bridge phát hiện nhóm mới: 3 nhóm + WS `group.discovered`. Nhóm vào `silent`
+          // (QD 17/10, mặc định) hay `pending` (ask: true ⇒ mô phỏng Sếp đặt «Nhóm mới: Hỏi Sếp»).
+          return done(res, 200, { added: current.phase2.hooks.discover(body.type === 'whatsapp' ? 'whatsapp' : 'zalo', body.ask === true) });
         case 'simulate':
           current.phase2.hooks.setSimulation(Boolean(body.on));
           return done(res);

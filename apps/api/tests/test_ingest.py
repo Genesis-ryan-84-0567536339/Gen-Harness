@@ -9,12 +9,24 @@ from gh.db import sessionmaker
 from tests.phase2 import listen, msg, org_id, put
 
 
-async def test_new_group_is_pending_and_drops_messages(app, db) -> None:  # type: ignore[no-untyped-def]
+async def test_new_group_is_silent_by_default_and_stores_messages(app, db) -> None:  # type: ignore[no-untyped-def]
     org = await org_id(db)
+    [eid] = await put(sessionmaker(), org, msg("Còn hàng không chị?", group="g-new"))
+    assert eid is not None
+    g = (await db.execute(text("SELECT listen_mode FROM core.groups WHERE external_id = 'g-new'"))).one()
+    assert g.listen_mode == "silent"        # QD 17/10: nhóm mới MẶC ĐỊNH lắng nghe im lặng — lưu hết tin, không trả lời
+    assert (await db.execute(text("SELECT count(*) FROM raw.events"))).scalar() == 1
+
+
+async def test_new_group_with_ask_is_pending_and_drops_messages(app, db) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    await db.execute(text("""UPDATE core.organizations SET settings = settings
+                             || '{"new_group_mode": {"zalo": "ask"}}'::jsonb"""))
+    await db.commit()
     [eid] = await put(sessionmaker(), org, msg("Còn hàng không chị?", group="g-new"))
     assert eid is None
     g = (await db.execute(text("SELECT listen_mode FROM core.groups WHERE external_id = 'g-new'"))).one()
-    assert g.listen_mode == "pending"       # v0.1.65: nhóm mới CHỜ Sếp chọn Im lặng/Không nghe — chưa lưu tin nào
+    assert g.listen_mode == "pending"       # Sếp chọn «Hỏi Sếp»: nhóm mới CHỜ Sếp chọn — chưa lưu tin nào
     assert (await db.execute(text("SELECT count(*) FROM raw.events"))).scalar() == 0
 
 
@@ -84,10 +96,10 @@ async def test_directory_and_listen_sets(app, db, redis) -> None:  # type: ignor
     await db.commit()
     rows = (await db.execute(text("SELECT external_id, listen_mode, member_count FROM core.groups ORDER BY 1"))).all()
     got = [(r.external_id, r.listen_mode, r.member_count) for r in rows]
-    assert got == [("gA", "pending", 40), ("gB", "pending", 5)]
+    assert got == [("gA", "silent", 40), ("gB", "silent", 5)]        # QD 17/10: nhóm mới mặc định silent
     phone = (await db.execute(text("SELECT phone_e164 FROM core.person_identities"))).scalar()
     assert phone == "+84901234567"
-    await db.execute(text("UPDATE core.groups SET listen_mode = 'silent' WHERE external_id = 'gA'"))
+    await db.execute(text("UPDATE core.groups SET listen_mode = 'off' WHERE external_id = 'gB'"))
     await sync_listen_sets(db, redis, org)
     assert await redis.smembers("gh:bridge:listen:zalo") == {b"gA"}
     assert await redis.get("gh:bridge:listen_direct:zalo") == b"1"   # tin 1-1 mặc định lưu im lặng
