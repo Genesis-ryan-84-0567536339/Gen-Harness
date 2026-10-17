@@ -325,9 +325,10 @@ async def test_default_gate_follows_final_policy_and_box_state(db: Any, monkeypa
     assert (await readiness.ai_ready(db, org, "core.reply"))["reason_code"] == "box_down"
     assert (await readiness.ai_ready(db, org, "core.gen", owner=False))["reason_code"] == "box_down"   # Gen nhân viên
     assert (await readiness.ai_ready(db, org, "core.gen"))["ok"] is True       # Gen của Sếp: trong tiến trình
-    assert (await readiness.ai_ready(db, org, "core.briefing"))["ok"] is True
+    assert (await readiness.ai_ready(db, org, "core.briefing"))["reason_code"] == "box_down"   # P2-3: Bản tin qua hộp
     state["v"] = "ok"
-    for role, owner in (("core.refinery", True), ("core.reply", True), ("core.gen", False), ("core.gen", True)):
+    for role, owner in (("core.refinery", True), ("core.reply", True), ("core.gen", False), ("core.gen", True),
+                        ("core.briefing", True)):
         assert (await readiness.ai_ready(db, org, role, owner=owner))["ok"] is True, (role, owner)
 
 
