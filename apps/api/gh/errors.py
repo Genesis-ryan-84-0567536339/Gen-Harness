@@ -78,7 +78,7 @@ def pin_required() -> ApiError:
     return ApiError(423, "PIN_REQUIRED", "Thao tác này cần nhập mã PIN")
 
 
-MODEL_UNAVAILABLE_HINT = "Chưa có model AI nào hoạt động — vào Agent & Model (Hướng dẫn bước 4) để chọn hoặc sửa model."
+MODEL_UNAVAILABLE_HINT = "Chưa có model AI nào hoạt động — vào API & Model (Hướng dẫn bước 4) để chọn hoặc sửa model."
 
 
 def model_unavailable(title: str, reasons: list[str]) -> ApiError:

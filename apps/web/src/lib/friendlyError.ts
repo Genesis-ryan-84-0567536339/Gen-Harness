@@ -32,7 +32,7 @@ const RULES: Array<[RegExp, string]> = [
 /** Dấu hiệu chuỗi là lỗi kỹ thuật (tiếng Anh / mã lỗi) chứ không phải câu đã viết cho người dùng. */
 const TECHNICAL = /[[\]{}]|errno|exception|traceback|error:|http\s?\d{3}|\b[a-z]+error\b|failed|refused|not found|https?:\/\//i;
 
-export const MODEL_UNAVAILABLE_TEXT = 'Chưa có model AI hoạt động — chọn hoặc sửa model ở Agent & Model (Hướng dẫn bước 4).';
+export const MODEL_UNAVAILABLE_TEXT = 'Chưa có model AI hoạt động — chọn hoặc sửa model ở API & Model (Hướng dẫn bước 4).';
 
 // v0.1.62: luật v0.1.38 (F-22) "Antigravity CLI chỉ dùng cho Gen của Sếp" đã gỡ (Owner chọn mở cho mọi vai ngày 16/10/2026)
 // — máy chủ không còn trả câu/lý do riêng cho "chuỗi chỉ có agy" nên web bỏ luôn các dấu nhận diện (AGY_ONLY_*).
