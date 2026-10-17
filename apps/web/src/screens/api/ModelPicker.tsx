@@ -7,6 +7,7 @@ import { errorText } from '../../lib/errorText';
 import { qk2 } from '../../lib/dataQueries';
 import { queryClient } from '../../lib/queryClient';
 import { toast } from '../../lib/toast';
+import { PIN_ROUTE_CHANGE_TITLE } from '../common';
 import { EFFORT_HINT, choiceText, effortOptionText, currentChoice, isCliKind, modelOptionText, pickEffort, pickerGroups, technicalDetail } from './apiModel';
 
 /**
@@ -96,7 +97,7 @@ export function ModelPicker({ provider: p, test }: { provider: Provider; test: P
         </select>
         </label>
       ) : null}
-      <Button variant="secondary" size="sm" loading={add.isPending} disabled={!model || isCurrent} onClick={() => add.mutate()}>
+      <Button variant="secondary" size="sm" loading={add.isPending} disabled={!model || isCurrent} title={PIN_ROUTE_CHANGE_TITLE} onClick={() => add.mutate()}>
         {isCurrent ? 'Đang dùng' : 'Dùng model này'}
       </Button>
       <span className="muted-note">

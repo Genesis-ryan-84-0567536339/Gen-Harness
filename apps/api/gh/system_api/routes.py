@@ -795,7 +795,11 @@ async def _probe_budget(redis: Any, org_id: uuid.UUID) -> None:
 
 @router.post("/providers/{pid}/models", status_code=201)
 async def add_model(pid: uuid.UUID, body: ModelIn, request: Request, user: service.CurrentUser = Depends(MANAGE),
+                    _pin: Any = Depends(require_pin("ai.route_change")),
                     db: AsyncSession = DB) -> dict[str, Any]:
+    """Thêm / sửa / tắt-bật / chọn mặc định một model của nguồn — cần PIN `ai.route_change` (dọn sót v0.1.70, như
+    `delete_provider`): "Dùng model này" và Tắt model đổi model nào Gen gọi, tức đổi chuỗi nguồn AI. Thứ tự kiểm:
+    quyền (403) → PIN (423) → 404 / 422."""
     p = await _provider(db, user.org_id, pid)
     # v0.1.32: tên biến thể cũ của agy ("gemini-3.8-flash-high") → model gốc + mức suy nghĩ.
     name, var_effort = catalog.split_variant(p.kind, body.model_name.strip())
@@ -866,8 +870,10 @@ async def add_model(pid: uuid.UUID, body: ModelIn, request: Request, user: servi
 
 @router.delete("/providers/{pid}/models/{mid}", status_code=204)
 async def delete_model(pid: uuid.UUID, mid: uuid.UUID, request: Request, user: service.CurrentUser = Depends(MANAGE),
+                       _pin: Any = Depends(require_pin("ai.route_change")),
                        db: AsyncSession = DB) -> Response:
-    """v0.1.66 (F008): gỡ một model đã thêm nhầm. Gỡ luôn dòng gán model trỏ vào nó (vai đó quay về model chuẩn).
+    """v0.1.66 (F008): gỡ một model đã thêm nhầm. Cần PIN `ai.route_change` (dọn sót v0.1.70, như `delete_provider`).
+    Gỡ luôn dòng gán model trỏ vào nó (vai đó quay về model chuẩn).
     Model còn lượt gọi trong 30 ngày ⇒ 409 `MODEL_HAS_CALLS` (gỡ sẽ xoá dây chuyền bảng giá, chi phí lịch sử tụt về 0) —
     dùng "Tắt model" (`POST /providers/{id}/models` với `enabled: false`)."""
     p = await _provider(db, user.org_id, pid)

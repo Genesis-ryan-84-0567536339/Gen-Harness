@@ -338,7 +338,7 @@ function ModelLimitRow({ provider: p, model: m, onRemove, removing }: { provider
         <span className="muted-note">Lượt/phút</span>
         <input className="gh-input" inputMode="numeric" placeholder="không giới hạn" aria-label={`Lượt mỗi phút của ${m.model_name}`} value={perMin} onChange={(e) => setPerMin(e.target.value)} />
       </label>
-      <Button variant="secondary" className="btn-22" loading={save.isPending} aria-label={`Lưu hạn mức của ${m.model_name}`} onClick={submit}>
+      <Button variant="secondary" className="btn-22" loading={save.isPending} aria-label={`Lưu hạn mức của ${m.model_name}`} title={PIN_ROUTE_CHANGE_TITLE} onClick={submit}>
         Lưu hạn mức
       </Button>
       <Button
@@ -346,6 +346,7 @@ function ModelLimitRow({ provider: p, model: m, onRemove, removing }: { provider
         className="btn-22"
         loading={save.isPending && save.variables?.body.enabled !== undefined}
         aria-label={`${enabled ? 'Tắt' : 'Bật'} model ${m.model_name}`}
+        title={PIN_ROUTE_CHANGE_TITLE}
         onClick={() =>
           save.mutate(
             { id: p.id, body: { model_name: m.model_name, enabled: !enabled } },
@@ -361,6 +362,7 @@ function ModelLimitRow({ provider: p, model: m, onRemove, removing }: { provider
         icon="ph ph-trash"
         loading={removing}
         aria-label={`Gỡ model ${m.model_name}`}
+        title={PIN_ROUTE_CHANGE_TITLE}
         onClick={() => {
           if (window.confirm(`Gỡ model "${m.model_name}" khỏi "${p.name}"? Vai nào đang gán model này sẽ quay về model chuẩn.`)) onRemove();
         }}
