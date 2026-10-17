@@ -63,6 +63,7 @@ from gh.notifications import router as notifications_router
 from gh.owner.routes import router as owner_router
 from gh.plugins_api.routes import router as plugins_router
 from gh.providers import cli as climod
+from gh.providers import clients
 from gh.providers.router import ModelRouter
 from gh.refinery.jev_routes import router as jev_router
 from gh.refinery.triage_routes import router as triage_router
@@ -178,6 +179,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         result = await bootstrap(db)
         await db.commit()
     app.state.org_id = result.org_id
+    # Review lần 2 v0.1.63 (P3-5): HOME tạm agy (có token) còn sót khi tiến trình trước bị SIGKILL.
+    with contextlib.suppress(Exception):
+        await asyncio.to_thread(clients.sweep_stale_turn_dirs)
     # Review lần 2 v0.1.63 (P3-2): phân giải tên proxy tin cậy (Caddy) trước yêu cầu đầu — sau đó làm mới ở luồng nền.
     with contextlib.suppress(Exception):
         await asyncio.to_thread(deps.refresh_trusted_proxies)

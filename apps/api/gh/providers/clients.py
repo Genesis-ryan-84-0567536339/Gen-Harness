@@ -583,11 +583,16 @@ def sync_token_back(cli_home: str, injected: bytes, new: bytes, *, locked: bool 
     return True
 
 
+#: Thư mục tạm của một lượt agy: `gh-agy-home-<pid>-…` (HOME tạm, chứa token) và `gh-agy-<pid>-…` (cwd). Review lần 2
+#: v0.1.63 (P3-5): mang pid tiến trình chủ để `sweep_stale_turn_dirs` biết thư mục nào của tiến trình đã chết.
+TURN_DIR_RE = re.compile(r"^gh-agy-(?:home-)?(\d+)-")
+
+
 def make_turn_home(token: bytes | None) -> Path:
     """HOME tạm cho MỘT lượt agy: thư mục mới 0700 (mkdtemp) có `.gemini/antigravity-cli/` 0700 và — nếu có — đúng
     một tệp token 0600. Không chép settings.json, mcp/, customizations/ hay lịch sử: cấu hình agy là mặc định của bản
     cài."""
-    home = Path(tempfile.mkdtemp(prefix="gh-agy-home-"))
+    home = Path(tempfile.mkdtemp(prefix=f"gh-agy-home-{os.getpid()}-"))
     try:
         cfg = home / ".gemini" / "antigravity-cli"
         cfg.mkdir(mode=0o700, parents=True)
@@ -601,6 +606,50 @@ def make_turn_home(token: bytes | None) -> Path:
         shutil.rmtree(home, ignore_errors=True)
         raise
     return home
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True                                    # tiến trình của uid khác — còn sống
+    return True
+
+
+def sweep_stale_turn_dirs(root: str | Path | None = None) -> int:
+    """Review lần 2 v0.1.63 (P3-5): /tmp của api/worker không phải tmpfs — tiến trình bị SIGKILL (dừng quá hạn, hết bộ
+    nhớ) để lại HOME tạm có TOKEN và cwd của lượt; container khởi động lại vẫn giữ. Gọi MỘT lần lúc khởi động (trước
+    lượt agy nào của tiến trình này): xoá thư mục lượt (`TURN_DIR_RE`) của tiến trình đã chết — hoặc mang chính pid này
+    (container khởi động lại cấp lại số pid cũ). Liên kết tượng trưng bị xoá, không đi theo; tệp thường và tên không có
+    pid (dạng cũ) được giữ. Trả số mục đã xoá."""
+    base = Path(tempfile.gettempdir() if root is None else root)
+    me, removed = os.getpid(), 0
+    try:
+        entries = list(os.scandir(base))
+    except OSError:
+        return 0
+    for entry in entries:
+        m = TURN_DIR_RE.match(entry.name)
+        if m is None:
+            continue
+        pid = int(m.group(1))
+        if pid != me and _pid_alive(pid):
+            continue
+        try:
+            if entry.is_symlink():
+                os.unlink(entry.path)
+            elif entry.is_dir(follow_symlinks=False):
+                shutil.rmtree(entry.path)
+            else:
+                continue
+        except OSError:
+            continue
+        removed += 1
+    if removed:
+        log.info("Đã dọn %d thư mục tạm agy còn sót từ tiến trình cũ", removed)
+    return removed
 
 
 def turn_token_path(home: Path) -> Path:
@@ -701,7 +750,7 @@ class AgyClient:
     def _workdir() -> str:
         """Thư mục làm việc riêng mỗi lượt: mkdtemp (0700) dưới thư mục tạm của hệ thống — không nằm trong HOME của
         agy hay GH_CLAUDE_HOME, rỗng → công cụ đọc tệp "trong workspace" của agy không thấy gì."""
-        d = tempfile.mkdtemp(prefix="gh-agy-")
+        d = tempfile.mkdtemp(prefix=f"gh-agy-{os.getpid()}-")
         if os.stat(d).st_mode & 0o777 != 0o700:
             os.chmod(d, 0o700)
         return d
@@ -724,7 +773,11 @@ class AgyClient:
     async def _run_locked(self, *args: str, stdin: bytes | None = None, token: bytes | None = None,
                           locked: bool = False) -> tuple[int, bytes, bytes]:
         work = self._workdir()
-        home = make_turn_home(token)
+        try:
+            home = make_turn_home(token)
+        except BaseException:
+            shutil.rmtree(work, ignore_errors=True)   # review lần 2 (P3-5): trước đây cwd rò khi tạo HOME tạm lỗi
+            raise
         try:
             try:
                 proc = await asyncio.create_subprocess_exec(
