@@ -83,9 +83,16 @@ Mức hiệu lực `L` = `gh.biz.core.drafts.effective_level` (thấp nhất c�
 | `suggest` | L ≥ 3 → `suggest` / `suggested` (nội dung ở `proposal.text`); L ≤ 2 → `silent` / `blocked` |
 | `draft`, `send` | L ≤ 2 → `silent` / `blocked`. L = 3 → `suggest` / `suggested`. L ≥ 4 → `create_draft(kind="message", agent_id, sources=…)` → bản nháp **`pending`** (`hold_reason` "ghi ra ngoài phải chờ duyệt") → `draft`/`send` / `held`. **Mức 5–6 cũng vậy** (khoá cứng 3, quyết định Q2): không bao giờ có lệnh gửi tới bridge từ agent. |
 
+**Nhóm «Lắng nghe im lặng» (`silent`) KHÔNG BAO GIỜ trả lời — kể cả khi được tag** (Sếp chốt 17/10/2026): với tin của nhóm
+`silent`, quyết định cho phép chỉ `silent`/`note` ở mọi mức tự trị (câu «Được chọn: silent, note.» trong lời nhắc); model nêu
+`suggest`/`draft`/`send` thì bị chặn: `decision = silent`, `requested = <điều model nêu>`, `outcome = blocked`, lý do «nhóm lắng
+nghe im lặng: không bao giờ trả lời, kể cả khi được tag». Áp cả khi agent được gán BOT cho nhóm đó hoặc BOT cho người gửi
+(gán BOT người chỉ áp cho tin 1-1 của họ — B8). Chế độ `tagged_only` («Nghe hết, chỉ trả lời khi được tag») giữ nguyên:
+được tag thì trả lời như bảng trên.
+
 Hạ `draft`/`send` xuống `suggest` (không tạo bản nháp, lý do ghi trong `rationale` trong ngoặc vuông) khi:
-tin do phía mình nói ra; nhóm ở chế độ nghe im lặng (`silent`) mà tin không tag agent; đã có bản nháp của agent
-đang chờ duyệt cho cùng nơi nhận (trừ tin tag); agent đã tạo ≥ `drafts_per_hour` bản nháp trong giờ qua.
+tin do phía mình nói ra; đã có bản nháp của agent đang chờ duyệt cho cùng nơi nhận (trừ tin tag); agent đã tạo
+≥ `drafts_per_hour` bản nháp trong giờ qua.
 
 Đích gửi của bản nháp: nhóm của đơn vị (`thread_type = group`) hoặc người gửi (`thread_type = user`) với tin 1-1.
 Đối tượng (`subject`) là người, không có người thì nhóm. Tiêu đề "Trả lời {người} · {nhóm}".
@@ -150,4 +157,4 @@ WebSocket (sau khi commit): `draft.new` (item danh sách, như Bàn làm việc)
    (nhóm/người mở hồ sơ, mục sổ tay mở Sổ tay nhận thức).
 2. Mức 0–2 với `note`: ARCHITECTURE xếp "ghi sổ tay" vào việc nội bộ tự làm ở mức 5–6, nhưng sổ tay cũng là trí nhớ
    lũy tiến mà sàng lọc ghi không qua mức tự trị. Tạm: agent ghi sổ tay ở mọi mức (mức 0 "Chỉ ghi nhận").
-3. Chế độ nghe "Nghe im lặng" (`silent`): tạm hiểu là agent được ghi chú / gợi ý nhưng chỉ soạn tin khi được tag.
+3. Chế độ nghe «Lắng nghe im lặng» (`silent`): Sếp chốt 17/10/2026 — agent chỉ được `silent`/`note`, KHÔNG BAO GIỜ soạn tin hay gợi ý trả lời, kể cả khi được tag (thay cách hiểu tạm «chỉ soạn tin khi được tag»).

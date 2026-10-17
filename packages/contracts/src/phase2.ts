@@ -411,10 +411,12 @@ export interface Channel {
   direct_mode?: DirectMode;
   /** v0.1.65: số nhóm mới phát hiện đang CHỜ Sếp chọn (`listen_mode = 'pending'`, chưa rời). Máy chủ cũ không gửi. */
   groups_pending?: number;
-  /** v0.1.65 (F1d): chế độ cho nhóm MỚI phát hiện sau này — `ask` (mặc định: chờ Sếp chọn) · `silent` (vào Im lặng ngay) · `off` (vào Không nghe). Máy chủ cũ không gửi. `PATCH /channels/{type}` 🔒 `policy.change`. */
+  /** v0.1.65 (F1d), QD 17/10: chế độ cho nhóm MỚI phát hiện sau này — `silent` (MẶC ĐỊNH: vào Lắng nghe im lặng ngay, không bao giờ trả lời kể cả khi được tag) · `ask` (chờ Sếp chọn) · `off` (vào Không nghe). Máy chủ cũ không gửi. `PATCH /channels/{type}` 🔒 `policy.change`. */
   new_group_mode?: NewGroupMode;
-  /** v0.1.65 (F1d): Sếp đã chọn ở hộp hỏi / thẻ kênh kể từ lần nối kênh gần nhất (false ⇒ hộp hỏi bật sẵn ô «Áp dụng cho các nhóm mới sau này»). */
+  /** v0.1.65 (F1d): Sếp đã chọn ở hộp hỏi / thẻ kênh kể từ lần nối kênh gần nhất. Chỉ còn để tương thích — ô «Áp dụng cho các nhóm mới sau này» không còn bật sẵn. */
   new_group_asked?: boolean;
+  /** QD 17/10: số nhóm mới vừa tự vào Lắng nghe im lặng mà Sếp chưa bấm «Đã biết» (`POST /channels/{type}/groups/seen`). Máy chủ cũ không gửi. */
+  new_groups_silent?: number;
   session_id?: string | null;
   ended_at?: string | null;
   /** Last bridge error for this channel, if any. */
@@ -447,7 +449,7 @@ export interface ChannelGroup {
   left?: boolean;
 }
 
-/** WS `group.discovered` (v0.1.65): nhóm mới phát hiện, chờ Sếp chọn Im lặng/Không nghe. */
+/** WS `group.discovered` (v0.1.65): nhóm mới phát hiện: `listen_mode` = `silent` (mặc định, QD 17/10) / `pending` (Sếp đặt Hỏi Sếp, chờ chọn) / `off`. */
 export interface GroupDiscoveredEvent {
   id: string;
   code: string;

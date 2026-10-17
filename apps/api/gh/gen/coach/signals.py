@@ -195,7 +195,7 @@ TODO_COPY: dict[str, tuple[str, str]] = {
     "followup.5": ("Kết nối Zalo / WhatsApp",
                    "Có kênh em mới đọc được tin nhắn trong các nhóm chat của Sếp."),
     "followup.6": ("Chọn nhóm cho agent lắng nghe",
-                   "Mọi nhóm mới đều ở chế độ Không nghe — Sếp chọn nhóm nào em được nghe."),
+                   "Nhóm mới em mặc định Lắng nghe im lặng, không bao giờ trả lời — Sếp chọn nhóm em được trả lời."),
     "followup.7": ("Bật sàng lọc dữ liệu",
                    "Tin thô được lọc và chấm điểm trước khi vào kho sạch — agent chỉ dùng dữ liệu đã lọc."),
     "followup.8": ("Tạo agent đầu tiên",

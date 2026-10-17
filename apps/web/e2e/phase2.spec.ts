@@ -384,12 +384,12 @@ test('setup: Nguồn AI + Xong ở trình thiết lập, bước 5–7 ở Hư�
   await next.click();
   await expect(page).toHaveURL(/\/guide$/);
 
-  // Bước 6 — v0.1.65: every synced group starts "Chờ Sếp chọn" (pending, chưa lưu tin).
+  // Bước 6 — QD 17/10: every synced group starts "Lắng nghe im lặng" (lưu hết, không bao giờ trả lời); Sếp đổi từng nhóm.
   await page.goto('/guide/6');
   await expect(page.getByRole('heading', { name: 'Chọn nhóm lắng nghe' })).toBeVisible();
   const mode = page.getByLabel('Chế độ lắng nghe của Vận hành Genesis — Quý 4');
-  await expect(mode).toHaveValue('pending');
-  await expect(next).toBeDisabled();
+  await expect(mode).toHaveValue('silent');
+  await expect(next).toBeEnabled();
   await mode.selectOption('tagged_only');
   await expect(next).toBeEnabled();
   await next.click();

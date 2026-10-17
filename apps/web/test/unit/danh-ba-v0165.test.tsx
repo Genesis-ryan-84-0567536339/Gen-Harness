@@ -18,7 +18,7 @@ import { applyEvent } from '../../src/lib/realtime';
 import { GUIDE } from '../../src/guide/guideContent';
 import { STEP_DESCRIPTIONS } from '../../src/setup/steps';
 
-// v0.1.65 (F1c): nhóm mới CHỜ chọn (Im lặng / Không nghe), Cập nhật danh sách nhóm, nhãn "Nghe hết, chỉ trả lời khi được tag",
+// v0.1.65 (F1c): nhóm mới CHỜ chọn (Lắng nghe im lặng / Không nghe — chỉ khi Sếp đặt «Hỏi Sếp», QD 17/10), Cập nhật danh sách nhóm, nhãn "Nghe hết, chỉ trả lời khi được tag",
 // bỏ "chờ QR", tin 1-1 ba mức. Máy chủ giả bằng fetch; không gọi Zalo/WhatsApp thật.
 
 const json = (status: number, body?: unknown) =>
@@ -118,12 +118,12 @@ describe('nhãn và hằng dùng chung (F065, F066)', () => {
   });
 });
 
-describe('hộp "Nhóm mới — chọn Im lặng/Không nghe"', () => {
+describe('hộp "Nhóm mới — chọn Lắng nghe im lặng/Không nghe"', () => {
   it('có nhóm pending: hiện hộp với tên nhóm, giải thích chưa lưu tin + vẫn thu thành viên', async () => {
     mockFetch((c) => (c.url.includes('pending=1') ? json(200, PENDING) : fallback(c)));
     renderCard(zalo());
     const box = await screen.findByTestId('newgroups-zalo');
-    expect(within(box).getByText(/Nhóm mới — chọn Im lặng hay Không nghe \(2\)/)).toBeInTheDocument();
+    expect(within(box).getByText(/Nhóm mới — chọn Lắng nghe im lặng hay Không nghe \(2\)/)).toBeInTheDocument();
     expect(within(box).getByText('Khách sỉ Hà Nội')).toBeInTheDocument();
     expect(box).toHaveTextContent(/chưa lưu tin nào/);
     expect(box).toHaveTextContent(/danh sách thành viên vẫn được ghi nhận/);
@@ -137,19 +137,19 @@ describe('hộp "Nhóm mới — chọn Im lặng/Không nghe"', () => {
     expect(calls.filter((c) => c.url.includes('pending=1'))).toHaveLength(0);
   });
 
-  it('bấm Im lặng gọi PATCH /channels/zalo/groups/{id}/mode {mode: silent}', async () => {
+  it('bấm Lắng nghe im lặng gọi PATCH /channels/zalo/groups/{id}/mode {mode: silent}', async () => {
     const user = userEvent.setup();
     const calls = mockFetch((c) => {
       if (c.method === 'PATCH') return json(200, grp('1', 'Khách sỉ Hà Nội', 'silent'));
       return c.url.includes('pending=1') ? json(200, PENDING) : fallback(c);
     });
     renderCard(zalo());
-    await user.click(await screen.findByRole('button', { name: 'Im lặng — nhóm Khách sỉ Hà Nội' }));
+    await user.click(await screen.findByRole('button', { name: 'Lắng nghe im lặng — nhóm Khách sỉ Hà Nội' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
     const p = calls.find((c) => c.method === 'PATCH')!;
     expect(p.url).toMatch(/\/channels\/zalo\/groups\/1\/mode$/);
     expect(p.body).toEqual({ mode: 'silent' });
-    expect(await screen.findByText(/Đã chọn: Im lặng — lưu tin, không tự trả lời/)).toBeInTheDocument();
+    expect(await screen.findByText(/Đã chọn: Lắng nghe im lặng — lưu tin, không bao giờ trả lời/)).toBeInTheDocument();
   });
 
   it('"Tất cả 2 nhóm: Không nghe" gửi lần lượt từng nhóm với mode off', async () => {
@@ -252,7 +252,7 @@ describe('hộp nhóm của kênh: chế độ + tin 1-1', () => {
     expect(within(sel).getByRole('option', { name: 'Chờ Sếp chọn' })).toBeDisabled();
     expect(within(sel).getByRole('option', { name: 'Nghe hết, chỉ trả lời khi được tag' })).toBeInTheDocument();
     expect(screen.getByText(/Sếp đã rời nhóm/)).toBeInTheDocument();
-    expect(screen.getByText(/Nhóm mới chờ Sếp chọn Im lặng hay Không nghe/)).toBeInTheDocument();
+    expect(screen.getByText(/Nhóm mới mặc định vào Lắng nghe im lặng — lưu hết tin, không bao giờ trả lời \(kể cả khi được tag\)/)).toBeInTheDocument();
   });
 
   it('tin 1-1: ba mức, mặc định "Lưu im lặng"; đổi gọi PATCH direct_mode', async () => {

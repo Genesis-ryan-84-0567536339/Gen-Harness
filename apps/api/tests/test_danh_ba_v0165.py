@@ -61,8 +61,28 @@ async def mode_of(db: Any, ext: str) -> str:
 
 # ─── nhóm mới: CHỜ chọn, chưa lưu tin, vẫn thu thành viên ────────────────────────────────────────────────────
 
-async def test_new_group_from_directory_is_pending_and_collects_members(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+async def _ask(db: Any) -> None:
+    """Sếp đặt «Nhóm mới: Hỏi Sếp» (mặc định từ QD 17/10 là silent) — nhóm mới mới vào `pending`."""
+    await db.execute(text("""UPDATE core.organizations SET settings = settings
+                             || '{"new_group_mode": {"zalo": "ask"}}'::jsonb"""))
+    await db.commit()
+
+
+async def test_new_group_from_directory_is_silent_by_default_and_collects_members(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """QD 17/10: nhóm mới mặc định «Lắng nghe im lặng» — vào tập nghe ngay, lưu tin, vẫn thu thành viên."""
     org = await org_id(db)
+    await directory(db, redis, org, grp("gN", mem("u1", phone="0901234567"), mem("u2")))
+    assert await mode_of(db, "gN") == "silent"
+    assert set(await members_of(db, "gN")) == {"u1", "u2"}
+    assert await redis.smembers("gh:bridge:listen:zalo") == {b"gN"}
+    [eid] = await put(sessionmaker(), org, msg("Còn hàng không chị?", group="gN"))
+    assert eid is not None
+    assert (await db.execute(text("SELECT count(*) FROM raw.events"))).scalar() == 1
+
+
+async def test_new_group_from_directory_with_ask_is_pending_and_collects_members(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    await _ask(db)
     await directory(db, redis, org, grp("gN", mem("u1", phone="0901234567"), mem("u2")))
     assert await mode_of(db, "gN") == "pending"
     assert set(await members_of(db, "gN")) == {"u1", "u2"}        # Q5=2: thu thành viên dù chưa chọn
@@ -81,14 +101,15 @@ async def test_existing_groups_keep_their_mode_on_resync(app, db, redis) -> None
     await db.commit()
     await directory(db, redis, org, grp("gOld", mem("u1")), grp("gSil"), grp("gTag"), grp("gNew"))
     got = [await mode_of(db, x) for x in ("gOld", "gSil", "gTag", "gNew")]
-    assert got == ["off", "silent", "tagged_only", "pending"]
+    assert got == ["off", "silent", "tagged_only", "silent"]        # nhóm cũ "off" giữ nguyên; chỉ nhóm MỚI vào silent
     # nhóm "Không nghe" vẫn thu thành viên (Q5=2) nhưng KHÔNG vào tập nghe
     assert set(await members_of(db, "gOld")) == {"u1"}
-    assert await redis.smembers("gh:bridge:listen:zalo") == {b"gSil", b"gTag"}
+    assert await redis.smembers("gh:bridge:listen:zalo") == {b"gSil", b"gTag", b"gNew"}
 
 
-async def test_group_discovered_creates_pending_once_and_never_changes_mode(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+async def test_group_discovered_creates_silent_once_and_never_changes_mode(app, db, redis) -> None:  # type: ignore[no-untyped-def]
     org = await org_id(db)
+    await _ask(db)                       # với «Hỏi Sếp» nhóm vừa phát hiện vào pending (mặc định thì vào silent)
     row, fresh = await handle_group_discovered(db, redis, org, {"channel": "zalo", "group_id": "gD",
                                                                 "name": "Khách mới", "member_count": 12})
     await db.commit()

@@ -233,6 +233,8 @@ export function createEndpoints(client: ApiClient) {
       update: (type: string, body: { listen_direct?: boolean; direct_mode?: DirectMode; new_group_mode?: NewGroupMode }) =>
         r<Channel>(`/channels/${enc(type)}`, { method: 'PATCH', body }),
       groups: (type: string, signal?: AbortSignal) => r<ChannelGroup[]>(`/channels/${enc(type)}/groups`, { signal }),
+      /** QD 17/10: «Đã biết» — đặt lại bộ đếm «N nhóm mới đã vào Lắng nghe im lặng». `system.manage`, không đòi PIN. Trả thẻ kênh. */
+      groupsSeen: (type: string) => r<Channel>(`/channels/${enc(type)}/groups/seen`, { method: 'POST' }),
       /** v0.1.65: chỉ nhóm mới đang CHỜ chọn (`listen_mode = pending`). */
       pendingGroups: (type: string, signal?: AbortSignal) =>
         r<ChannelGroup[]>(`/channels/${enc(type)}/groups`, { signal, query: { pending: 1 } }),
