@@ -246,6 +246,16 @@ describe('API & Model — thẻ nhà cung cấp', () => {
     expect(first).not.toHaveTextContent('gemini-2.5-flash');
   });
 
+  it('P2-1 (review): nguồn chưa chốt model ⇒ chuỗi chuyển hướng KHÔNG ghi model lưu đầu tiên mà ghi "theo vai"', async () => {
+    mockFetch(baseHandler([GEMINI, AGY]));
+    renderUi(<ApiScreen />);
+    const list = await screen.findByRole('list', { name: 'Chuỗi chuyển hướng nhà cung cấp' });
+    const agyRow = within(list).getAllByRole('listitem')[1];
+    expect(agyRow).toHaveTextContent('Antigravity CLI');
+    expect(agyRow).toHaveTextContent('theo vai — xem bảng Gán model cho từng agent');
+    expect(agyRow).not.toHaveTextContent('gemini-3.8-flash');
+  });
+
   it('F018: không còn thẻ "Tham số sàng lọc" (trùng "Tham số theo vai")', async () => {
     mockFetch(baseHandler([GEMINI]));
     renderUi(<ApiScreen />);
@@ -299,5 +309,22 @@ describe('F020 / F137 — Bộ não AI', () => {
     await waitFor(() => expect(document.querySelector('.brain-chain-row__model')).not.toBeNull());
     expect(document.querySelector('.brain-chain-row__model')).toHaveTextContent('gemini-2.5-pro');
     expect(screen.queryByText('Quy tắc chuyển hướng')).toBeNull();
+  });
+
+  it('P2-1 (review): nguồn chưa chốt model ghi "theo vai", không ghi model lưu đầu tiên', async () => {
+    mockFetch(baseHandler([GEMINI, AGY]));
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData(qk.me, ME);
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <BrainTab />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(document.querySelectorAll('.brain-chain-row__model')).toHaveLength(2));
+    const rows = document.querySelectorAll('.brain-chain-row__model');
+    expect(rows[1]).toHaveTextContent('theo vai — xem bảng Gán model cho từng agent');
+    expect(rows[1]).not.toHaveTextContent('gemini-3.8-flash');
   });
 });

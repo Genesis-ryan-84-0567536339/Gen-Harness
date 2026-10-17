@@ -151,9 +151,15 @@ export function pickerGroups(t: ProviderTestResult | null | undefined): { groups
   return { groups: fallback, live: false };
 }
 
-/** Model đang là mặc định của nguồn (đã "Dùng model này"), không có thì model đã lưu đầu tiên. */
+/** Model Sếp đã chốt cho nguồn ("Dùng model này"); chưa chốt ⇒ null (mỗi vai tự chọn theo hồ sơ chuẩn). */
 export function currentModelName(p: Pick<Provider, 'models'>): string | null {
-  return p.models.find((m) => m.is_default)?.model_name ?? p.models[0]?.model_name ?? null;
+  return p.models.find((m) => m.is_default)?.model_name ?? null;
+}
+
+/** Chữ ở chuỗi chuyển hướng (API & Model, Bộ não AI): model đã chốt; chưa chốt thì nói thật là theo vai (review v0.1.66, P2-1). */
+export const CHAIN_BY_ROLE = 'theo vai — xem bảng Gán model cho từng agent';
+export function chainModelText(p: Pick<Provider, 'models'>): string {
+  return currentModelName(p) ?? (p.models.length ? CHAIN_BY_ROLE : '—');
 }
 
 /** Chữ hiện trong ô chọn: "Gemini 3.8 Flash · nhanh, rẻ" (+ "chưa xác minh" khi không có nguồn CLI/tài liệu). */

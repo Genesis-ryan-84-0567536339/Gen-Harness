@@ -20,8 +20,8 @@ import {
   bindingEffortText,
   bindingModelText,
   bindingParamsText,
+  chainModelText,
   choiceText,
-  currentModelName,
   DEFAULT_CONTEXT_TOKENS,
   effortOptionText,
   findPreset,
@@ -707,7 +707,7 @@ function PriorityChainPanel({ canManage }: { canManage: boolean }) {
               <span className="apm-chain-row__rank mono">{i + 1}</span>
               <div className="apm-chain-row__body">
                 <div className="apm-chain-row__name">{p.name}</div>
-                <div className="apm-chain-row__model mono">{currentModelName(p) ?? '—'}</div>
+                <div className="apm-chain-row__model mono">{chainModelText(p)}</div>
               </div>
               <span className="apm-chain-row__state" style={{ color: providerStatus(p).tone }}>
                 {providerStatus(p).label}

@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { EmptyState, Icon } from '@gen-harness/ui';
 import { qk2, useProviders } from '../../lib/dataQueries';
 import { useTestProvider } from '../api/queries';
-import { currentModelName, fmtQuota, providerStatus } from '../api/apiModel';
+import { chainModelText, fmtQuota, providerStatus } from '../api/apiModel';
 import { CardError, Panel, SkeletonLines } from '../common';
 import { N4, OK, WARN } from '../data/dataModel';
 import { JevCard } from './JevCard';
@@ -169,7 +169,7 @@ export function BrainTabBody() {
                 <span className="mono brain-chain-row__rank">{String(i + 1).padStart(2, '0')}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="brain-chain-row__name">{p.name}</div>
-                  <div className="mono brain-chain-row__model">{currentModelName(p) ?? '—'}</div>
+                  <div className="mono brain-chain-row__model">{chainModelText(p)}</div>
                 </div>
                 <span className="brain-chain-row__state" style={{ color: providerStatus(p).tone }}>
                   {providerStatus(p).label}
