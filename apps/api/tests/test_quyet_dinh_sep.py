@@ -424,15 +424,15 @@ def test_qd1710_allowed_decisions_in_silent_group_are_silent_and_note_at_every_l
 @pytest.mark.parametrize("tagged", [False, True])
 @pytest.mark.parametrize("choice", ["suggest", "draft", "send"])
 async def test_qd1710_silent_group_never_replies_even_when_tagged(w, db, redis, choice: str, tagged: bool) -> None:  # type: ignore[no-untyped-def]
-    """17/10: model đòi gợi ý/soạn/gửi ở nhóm silent (kể cả được tag) ⇒ chặn, không nháp, không tin ra ngoài."""
+    """17/10 (+ mặc định #22): nhóm silent (kể cả được tag) không vào ứng viên agent trực ⇒ không gọi model, không quyết
+    định, không nháp, không tin ra ngoài (sàng lọc vẫn tạo đơn vị ý nghĩa)."""
     a = await make_agent(db, w, level=6)
     await db.execute(text("UPDATE core.groups SET listen_mode = 'silent' WHERE id = :g"), {"g": w["g1"]})
     await db.commit()
     [u] = await refine(w, redis, msg(BUY, mentions=tagged))
-    await hook(w, redis, decide(choice), [u])
-    [d] = await decisions(db, a)
-    assert (d.decision, d.requested, d.outcome, d.draft_id) == ("silent", choice, "blocked", None)
-    assert "không bao giờ" in d.rationale and "kể cả khi được tag" in d.rationale
+    router = decide(choice)
+    await hook(w, redis, router, [u])
+    assert router.calls == [] and await decisions(db, a) == []
     assert await agent_drafts(db) == [] and await redis.xlen("gh.bridge.outbound") == 0
 
 

@@ -3,12 +3,15 @@
 Chỉ stdlib + orjson: module này nằm trong hộp nên KHÔNG được kéo theo `gh.config` / DB / Redis.
 
 Đường HTTP (nghe `0.0.0.0:8090` trong mạng nội bộ `agy-bus`; hộp KHÔNG bao giờ gọi ngược api):
-  GET  /healthz       không ký. {"ok": true, "service": "agy-box", "protocol": 1, "agy_version": "1.2.9"|null,
-                           "cli_logged_in": bool}
-  POST /v1/generate   ký. Yêu cầu  {request_id, model, effort|null, prompt, json_mode, timeout_s}
+  GET  /healthz       không ký. {"ok": true, "service": "agy-box", "protocol": 2, "agy_version": "1.2.9"|null,
+                           "cli_logged_in": null}
+  POST /v1/generate   ký. Yêu cầu  {request_id, model, effort|null, prompt, json_mode, timeout_s, session}
                            Trả lời {request_id, text, tokens_in, tokens_out, raw}
-  POST /v1/models     ký. Yêu cầu  {request_id, timeout_s?}
+  POST /v1/models     ký. Yêu cầu  {request_id, timeout_s?, session}
                            Trả lời {request_id, models: [{id, ...}], raw_text}
+`session` (protocol 2, review v0.1.63 P1-1): nội dung tệp token agy của hồ sơ đang hoạt động (chuỗi JSON đối tượng
+≤ 64 KiB) — api đọc từ kho phiên của nó (O_NOFOLLOW, đã kiểm) và gửi theo từng yêu cầu; hộp không có volume, không lưu,
+không trả lại.
 Lỗi (mọi mã khác 2xx): {"error": {"code": <mã dưới đây>, "message": "...", ...}} — xem ERROR_STATUS.
 
 Ký: header `X-GH-Ts` (giây UNIX, số nguyên) và `X-GH-Sig` = hex HMAC-SHA256(subkey("request"),
@@ -24,7 +27,7 @@ import hmac
 import re
 from collections.abc import Mapping
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 SERVICE = "agy-box"
 DEFAULT_PORT = 8090
 
@@ -46,6 +49,8 @@ HTTP_MARGIN_S = 10.0
 BUSY_RETRY_AFTER_S = 5.0
 
 REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_TS_RE = re.compile(r"^[0-9]{1,12}$")
+_SIG_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
 # Mã lỗi → HTTP status. Client dựng lại ngoại lệ từ `error.code` (xem client.raise_for_error).
 E_BAD_REQUEST = "bad_request"              # 400 BadRequest (JSON hỏng, thiếu trường, model sai regex)
@@ -108,6 +113,14 @@ def sign_request(key: bytes, method: str, path: str, body: bytes, now: float) ->
     return {TS_HEADER: str(ts), SIG_HEADER: request_signature(key, method, path, ts, body)}
 
 
+def signature_equal(expected: str, got: object) -> bool:
+    """So chữ ký thời gian hằng. `got` không phải hex 64 ký tự ASCII (vd header có ký tự ngoài ASCII — compare_digest
+    trên chuỗi như vậy ném TypeError) ⇒ False, không ném (review v0.1.63, P3)."""
+    if not isinstance(got, str) or not _SIG_RE.fullmatch(got):
+        return False
+    return hmac.compare_digest(expected.encode("ascii"), got.lower().encode("ascii"))
+
+
 def verify_request(key: bytes, method: str, path: str, body: bytes, headers: Mapping[str, str], now: float
                    ) -> str | None:
     """None nếu hợp lệ; ngược lại một lý do ngắn (`missing`, `bad_timestamp`, `stale`, `bad_signature`) — CHỈ để ghi
@@ -116,12 +129,11 @@ def verify_request(key: bytes, method: str, path: str, body: bytes, headers: Map
     ts_raw, sig = get(TS_HEADER) or get(TS_HEADER.lower()), get(SIG_HEADER) or get(SIG_HEADER.lower())
     if not ts_raw or not sig:
         return "missing"
-    try:
-        ts = int(ts_raw)
-    except (TypeError, ValueError):
+    if not _TS_RE.fullmatch(str(ts_raw)):          # chỉ chữ số ASCII (int() nhận cả chữ số Unicode khác)
         return "bad_timestamp"
+    ts = int(ts_raw)
     if abs(now - ts) > MAX_SKEW_S:
         return "stale"
-    if not hmac.compare_digest(request_signature(key, method, path, ts, body), str(sig).lower()):
+    if not signature_equal(request_signature(key, method, path, ts, body), sig):
         return "bad_signature"
     return None

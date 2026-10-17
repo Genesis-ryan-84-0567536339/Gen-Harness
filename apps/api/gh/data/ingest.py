@@ -112,7 +112,7 @@ async def upsert_group(db: AsyncSession, org_id: uuid.UUID, channel: Any, extern
 
 async def upsert_group_ex(db: AsyncSession, org_id: uuid.UUID, channel: Any, external_id: str, name: str | None,
                           member_count: int | None = None, *, quiet: bool = False) -> tuple[Any, bool]:
-    """Như `upsert_group` nhưng trả thêm cờ "vừa tạo". v0.1.71 (Nhật ký lắng nghe): nhóm MỚI ghi sự kiện `group_new`
+    """Như `upsert_group` nhưng trả thêm cờ "vừa tạo". v0.1.68 (Nhật ký lắng nghe): nhóm MỚI ghi sự kiện `group_new`
     (kèm chế độ nghe nó tự vào), nhóm đổi tên ghi `group_renamed`; `quiet` tắt sự kiện (lần quét danh bạ đầu tiên)."""
     created = False
     row = (await db.execute(text("""SELECT id, code, name, listen_mode, left_at FROM core.groups
@@ -299,7 +299,7 @@ async def ingest_message(db: AsyncSession, org_id: uuid.UUID, p: dict[str, Any])
         {"id": event_id, "o": org_id, "r": received_at, "occ": _ts(p.get("occurred_at")), "c": channel.id,
          "g": group.id if group else None, "s": identity.id, "m": msg_id, "k": kind, "b": body,
          "pl": orjson.dumps(payload, default=str).decode(), "h": content_hash, "d": direction, "men": mentions,
-         # v0.1.71: chế độ nghe LÚC tin vào kho (nhóm: chế độ của nhóm; tin 1-1: silent | reply) cho Nhật ký lắng nghe.
+         # v0.1.68: chế độ nghe LÚC tin vào kho (nhóm: chế độ của nhóm; tin 1-1: silent | reply) cho Nhật ký lắng nghe.
          "lm": group.listen_mode if group is not None else dm})
     if new_direct:
         await lev.record(db, org_id, "direct_new", channel_id=channel.id, channel_type=channel.type,
@@ -338,6 +338,9 @@ async def sync_listen_sets(db: AsyncSession, redis: Redis, org_id: uuid.UUID) ->
         if ids:
             pipe.sadd(key, *ids)
         pipe.set(f"gh:bridge:listen_direct:{ch}", "0" if direct_mode(settings, ch) == "off" else "1")
+        # Cờ «nhóm mới» của kênh: bridge chỉ gắn nội dung tin đầu (`first_message`) vào `group.discovered` khi =
+        # silent — ask/off thì lõi không lưu nên nội dung không được phép nằm lại trong stream (review v0.1.65 P2-1).
+        pipe.set(f"gh:bridge:new_group_mode:{ch}", new_group_mode(settings, ch))
     await pipe.execute()
 
 
@@ -379,7 +382,7 @@ async def close_sessions(bus: EventBus, org_id: uuid.UUID, type: str, session_id
                           org_id=org_id)
 
 
-async def _reset_new_group_mode_if_account_changed(db: AsyncSession, org_id: uuid.UUID, s: Any,
+async def _reset_new_group_mode_if_account_changed(db: AsyncSession, redis: Redis, org_id: uuid.UUID, s: Any,
                                                    account_id: str | None) -> None:
     """Quét QR một tài khoản KHÁC tài khoản trước đó của kênh ⇒ «Nhóm mới» về lại MẶC ĐỊNH (`silent`: Lắng nghe im lặng,
     QD 17/10): lựa chọn Hỏi Sếp / Không nghe là của tài khoản cũ, không mang sang tài khoản mới (review v0.1.65 P3). Lần
@@ -401,6 +404,19 @@ async def _reset_new_group_mode_if_account_changed(db: AsyncSession, org_id: uui
         await actionlog.record(db, org_id=org_id, actor_type="system", actor_id=f"bridge:{s.type}",
                                action="channel.new_group_mode_reset", target_type="channel", target_id=s.type,
                                detail={"from": before, "reason": "account_changed"})
+        await sync_listen_sets(db, redis, org_id)   # cờ gh:bridge:new_group_mode:<kênh> của bridge theo mặc định mới
+        # Báo Sếp (chuông của Owner), không chỉ Nhật ký: nhóm mới của tài khoản này sẽ được LƯU tin chứ không còn
+        # «Hỏi Sếp» / «Không nghe» như Sếp đã chọn cho tài khoản cũ.
+        from gh import notifications
+
+        name = CHANNEL_NAME.get(s.type, s.type)
+        was = {"ask": "Hỏi Sếp", "off": "Không nghe"}.get(before, before)
+        await notifications.notify(
+            db, org_id, await notifications.owner_ids(db, org_id), kind="channel.new_group_mode_reset",
+            title=f"Kênh {name}: nhóm mới về Lắng nghe im lặng",
+            body=(f"Sếp vừa quét tài khoản {name} khác nên cách xử lý nhóm mới (trước: «{was}») về mặc định «Lắng nghe "
+                  "im lặng»: nhóm mới sẽ được lưu tin, không bao giờ trả lời. Muốn đổi, vào Kết nối › thẻ kênh."),
+            link="/connections", redis=redis)
 
 
 async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: uuid.UUID, type: str,
@@ -454,7 +470,7 @@ async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: u
             return out
         account = p.get("account") or {}
         cred = _reencrypt(p.get("credential"), s)
-        await _reset_new_group_mode_if_account_changed(db, org_id, s, str(account.get("id") or "") or None)
+        await _reset_new_group_mode_if_account_changed(db, redis, org_id, s, str(account.get("id") or "") or None)
         # Một kênh chỉ một phiên hoạt động: phiên cũ kết thúc
         # — và (v0.1.62, F067) bridge được bảo đóng kết nối của chúng.
         old = (await db.execute(text("""UPDATE core.channel_sessions SET state = 'logged_out', ended_at = now()
@@ -592,11 +608,21 @@ async def handle_directory(db: AsyncSession, redis: Redis, org_id: uuid.UUID, p:
     # Nhật ký lắng nghe — chỉ một dòng tóm tắt `groups_synced`.
     first_sync = (await db.execute(text("SELECT 1 FROM core.groups WHERE channel_id = :c LIMIT 1"),
                                    {"c": channel.id})).first() is None
+    # Lần quét KHÔNG phải đầu tiên cũng có thể thấy hàng trăm nhóm mới cùng lúc (đăng nhập tài khoản khác, bridge
+    # vừa báo một nhóm lạ trước lần quét đầu): chỉ ghi tối đa MAX_GROUP_NEW_EVENTS dòng «nhóm mới» (và phát
+    # WebSocket tương ứng), phần còn lại gom vào MỘT dòng tóm tắt `groups_synced` — như left/rejoined (≤ 50).
+    new_events = suppressed = 0
     for g in p.get("groups") or []:
         if not g.get("external_id"):
             continue
+        quiet = first_sync or new_events >= lev.MAX_GROUP_NEW_EVENTS
         row, created = await upsert_group_ex(db, org_id, channel, str(g["external_id"]), g.get("name"),
-                                             g.get("member_count"), quiet=first_sync)
+                                             g.get("member_count"), quiet=quiet)
+        if created and not first_sync:
+            if quiet:
+                suppressed += 1
+            else:
+                new_events += 1
         n += 1
         seen.append(str(g["external_id"]))
         members = (g.get("members") or [])[:5000]
@@ -641,6 +667,9 @@ async def handle_directory(db: AsyncSession, redis: Redis, org_id: uuid.UUID, p:
     if first_sync and n:
         await lev.record(db, org_id, "groups_synced", channel_id=channel.id, channel_type=channel.type,
                          detail={"groups": n})
+    elif suppressed:
+        await lev.record(db, org_id, "groups_synced", channel_id=channel.id, channel_type=channel.type,
+                         detail={"groups": suppressed, "extra": True})
     await sync_listen_sets(db, redis, org_id)
     return n
 
@@ -731,11 +760,21 @@ class Ingest:
                 found = await handle_group_discovered(db, self.redis, self.org_id, event.payload)
                 first_id = None
                 if found is not None:
-                    first_id = await ingest_discovered_message(db, self.org_id, event.payload)
+                    # Savepoint: lưu tin đầu lỗi thì chỉ mất tin đầu — nhóm vừa tạo, tập nghe và bộ đếm vẫn commit
+                    # (không có savepoint, cả giao dịch hỏng ⇒ bus giao lại 5 lần rồi DLQ, nhóm không bao giờ có).
+                    try:
+                        async with db.begin_nested():
+                            first_id = await ingest_discovered_message(db, self.org_id, event.payload)
+                    except Exception as exc:  # noqa: BLE001 — cách ly: không ghi nội dung tin vào log
+                        log.warning("không lưu được tin đầu của nhóm lạ (%s)", type(exc).__name__)
                 await db.commit()
                 pending = lev.take_pending(db)
                 first_row = await fetch_raw(db, first_id) if first_id is not None else None
             await lev.publish_pending(self.sm, self.redis, self.org_id, pending)
+            # Đã commit (tin lưu được thì đã vào Kho thô; ask/off thì bỏ): bản ghi mang NỘI DUNG tin không được ở lại
+            # trong stream (MAXLEN 100000, AOF bật). Lỗi trước dòng này ⇒ bus giao lại; vào DLQ thì bus tự bỏ nội dung.
+            if getattr(event, "message_id", None):
+                await self.redis.xdel(event.stream, event.message_id)
             if first_row is not None:
                 await realtime.publish(self.redis, "raw.new", raw_item(first_row), org_id=self.org_id)
             if found is not None and found[1]:   # nhóm MỚI ⇒ báo Console (nhóm `pending` mở hộp "Nhóm mới — chọn …")

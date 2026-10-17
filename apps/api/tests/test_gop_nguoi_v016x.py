@@ -85,6 +85,9 @@ async def _seed_business(db: Any, org: uuid.UUID, p: uuid.UUID, other: uuid.UUID
                              VALUES (:o, 'DRF-9001', 'message', '{}', 1, 'person', :p)"""), {"o": org, "p": p})
     await db.execute(text("""INSERT INTO core.assignments (org_id, user_id, subject_type, subject_id)
                              VALUES (:o, :u, 'person', :p)"""), {"o": org, "u": uid, "p": p})
+    # v0.1.68: sự kiện «người lạ nhắn riêng lần đầu» của Nhật ký lắng nghe trỏ về người.
+    await db.execute(text("""INSERT INTO ops.listen_events (org_id, kind, channel_type, person_id)
+                             VALUES (:o, 'direct_new', 'zalo', :p)"""), {"o": org, "p": p})
     await db.commit()
 
 
@@ -94,7 +97,8 @@ _EXPECT = [("biz.opportunities", "person_id", None), ("biz.deals", "person_id", 
            ("biz.promises", "promiser_person_id", None), ("biz.promises", "to_person_id", None),
            ("biz.documents", "owner_person_id", None), ("biz.tasks", "subject_id", "person"),
            ("biz.alerts", "subject_id", "person"), ("biz.cases", "subject_id", "person"),
-           ("biz.action_drafts", "subject_id", "person"), ("core.assignments", "subject_id", "person")]
+           ("biz.action_drafts", "subject_id", "person"), ("core.assignments", "subject_id", "person"),
+           ("ops.listen_events", "person_id", None)]
 
 
 async def _count_at(db: Any, person: uuid.UUID) -> dict[str, int]:

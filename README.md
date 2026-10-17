@@ -130,7 +130,7 @@ make up
 # tương đương: docker compose -f deploy/compose.yaml --env-file .env up -d --build
 ```
 
-`make up` kéo lên **12 dịch vụ** (các khoá dưới `services:` của `deploy/compose.yaml`):
+`make up` kéo lên **13 dịch vụ** (các khoá dưới `services:` của `deploy/compose.yaml`):
 
 | Dịch vụ | Vai trò |
 |---|---|
@@ -139,7 +139,8 @@ make up
 | `migrate` | Chạy migration Postgres một lần rồi thoát, trước khi `api`/`worker` khởi động (không chạy thường trực) |
 | `api` | FastAPI — mọi nghiệp vụ, xác thực, WebSocket realtime, Gen |
 | `worker` | Tiến trình nền (arq): sàng lọc, hook nghiệp vụ, việc định kỳ (sao lưu, Bản tin Gen, kiểm phiên…) |
-| `agy-box` | Hộp riêng Antigravity (v0.1.63): chạy `agy` cho việc có người ngoài (soạn trả lời khách, sàng lọc tin người lạ, Gen của nhân viên); không DB, không Redis, không khoá master — chỉ khoá ký `gh_agy_key` và volume token agy |
+| `agy-box` | Hộp riêng Antigravity (v0.1.63): chạy `agy` cho việc có người ngoài (soạn trả lời khách, sàng lọc tin người lạ, Gen của nhân viên); không DB, không Redis, không khoá master, không volume — chỉ khoá ký `gh_agy_key` (phiên agy gửi theo từng lượt), chỉ ra Internet qua `agy-egress` |
+| `agy-egress` | Proxy lối ra của `agy-box` (v0.1.63): chỉ cổng 443, chặn IP nội bộ / gateway / LAN |
 | `bridge` | Kết nối kênh nhắn tin thật (Zalo/WhatsApp qua QR), chỉ giữ khoá bridge, không bao giờ có khoá master |
 | `browser` | Trình duyệt riêng (Playwright/Chromium) cho Facebook cá nhân; không DB, không khoá master, không thấy Redis chính |
 | `browser-redis` | Redis riêng của `browser` (không lưu đĩa, ACL hẹp) — kênh giao thức `gh:browser:*` |

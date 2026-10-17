@@ -49,7 +49,7 @@ if sys.argv[1:2] == ["whoami"]:
 VARIANTS = {"gemini-3.8-flash": ["low", "medium", "high"], "gemini-3.1-pro": ["low", "high"],
             "claude-sonnet-4-6-thinking": []}
 LEGACY_OK = {"gemini-2.5-pro"}   # test cũ (đổi tài khoản) gọi model này
-CALLS = Path(os.environ["HOME"]) / "agy-calls.log"
+CALLS = Path(os.environ.get("FAKE_AGY_CALLS") or Path(os.environ["HOME"]) / "agy-calls.log")
 REQUIRE_EFFORT = os.environ.get("FAKE_AGY_REQUIRE_EFFORT") == "1"
 FLAGS = {"--model", "--effort", "--output-format", "-p", "--print", "--prompt", "--print-timeout"}  # có giá trị
 if sys.argv[1:2] == ["--version"]:

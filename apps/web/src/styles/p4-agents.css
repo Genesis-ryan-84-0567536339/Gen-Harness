@@ -25,6 +25,12 @@
 
 .ag-card__rule { height: 1px; background: var(--color-divider); }
 .ag-card__foot { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.ag-card__acts { flex: none; display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.ag-card__acts .btn-22 { white-space: nowrap; flex: none; }
+/* Màn hẹp: chip mức tự trị + hai nút ở MỘT hàng (nút không rớt dòng lẻ loi), dòng "lên tiếng gần nhất" xuống hàng dưới. */
+@media (max-width: 520px) {
+  .ag-card__spoke { order: 3; flex: 1 0 100%; }
+}
 .ag-autonomy {
   flex: none; font-size: 10px; font-family: var(--font-mono); color: var(--color-accent-300);
   border: 1px solid var(--color-accent-800); border-radius: var(--radius-sm); padding: 2px 7px;

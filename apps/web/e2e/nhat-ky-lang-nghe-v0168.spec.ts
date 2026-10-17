@@ -4,7 +4,7 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { loginAsOwner, mockHook, resetMock, resultsDir, settle } from './support';
 
 /**
- * v0.1.71 — Nhật ký lắng nghe, trên bản mock chạy thật ở 390px và 1440px: không lỗi console, không tràn ngang, dòng tin +
+ * v0.1.68 — Nhật ký lắng nghe, trên bản mock chạy thật ở 390px và 1440px: không lỗi console, không tràn ngang, dòng tin +
  * sự kiện + chuỗi "hệ thống đã làm gì", "Xem thêm", lọc, cập nhật trực tiếp (WebSocket), link nháp sang Bàn làm việc.
  * Ảnh: `SHOTS_DIR` (nếu đặt) hoặc test-results/visual.
  */

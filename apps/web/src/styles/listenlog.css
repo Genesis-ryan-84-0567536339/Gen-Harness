@@ -1,4 +1,4 @@
-/* Nhật ký lắng nghe (v0.1.71). Màu/cỡ chữ theo token; điểm nhấn duy nhất là "chuỗi việc hệ thống đã làm" dưới mỗi tin. */
+/* Nhật ký lắng nghe (v0.1.68). Màu/cỡ chữ theo token; điểm nhấn duy nhất là "chuỗi việc hệ thống đã làm" dưới mỗi tin. */
 
 .ll-live { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; color: var(--color-neutral-400); }
 
@@ -24,6 +24,9 @@
 
 .ll-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .ll-search { flex: 1 1 220px; min-width: min(100%, 200px); max-width: 360px; }
+.ll-filters > .gh-btn { flex: none; }
+/* Màn rộng (≥ 1100px): ô tìm chữ co lại nhường chỗ để «Xoá n bộ lọc» ở lại CÙNG hàng thay vì rớt xuống hàng riêng. */
+@media (min-width: 1100px) { .ll-search { flex-basis: 120px; min-width: 120px; } }
 .ll-search .gh-field__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .ll-search .gh-input { height: 26px; font-size: 11.5px; }
 

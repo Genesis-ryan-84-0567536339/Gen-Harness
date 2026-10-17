@@ -1,4 +1,4 @@
-"""Sự kiện trên kênh cho "Nhật ký lắng nghe" (v0.1.71): ghi nhẹ vào `ops.listen_events`, phát WebSocket `listen.event`.
+"""Sự kiện trên kênh cho "Nhật ký lắng nghe" (v0.1.68): ghi nhẹ vào `ops.listen_events`, phát WebSocket `listen.event`.
 
 Nơi ghi (ingest.py, system_api/routes.py) chỉ gọi `record(...)` TRONG transaction đang chạy; dòng chờ phát được cất ở
 `db.info["listen_pub"]`, sau commit người gọi `await publish_pending(redis, org_id, pending)` (cùng khuôn "ghi rồi mới
@@ -49,6 +49,8 @@ DIRECT_KINDS = ("direct_new",)
 GROUP_KINDS = tuple(k for k in KINDS if k not in CHANNEL_KINDS and k not in DIRECT_KINDS)
 #: Tên người/nhóm kèm theo trong câu: tối đa bao nhiêu tên.
 MAX_NAMES = 5
+#: Một lượt quét danh bạ ghi tối đa bấy nhiêu dòng «nhóm mới» (và WebSocket); phần dư gom thành một dòng tóm tắt.
+MAX_GROUP_NEW_EVENTS = 50
 
 _ENDED_TEXT = {"logged_out": "đã đăng xuất", "expired": "đã hết hạn phiên", "error": "bị ngắt do lỗi"}
 
@@ -86,7 +88,11 @@ def event_text(kind: str, detail: dict[str, Any], *, channel_type: str | None, g
                 parts.append(f"{blk['count']} {what}" + (f" ({', '.join(nm)}{more})" if nm else ""))
         out = f"Nhóm {g}: " + (", ".join(parts) or "thành viên thay đổi") + "."
     elif kind == "groups_synced":
-        out = f"Lần đầu quét danh bạ {ch}: thấy {int(detail.get('groups') or 0)} nhóm."
+        if detail.get("extra"):
+            out = (f"Quét danh bạ {ch}: còn {int(detail.get('groups') or 0)} nhóm mới nữa "
+                   "(không ghi từng nhóm một).")
+        else:
+            out = f"Lần đầu quét danh bạ {ch}: thấy {int(detail.get('groups') or 0)} nhóm."
     elif kind == "channel_connected":
         label = detail.get("account_label")
         head = f"Kênh {ch} đã nối lại" if detail.get("resumed") else f"Kênh {ch} đã đăng nhập"

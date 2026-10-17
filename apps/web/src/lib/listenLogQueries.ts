@@ -5,6 +5,8 @@ import { api } from './api';
 /** Khoá truy vấn của Nhật ký lắng nghe — một gốc để làm mới cả danh sách lẫn số liệu đầu màn. */
 export const qkLog = {
   root: ['listenlog'] as const,
+  /** Gốc của MỌI truy vấn danh sách (không gồm số liệu 24 giờ) — tín hiệu WebSocket chỉ làm mới phần này. */
+  listRoot: ['listenlog', 'list'] as const,
   list: (q: ListenLogQuery) => ['listenlog', 'list', q] as const,
   stats: ['listenlog', 'stats'] as const,
 };
@@ -33,9 +35,15 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 let firstAt = 0;
 let live = true;
 
-/** Công tắc "Cập nhật trực tiếp" của màn (tắt ⇒ tín hiệu bị bỏ, người dùng bấm Làm mới). */
-export function setListenLogLive(on: boolean): void {
+/**
+ * Công tắc "Cập nhật trực tiếp" của màn (tắt ⇒ tín hiệu bị bỏ, người dùng bấm Làm mới).
+ * Truyền `qc` khi người dùng BẬT LẠI sau lúc tạm dừng ⇒ tải bù ngay một lần để tin đến lúc tạm dừng hiện ra
+ * (không tải khi đã bật sẵn, hay khi màn đóng — lúc đó không có `qc`).
+ */
+export function setListenLogLive(on: boolean, qc?: QueryClient): void {
+  const resumed = on && !live;
   live = on;
+  if (resumed && qc) void qc.invalidateQueries({ queryKey: qkLog.listRoot });
 }
 export function isListenLogLive(): boolean {
   return live;
@@ -55,7 +63,9 @@ export function scheduleListenLogRefresh(qc: QueryClient): void {
   const wait = Math.max(0, Math.min(TRAILING_MS, firstAt + MAX_WAIT_MS - now));
   timer = setTimeout(() => {
     timer = null;
-    void qc.invalidateQueries({ queryKey: qkLog.root });
+    // Chỉ danh sách: số liệu 24 giờ đầu màn tự làm mới theo chu kỳ riêng (2 phút) và nút «Làm mới» — không kéo theo
+    // mỗi nhịp WebSocket (sàng lọc bắn cả trăm tín hiệu).
+    void qc.invalidateQueries({ queryKey: qkLog.listRoot });
   }, wait);
 }
 

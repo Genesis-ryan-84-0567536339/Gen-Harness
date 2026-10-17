@@ -82,7 +82,7 @@ async def test_navigation_filtered_by_role(owner_api, client, db, role: str) -> 
     assert "people" not in screens(nav) or role == "owner"
     if role == "owner":
         # v0.1.42: số màn KHÔNG ẩn; DB test chưa có nhân viên ⇒ Đánh giá/Chăm sóc ẩn (14 → 12).
-        # v0.1.71: thêm Nhật ký lắng nghe ⇒ Nâng cao 10 → 11.
+        # v0.1.68: thêm Nhật ký lắng nghe ⇒ Nâng cao 10 → 11.
         assert [d["count"] for d in nav] == [12, 11]
     assert "team" not in screens(nav) or role == "owner"
 

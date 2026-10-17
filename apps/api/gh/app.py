@@ -21,6 +21,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from gh import __version__, biz, health, realtime
 from gh.agents_api.routes import router as agents_router
 from gh.audit.routes import router as audit_router
+from gh.auth import deps
 from gh.auth.account import router as account_router
 from gh.auth.routes import router as auth_router
 from gh.auth.users import router as users_router
@@ -50,11 +51,19 @@ from gh.gen.coach.routes import router as coach_router
 from gh.gen.routes import router as gen_router
 from gh.hub_link.routes import router as hub_router
 from gh.mcp_api.routes import router as mcp_router
-from gh.middleware import ActionLogGuard, RequestIdMiddleware, SameOriginFrame, SessionCookieRenewal, SetupGate
+from gh.middleware import (
+    ActionLogGuard,
+    RequestIdMiddleware,
+    SameOriginFrame,
+    SessionCookieRenewal,
+    SetupGate,
+    TrustedForwardedProto,
+)
 from gh.notifications import router as notifications_router
 from gh.owner.routes import router as owner_router
 from gh.plugins_api.routes import router as plugins_router
 from gh.providers import cli as climod
+from gh.providers import clients
 from gh.providers.router import ModelRouter
 from gh.refinery.jev_routes import router as jev_router
 from gh.refinery.triage_routes import router as triage_router
@@ -170,6 +179,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         result = await bootstrap(db)
         await db.commit()
     app.state.org_id = result.org_id
+    # Review lần 2 v0.1.63 (P3-5): HOME tạm agy (có token) còn sót khi tiến trình trước bị SIGKILL.
+    with contextlib.suppress(Exception):
+        await asyncio.to_thread(clients.sweep_stale_turn_dirs)
+    # Review lần 2 v0.1.63 (P3-2): phân giải tên proxy tin cậy (Caddy) trước yêu cầu đầu — sau đó làm mới ở luồng nền.
+    with contextlib.suppress(Exception):
+        await asyncio.to_thread(deps.refresh_trusted_proxies)
     # v0.1.44 (F-8c): đồng bộ run/telegram.json cho Trực canh máy chủ (sau nhập gói/đổi khoá vẫn khớp) — best-effort.
     await telegram_service.sync_host_file(sessionmaker())
     app.state.console_ready = None
@@ -258,6 +273,7 @@ def create_app(*, with_lifespan: bool = True, expose_docs: bool | None = None) -
     app.add_middleware(SameOriginFrame)  # cả 428 của SetupGate cũng mang header khung cùng gốc
     # v0.1.44 (F-4b) NGOÀI CÙNG: Mã yêu cầu cho mọi phản hồi (kể cả 428/423/500) + lưới 500 problem+json.
     app.add_middleware(RequestIdMiddleware)
+    app.add_middleware(TrustedForwardedProto)  # ngoài cùng: mọi lớp trong thấy đúng scheme (P3-4, review lần 2)
     return app
 
 

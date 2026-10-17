@@ -45,6 +45,8 @@ describe('healthModel — Hộp riêng Antigravity (H1)', () => {
     expect(typeof r?.value).toBe('string');
     const tip = healthTips(h).find((t) => t.key === 'agy_box');
     expect(tip?.title).toBe('Cách bật lại Hộp riêng Antigravity');
-    expect(tip?.steps.map((s) => s.cmd).filter(Boolean)).toEqual(['genh logs agy-box', 'genh update']);
+    expect(tip?.steps.map((s) => s.cmd).filter(Boolean)).toEqual(['genh logs agy-box', 'genh start']);
+    // Review v0.1.63 (P3): `genh update` tải bản mới / có thể không làm gì khi đã mới nhất — dựng lại hộp là `genh start`.
+    expect(tip?.steps.some((s) => s.cmd === 'genh update')).toBe(false);
   });
 });

@@ -49,3 +49,29 @@ async def test_scanning_a_different_account_resets_new_group_mode_to_default(own
     log = (await db.execute(text("""SELECT detail FROM ops.action_log
                                     WHERE action = 'channel.new_group_mode_reset'"""))).all()
     assert len(log) == 1 and log[0].detail == {"from": "off", "reason": "account_changed"}
+
+
+async def test_account_change_reset_rings_the_owner_bell_only_when_the_mode_changed(owner_api, db, redis, app) -> None:  # type: ignore[no-untyped-def]
+    """Review v0.1.65 P3: đổi tài khoản làm «Nhóm mới» đổi chế độ ⇒ chuông của Owner (không chỉ Nhật ký hành động)."""
+    org = await org_id(db)
+    await set_channel_setting(db, org, "new_group_mode", "zalo", "ask")
+    await db.commit()
+    await _active(app, redis, org, await _session(db, org, state="pending_qr", started_ago_h=None, cred=False,
+                                                  qr_ago_h=0.01), "A1")
+    q = "SELECT title, body, link FROM core.notifications WHERE kind = 'channel.new_group_mode_reset'"
+    await db.rollback()
+    assert (await db.execute(text(q))).all() == []                       # lần nối đầu: không đổi gì ⇒ không chuông
+    await _active(app, redis, org, await _session(db, org, state="pending_qr", started_ago_h=None, cred=False,
+                                                  qr_ago_h=0.01), "B2")
+    await db.rollback()
+    [row] = (await db.execute(text(q))).all()
+    assert "Zalo" in row.title and "Lắng nghe im lặng" in row.title and row.link == "/connections"
+    assert "Hỏi Sếp" in row.body and "không bao giờ trả lời" in row.body
+    owners = (await db.execute(text("""SELECT count(*) FROM core.notifications
+                                       WHERE kind = 'channel.new_group_mode_reset'"""))).scalar_one()
+    assert owners >= 1
+    # đã ở mặc định rồi, đổi tiếp tài khoản ⇒ không chuông thêm
+    await _active(app, redis, org, await _session(db, org, state="pending_qr", started_ago_h=None, cred=False,
+                                                  qr_ago_h=0.01), "C3")
+    await db.rollback()
+    assert len((await db.execute(text(q))).all()) == 1

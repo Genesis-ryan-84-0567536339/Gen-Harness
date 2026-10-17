@@ -21,14 +21,19 @@ const CHOICES: Array<{ mode: SettableListenMode; label: string; icon: string }> 
 ];
 
 /**
- * Hộp "Nhóm mới — chọn Lắng nghe im lặng/Không nghe": CHỈ hiện khi Sếp đặt «Nhóm mới: Hỏi Sếp» (QD 17/10 — mặc định là tự
- * vào Lắng nghe im lặng, không hỏi) và có nhóm CHỜ chọn (`listen_mode = pending`). Chưa chọn thì Gen không lưu tin nào của
+ * Hộp "Nhóm mới — chọn Lắng nghe im lặng/Không nghe": hiện khi có nhóm CHỜ chọn (`listen_mode = pending`) — nhóm đó phát sinh
+ * khi Sếp đặt «Nhóm mới: Hỏi Sếp» (QD 17/10 — mặc định là tự vào Lắng nghe im lặng, không hỏi) và còn đó cả khi Sếp đổi
+ * sang chế độ khác sau đó, cho tới khi hết nhóm chờ. Chưa chọn thì Gen không lưu tin nào của
  * nhóm đó; dù chọn gì, danh sách thành viên vẫn được ghi nhận (để hợp nhất danh tính, không lưu tin). Máy chủ cũ (không có
  * `new_group_mode`) vẫn hiện hộp khi có nhóm chờ.
  */
 export function NewGroupsBox({ channel, canManage, onOpenAll }: { channel: Channel; canManage: boolean; onOpenAll: () => void }) {
+  // Còn nhóm CHỜ chọn thì hộp vẫn hiện dù Sếp đã đổi «Nhóm mới» sang Lắng nghe im lặng / Không nghe (đổi chính sách chỉ áp
+  // cho nhóm phát hiện SAU, không tự đổi nhóm đang chờ): ẩn hộp sẽ để các nhóm đó kẹt ở «Chờ Sếp chọn», không lưu tin.
+  // Máy chủ cũ không gửi `groups_pending`: chỉ hiện khi còn đang «Hỏi Sếp» (hoặc chưa biết) như trước.
   const asks = channel.new_group_mode === undefined || channel.new_group_mode === 'ask';
-  const enabled = isQrChannel(channel) && channel.installed && channel.state === 'active' && asks && (channel.groups_pending ?? 1) > 0;
+  const hasPending = channel.groups_pending === undefined ? asks : channel.groups_pending > 0;
+  const enabled = isQrChannel(channel) && channel.installed && channel.state === 'active' && hasPending;
   const pending = usePendingGroups(channel.type, enabled);
   const [failed, setFailed] = useState<unknown>(null);
   // F1d — ô «Áp dụng cho các nhóm mới sau này»: chỉ hiện khi máy chủ có `new_group_mode`. QD 17/10: KHÔNG còn bật sẵn — Sếp

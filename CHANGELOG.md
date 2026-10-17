@@ -7,12 +7,40 @@ Ngày = ngày Release trên GitHub theo giờ Việt Nam; tiêu đề trong `doc
 (v0.1.32–v0.1.34, v0.1.40, v0.1.46) hoặc vài ngày (v0.1.47, v0.1.48: làm 03/10, phát hành 09/10).
 Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) ghi ở [ROADMAP › Bản phản ứng](docs/ROADMAP.md).
 
+## v0.1.68 — Một danh sách việc, thiết lập nói thật, màn «Nhật ký lắng nghe»; bản gộp v0.1.67 + v0.1.68 (17/10/2026)
+- **Thiết lập và «Việc Sếp cần làm» nói thật** (D1, C1, C2): chỉ MỘT cách đếm việc và MỘT đường tới «Thêm nguồn AI» (`/setup?buoc=nguon-ai`); nguồn Sếp đã tắt không bị tự bật lại; «Mời người trong đội» chỉ xong khi có người khác Owner đang hoạt động; làm lại bước 8 không tạo agent trùng, agent bước 8 nghe sẵn mọi kênh đã nối; vai không phải Owner mở `/guide/n` thấy khung «Việc này do Owner làm» (hết 403 ở console); Kết nối › Gen-hub «Lưu & kiểm tra» tự ghi kết quả kiểm. Route-crawl duyệt thêm vai Operator và Auditor.
+- **Màn mới «Nhật ký lắng nghe»** (Nâng cao › Tầng dữ liệu, sau Kho dữ liệu thô): một dòng thời gian gộp tin và sự kiện kênh (nhóm mới/rời, thành viên vào-rời, kênh nối/ngắt), kèm chế độ nghe lúc tin vào kho, sàng lọc, quyết định của agent trực; tìm chữ, lọc, tự cập nhật. Migration 0040.
+- **THAY ĐỔI QUYỀN**: đổi hạng chuỗi nguồn AI sau khi Hoàn tất thiết lập, xoá nguồn AI và xoá khoá API cần mã PIN `ai.route_change`; xem thêm v0.1.67 ở dưới.
+- Gộp hai bản: v0.1.67 (model hiển thị = model chạy + agent làm và nói thật) **phát hành chung trong v0.1.68** — Sếp chỉ cần một lần `genh update`; kèm bản gộp v0.1.65 / bản vá v0.1.66 (hộp riêng Antigravity, Telegram 2 chiều, chế độ nghe) nếu máy chưa lên. Chi tiết: [docs/releases/v0.1.68.md](docs/releases/v0.1.68.md)
+
+## v0.1.67 — Model hiển thị = model chạy + Agent làm và nói thật: một bộ chọn model, xoá khoá / gỡ model / hạn mức, lỗi model đúng loại, Lưu trữ agent, «Chưa trả lời» đúng người (17/10/2026)
+- **Model hiển thị = model chạy** (B3, C3 + D2): «Chuẩn: …», chuỗi chạy và bảng gán dùng chung một hàm; model Sếp đã chốt hiện đúng; Gen không ép tầng Nhanh khi Sếp đã ghim model; flash = Cân bằng, flash-lite = Nhanh; ô chọn model luôn hiện cả khi Kiểm tra đỏ (ghi «chưa xác minh»). Việc mới ở API & Model: Xoá khoá, Gỡ model (chặn nếu còn lượt gọi trong 30 ngày, có «Tắt model»), ô Hạn mức/ngày và Lượt/phút. Bản cài cũ chỉ có 1 model Antigravity ⇒ tự thêm model ở ô chọn nếu cần tầng «Kỹ hơn».
+- **Agent nói thật** (B7, C5): thẻ agent có dòng MODEL («Chuẩn: …» hoặc model riêng, cảnh báo khi nguồn đã tắt); lỗi 503 phân biệt «chưa có model» với «nguồn đang lỗi / hết hạn mức»; bảng «Agent đã nói gì» hiện câu agent gợi ý, «Đã gửi» chỉ khi nháp thật sự gửi; Soạn lại theo giọng, điều cấm, xưng hô của agent.
+- **Lưu trữ agent** (PIN `agent.manage`, giữ lịch sử quyết định), chặn trùng tên, tắt agent không cần PIN, bật cần PIN, nhân bản chép cả model riêng, mức tự trị mặc định 4, mẫu Việt hoá. Migration 0039. **THAY ĐỔI QUYỀN**: Quản lý chỉ thấy nháp trong phạm vi của mình; «Sửa rồi gửi» của vai dưới Owner chặn chuỗi số đã che (422). **«Chưa trả lời» đúng người, đúng tin** (C6): tin 1-1 ghép theo người nhận, mỗi người một cảnh báo.
+- Phát hành chung trong v0.1.68 (không có bản v0.1.67 riêng). Chi tiết: [docs/releases/v0.1.67.md](docs/releases/v0.1.67.md)
+
+## v0.1.66 — Bản vá phát hành của v0.1.65: sửa bước kiểm E2E nâng cấp lỗi thời; nội dung sản phẩm như v0.1.65 (18/10/2026)
+- v0.1.65 đã có bản thử nhưng E2E «cài đặt thật» chế độ release đỏ ở hai job nâng cấp (từ v0.1.60 và v0.1.62) vì bước F-22 còn đòi api tự chuyển phiên Claude từ đường dẫn cũ — việc v0.1.63 đã cố ý bỏ. Sửa bước kiểm + thêm test giữ hợp đồng (`.github/workflows/e2e-install.yml`, `test_e2e_upgrade_steps.py`).
+- **Mã sản phẩm KHÔNG đổi**, nội dung như v0.1.65 (gộp v0.1.63 + v0.1.64 + v0.1.65). Ai đang ở v0.1.62 chạy `genh update` sẽ lên thẳng v0.1.66; không có bản chính thức v0.1.65 riêng.
+- Chi tiết: [docs/releases/v0.1.66.md](docs/releases/v0.1.66.md)
+
+## v0.1.65 — Chế độ nghe & danh bạ: nhóm mới tự vào Lắng nghe im lặng, thu thành viên mọi nhóm, tin 1-1 lưu im lặng; quyền xem tin 1-1 chặt hơn (17/10/2026)
+- **Nhóm mới mặc định Lắng nghe im lặng** (Sếp chốt 17/10): lưu hết tin, KHÔNG BAO GIỜ trả lời kể cả khi được tag (`tagged_only` mới trả lời khi tag); tin ĐẦU TIÊN của nhóm lạ cũng được lưu; nhóm cũ đang Không nghe giữ nguyên; đổi mặc định ở thẻ kênh (cần mã PIN). **Danh bạ** quét 2 giờ/lượt, thu thành viên MỌI nhóm (kể cả Không nghe), đánh dấu người/nhóm đã rời; nút «Cập nhật danh sách nhóm».
+- **Tin 1-1 lưu im lặng** (bản cài cũ đang tắt ⇒ nay lưu im lặng, đang bật giữ trả lời): ba mức Lưu im lặng / Lưu và cho trợ lý trả lời / Không lưu; «Gán BOT» cho một người có tác dụng với tin 1-1 của người đó. **THAY ĐỔI QUYỀN**: tin 1-1 chỉ Owner (hoặc người phụ trách/được giao đúng người đó) xem nguyên văn; gán/bỏ BOT cho một người chỉ Owner + mã PIN; SĐT/JID che với vai dưới Owner. Migration 0038 (sau 0037).
+- **Gộp ba bản lớn**: v0.1.63 (hộp riêng Antigravity) và v0.1.64 (Telegram 2 chiều, sàng lọc ghi loại người) **phát hành chung trong v0.1.65** — Sếp chỉ cần một lần `genh update`.
+- Chi tiết: [docs/releases/v0.1.65.md](docs/releases/v0.1.65.md)
+
+## v0.1.64 — Telegram 2 chiều: Sếp nhắn Gen qua Telegram; sàng lọc ghi loại người, Sếp tự đánh dấu nhân viên (17/10/2026)
+- **Telegram 2 chiều (Nợ #13)**: ghép Telegram bằng mã 6 số (`/start <mã>`, chỉ lưu băm HMAC, sống 10 phút), công tắc «Nhận tin từ Sếp» (mặc định TẮT); chỉ nhận chat riêng đúng tài khoản đã ghép; lệnh `/hom_nay` `/viec` `/suc_khoe` `/nhap` + câu hỏi tự do (Gen chỉ đọc/đề xuất, dữ liệu đã che); đề xuất chỉ có nút «Mở Console để Xác nhận» — không nút Duyệt, không nhận mã PIN qua Telegram. Migration 0037.
+- **Sàng lọc ghi loại người (B6)**: kết quả quy tắc ghi ngược vào hồ sơ (chỉ nâng từ «chưa rõ», không đè loại Sếp đã đặt); hồ sơ có nút «Đánh dấu là nhân viên»; tin lỗi không kẹt (tự nhận lại sau 30 phút, tối đa 3 lần), dải pipeline hiện số tin lỗi.
+- Phát hành chung trong v0.1.65 (không có bản v0.1.64 riêng). Chi tiết: [docs/releases/v0.1.64.md](docs/releases/v0.1.64.md)
+
 ## v0.1.63 — Hộp riêng Antigravity: mỗi vai một chỗ chạy, "nguồn AI dùng được" một hàm duy nhất (17/10/2026)
-- **Hộp riêng `agy-box`**: container chạy Antigravity không có khoá master, DB hay Redis (chỉ khoá ký `gh_agy_key` + volume token agy; không mạng `default`); `genh update` tự sinh khoá và dựng hộp, `genh doctor` + thẻ Sức khoẻ có dòng "Hộp riêng Antigravity".
-- **Mỗi vai một chỗ chạy**: Gen của Sếp, Bản tin, agent nội bộ chạy agy trong tiến trình; sàng lọc tin người lạ, Soạn lại / Dịch nháp, agent trực kênh (ngoại giao), Gen của nhân viên, lượt thử agent chạy qua hộp. Hộp tắt ⇒ dùng nguồn AI kế, không bao giờ rơi về agy trong tiến trình; "Thử quy tắc" vẫn không dùng agy.
+- **Hộp riêng `agy-box`**: container chạy Antigravity không có khoá master, DB hay Redis (chỉ khoá ký `gh_agy_key`, không volume — tệp phiên agy gửi theo từng lượt, mọi lượt agy chạy HOME tạm; chỉ mạng internal, ra Internet qua proxy `agy-egress` chặn IP nội bộ/LAN; sau mỗi lượt hộp giết mọi tiến trình agy để lại và xoá `/tmp`, `/dev/shm`); `genh update` tự sinh khoá và dựng hộp, `genh doctor` + thẻ Sức khoẻ có dòng "Hộp riêng Antigravity".
+- **Mỗi vai một chỗ chạy**: Gen của Sếp, agent nội bộ chạy agy trong tiến trình; Bản tin, sàng lọc tin người lạ, Soạn lại / Dịch nháp, trực việc, agent trực kênh (ngoại giao), Gen của nhân viên, lượt thử agent chạy qua hộp. Nên đăng nhập Antigravity bằng tài khoản Google riêng (token đi vào hộp). Hộp tắt ⇒ dùng nguồn AI kế, không bao giờ rơi về agy trong tiến trình; "Thử quy tắc" vẫn không dùng agy.
 - **Một hàm "nguồn AI dùng được"** (`providers.readiness`): bước 4 thiết lập, dòng "nguồn AI" ở Việc Sếp cần làm và nút Kiểm tra cùng hỏi nó (đóng F002/F010/F014/F035), có lý do `box_down`.
 - **Cổng phát hành**: `check_agy_box_isolation.py` + E2E `e2e_agy_box.sh` (cài mới và nâng cấp) trước khi ra bản chính thức.
-- Chi tiết: [docs/releases/v0.1.63.md](docs/releases/v0.1.63.md)
+- Phát hành chung trong v0.1.65 (không có bản v0.1.63 riêng). Chi tiết: [docs/releases/v0.1.63.md](docs/releases/v0.1.63.md)
 
 ## v0.1.62 — Đợt A phần 2, Antigravity phân lớp theo kiến trúc, kênh bền, sức khoẻ, dev cục bộ (17/10/2026)
 - **Xem hết & tìm ở máy chủ**: Hộp thư, Việc, Nhật ký (câu tiếng Việt, ẩn `http.*`), Khách & Nhóm (con trỏ `(created_at, id)`, gán BOT hàng loạt theo bộ lọc, xuất/ẩn danh hoá một người); lỗi sao lưu và 403 nói tiếng người; Cung–Cầu không ghép bừa; che OTP/mật khẩu (kể cả mẫu Việt Nam) trước khi gửi model.

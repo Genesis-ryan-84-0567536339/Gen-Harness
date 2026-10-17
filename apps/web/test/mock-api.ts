@@ -1578,7 +1578,7 @@ export function createMockApi(opts: MockOptions = {}) {
         case 'raw':
           return done(res, 200, current.phase2.hooks.pushRaw());
         case 'listenevent':
-          // v0.1.71: thêm một sự kiện kênh vào Nhật ký lắng nghe + WS `listen.event`.
+          // v0.1.68: thêm một sự kiện kênh vào Nhật ký lắng nghe + WS `listen.event`.
           return done(res, 200, current.phase2.hooks.pushEvent());
         case 'scan':
           return done(res, current.phase2.hooks.scan(String(body.type ?? 'zalo')) ? 204 : 409);
