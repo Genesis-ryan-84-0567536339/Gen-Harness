@@ -52,7 +52,7 @@ from gh.biz.market.jobs import market_signal_capture, recompute_matches_org
 from gh.biz.people.jobs import period_for, recompute_people_reviews_org
 from gh.biz.queue.jobs import early_warning_scan
 from gh.config import get_settings
-from gh.data.ingest import ingest_message
+from gh.data.ingest import channel_row, ingest_message, upsert_group
 from gh.data_api.routes import RuleIn, create_rule
 from gh.db import sessionmaker
 from gh.providers.clients import Message
@@ -331,16 +331,11 @@ async def _channel_id(db: AsyncSession, org_id: uuid.UUID, type_: str) -> uuid.U
 
 
 async def _ensure_group(db: AsyncSession, org_id: uuid.UUID, g: Group) -> None:
-    """Nhóm mới luôn 'Không nghe' (khoá cứng) — bơm một tin dò để hệ thống thật tạo dòng nhóm, rồi Owner (ở đây
-    là script seed, đứng vai Owner) bật lắng nghe đúng như UI thật làm. Chỉ dò một lần: nếu nhóm đã có (lần
-    seed trước), tin dò với cùng `external_msg_id` sẽ không còn bị `listen_mode='off'` chặn nữa và sẽ lọt vào
-    kho thô thành một bản ghi 'probe' rác mới mỗi lần chạy — không idempotent."""
-    exists = (await db.execute(text("SELECT 1 FROM core.groups WHERE org_id = :o AND external_id = :x"),
-                               {"o": org_id, "x": _gext(g.key)})).scalar_one_or_none()
-    if exists is None:
-        await ingest_message(db, org_id, {"channel": g.channel, "external_group_id": _gext(g.key),
-                                          "group_name": g.name, "external_msg_id": f"{NS}-probe-{g.key}",
-                                          "sender_external_id": f"{NS}-probe", "body_text": "probe"})
+    """Tạo dòng nhóm (nếu chưa có) rồi đặt chế độ nghe theo bộ mẫu, đúng như Owner đổi ở UI thật. Nhóm mới từ 17/10/2026
+    MẶC ĐỊNH vào «Lắng nghe im lặng» (lưu tin) nên KHÔNG bơm tin dò để tạo nhóm nữa — tin dò sẽ lọt vào kho thô thành
+    một bản ghi 'probe' rác mỗi lần chạy (không idempotent, và bị tính là dữ liệu thật ngoài bộ mẫu)."""
+    channel = await channel_row(db, org_id, g.channel)
+    await upsert_group(db, org_id, channel, _gext(g.key), g.name)
     await db.execute(text("UPDATE core.groups SET listen_mode = :m WHERE org_id = :o AND external_id = :x"),
                      {"m": g.mode, "o": org_id, "x": _gext(g.key)})
 
