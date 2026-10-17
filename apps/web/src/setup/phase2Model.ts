@@ -18,6 +18,12 @@ export function providerReady(
   return p.auth_state === 'ok';
 }
 
+/**
+ * Review v0.1.68 (P2-1): có nguồn AI nhưng TẤT CẢ đều đã tắt (Sếp tắt ở API & Model). Màn Thiết lập nói đúng điều đó và chỉ chỗ bật
+ * lại, thay vì bảo "đăng nhập / dán khoá" (ngõ cụt: nguồn đã tắt không bao giờ "sẵn sàng", xem `providerReady`).
+ */
+export const allSourcesOff = (list: Array<Pick<Provider, 'enabled'>>): boolean => list.length > 0 && list.every((p) => !p.enabled);
+
 export type GroupDraft = Record<string, { listen_mode: ListenMode; view_scope: ViewScope }>;
 
 /** Bước 6: apply local edits over the server rows. */

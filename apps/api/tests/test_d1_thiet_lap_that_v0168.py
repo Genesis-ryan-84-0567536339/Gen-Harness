@@ -92,6 +92,22 @@ async def test_step4_disabled_source_is_not_ready(owner_api: Api, db: Any) -> No
     assert await _enabled(db, solo) is False
 
 
+async def test_step4_all_sources_off_409_says_disabled_not_untested(owner_api: Api, db: Any) -> None:
+    """Review v0.1.68 P2-1: mọi nguồn TẮT ⇒ câu 409 nói đúng "đã tắt" + chỉ chỗ bật (API & Model)."""
+    api = owner_api
+    solo = await _provider(api, db, "solo", ok=True, tested=["m-s"])
+    assert (await api.send("PATCH", f"/providers/{solo}", {"enabled": False})).status_code == 200
+    r = await api.send("PUT", "/setup/steps/4", {"provider_ids": [solo]})
+    assert r.status_code == 409 and r.json()["code"] == "STEP_INCOMPLETE", r.text
+    msg = r.json()["title"]
+    assert "đã tắt" in msg and "API & Model" in msg, msg
+    # Còn nguồn bật nhưng CHƯA kiểm tra (nguồn tắt gửi kèm): câu cũ vẫn đúng — không nhắc nhầm "đã tắt".
+    fresh = await _provider(api, db, "fresh", ok=False, tested=[])
+    r = await api.send("PUT", "/setup/steps/4", {"provider_ids": [fresh]})
+    assert r.status_code == 409, r.text
+    assert "đã tắt" not in r.json()["title"], r.json()["title"]
+
+
 # ─── F026 ───────────────────────────────────────────────────────────────────
 
 async def test_skip_step4_does_not_block_step8_and_step9(owner_api: Api, db: Any) -> None:

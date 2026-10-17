@@ -428,6 +428,9 @@ async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
     ready = [p for p in found if p.kind != "system_one" and p.is_enabled  # Jev không sinh được văn bản
              and (p.cli_ok if p.kind in CLI_KINDS else p.tested and p.auth_state == "ok")]
     if not ready:
+        # Review v0.1.68 (P2-1): mọi nguồn gửi lên đều TẮT ⇒ nói đúng điều đó + chỉ chỗ bật lại.
+        if found and not any(p.is_enabled for p in found):
+            raise incomplete("Nguồn AI đã tắt — bật lại ở API & Model (hoặc thêm một nguồn mới) rồi quay lại bước này")
         raise incomplete("Cần ít nhất một nhà cung cấp đã gọi thử thành công, hoặc một CLI (Antigravity / Claude Code) "
                          "đã đăng nhập")
     # v0.1.28 (UX C1): nguồn đã gọi thử OK mà Owner chưa bấm "Dùng model này" → tự dùng model đầu tiên nhận được khi

@@ -12,7 +12,7 @@ import { PROVIDER_KIND_LABEL, PROVIDER_PRESETS, choiceText, isCliKind, providerS
 import { ModelPicker } from '../screens/api/ModelPicker';
 import { CliDiagnose } from '../screens/system/CliDiagnose';
 import { CliLoginPanel } from './CliLoginPanel';
-import { providerHasModel, providerReady, testedModels } from './phase2Model';
+import { allSourcesOff, providerHasModel, providerReady, testedModels } from './phase2Model';
 import { StepFrame } from './StepFrame';
 import { describeError, type StepProps } from './types';
 
@@ -69,7 +69,9 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip
     ? null
     : ready.length
       ? 'Chọn model cho nguồn đã kiểm tra OK (bấm "Kiểm tra" rồi "Dùng model này") để tiếp tục.'
-      : 'Cần ít nhất một nguồn gọi thử thành công để tiếp tục.';
+      : allSourcesOff(list)
+        ? 'Mọi nguồn AI đang tắt — bật lại một nguồn ở API & Model, hoặc thêm nguồn mới rồi bấm "Kiểm tra".'
+        : 'Cần ít nhất một nguồn gọi thử thành công để tiếp tục.';
 
   const refreshProviders = () => void queryClient.invalidateQueries({ queryKey: qk2.providers });
   const test = useMutation({

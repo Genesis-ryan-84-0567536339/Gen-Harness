@@ -11,7 +11,7 @@ import { errorDetail, errorText } from '../../lib/errorText';
 import { FriendlyErrorText, InlineError, PinHint, SkeletonLines } from '../../screens/common';
 import { PROVIDER_PRESETS, isCliKind, testOkText } from '../../screens/api/apiModel';
 import { CliLoginPanel } from '../CliLoginPanel';
-import { providerHasModel, providerReady, testedModels } from '../phase2Model';
+import { allSourcesOff, providerHasModel, providerReady, testedModels } from '../phase2Model';
 import { describeError } from '../types';
 
 type ApiKind = Exclude<ProviderKind, CliKind | 'system_one'>;
@@ -99,7 +99,9 @@ export function StepAiSource({ finished = false, onSaved, onLater }: StepAiSourc
       ? test.isPending
         ? 'Đang kiểm tra kết nối với nguồn vừa đăng nhập…'
         : 'Đã đăng nhập nhưng chưa kiểm tra được model — bấm “Kiểm tra lại” ở nguồn bên trên.'
-      : 'Đăng nhập Google hoặc dán một khoá API và bấm Kiểm tra — có một nguồn chạy được là tiếp tục được.';
+      : allSourcesOff(list)
+        ? 'Mọi nguồn AI đang tắt — bật lại một nguồn ở API & Model, hoặc thêm nguồn mới ở trên rồi bấm Kiểm tra.'
+        : 'Đăng nhập Google hoặc dán một khoá API và bấm Kiểm tra — có một nguồn chạy được là tiếp tục được.';
 
   const save = async (e?: FormEvent) => {
     e?.preventDefault();
@@ -246,6 +248,14 @@ function ProviderRows({
               <div className="setup-one__prov-name" title={p.name}>
                 {p.name}
               </div>
+              {p.enabled ? null : (
+                <div className="setup-one__muted" data-testid="setup-ai-provider-off">
+                  Đã tắt — bật lại ở{' '}
+                  <Link to="/api" className="setup-one__link">
+                    API & Model
+                  </Link>
+                </div>
+              )}
               <div className="setup-one__muted">
                 {cli ? 'Tài khoản đã đăng nhập' : `${fmtInt(p.keys.length)} khoá${p.keys[0] ? ` · …${p.keys[0].last4}` : ''}`}
                 {offered.length ? ` · ${offered.length} model` : ''}
