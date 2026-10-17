@@ -18,7 +18,7 @@ import { queryClient } from '../../src/lib/queryClient';
 import { MoreScreen } from '../../src/owner/MoreScreen';
 import { ApiError } from '@gen-harness/contracts';
 import { ActionError, ModelUnavailableNotice } from '../../src/screens/common';
-import { NoModelBanner } from '../../src/screens/queue/NoModelBanner';
+import { NoModelNotice } from '../../src/screens/queue/NoModelBanner';
 import { SetupPage } from '../../src/setup/SetupPage';
 import {
   AI_LATER_KEY,
@@ -719,13 +719,13 @@ describe('Đích "Chọn model" dồn về /setup?buoc=nguon-ai', () => {
     queryClient.removeQueries({ queryKey: qk.me });
   });
 
-  it('NoModelBanner (NoModelNotice): "Chọn model" → /setup?buoc=nguon-ai', async () => {
+  it('NoModelNotice: "Chọn model" → /setup?buoc=nguon-ai', async () => {
     startServer({ done: [1, 2, 3], session: true });
     queryClient.setQueryData(qk.me, ME());
     render(
       <QueryClientProvider client={queryClient}>
         <MemoryRouter>
-          <NoModelBanner />
+          <NoModelNotice to={AI_SOURCE_PATH} />
         </MemoryRouter>
       </QueryClientProvider>,
     );

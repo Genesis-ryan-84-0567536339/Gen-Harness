@@ -79,7 +79,7 @@ const BOSS = {
     { row: 5, key: 'jev', title: 'Jev', optional: true, checks: ['jev'], done: false },
     { row: 8, key: 'facebook_reply', title: 'Facebook trả lời', optional: true, checks: [], done: false },
   ],
-  results: {}, required_done: 1, required_total: 6, switch_passes: 0,
+  results: {}, required_done: 1, required_total: 6,
 };
 
 // ── máy chủ giả ─────────────────────────────────────────────────────────────────────────────────────────────────────

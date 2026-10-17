@@ -714,10 +714,14 @@ async def patch_provider(pid: uuid.UUID, body: ProviderPatch, request: Request,
 
 @router.delete("/providers/{pid}", status_code=204)
 async def delete_provider(pid: uuid.UUID, request: Request, user: service.CurrentUser = Depends(MANAGE),
+                          _pin: Any = Depends(require_pin("ai.route_change")),
                           db: AsyncSession = DB) -> Response:
     """v0.1.28 (UX N1): xoá một nguồn model nhập nhầm / gọi thử lỗi (bước 4 và màn API & Model). Gỡ luôn gán model của
     các agent đang trỏ vào model của nguồn này (agent đó quay về dùng chuỗi chung). Antigravity CLI dùng phiên đăng
-    nhập — gỡ ở thẻ tài khoản CLI, không xoá ở đây."""
+    nhập — gỡ ở thẻ tài khoản CLI, không xoá ở đây.
+
+    Review v0.1.68 (P3): cần PIN `ai.route_change` như thêm / sửa nhà cung cấp — gỡ nguồn của Sếp cũng đổi chuỗi nguồn
+    AI (nguồn lạ lên đứng đầu, agent bị gỡ gán model rơi về chuỗi chung). Thứ tự kiểm: quyền (403) → PIN (423) → 404."""
     p = await _provider(db, user.org_id, pid)
     if p.kind in CLI_KINDS:
         name = climod.spec(p.kind).name
@@ -757,7 +761,9 @@ async def add_key(pid: uuid.UUID, body: KeyIn, request: Request, user: service.C
 
 @router.delete("/providers/{pid}/keys/{kid}", status_code=204)
 async def delete_key(pid: uuid.UUID, kid: uuid.UUID, request: Request, user: service.CurrentUser = Depends(MANAGE),
+                     _pin: Any = Depends(require_pin("ai.route_change")),
                      db: AsyncSession = DB) -> Response:
+    """Xoá khoá API của một nguồn — cần PIN `ai.route_change` (review v0.1.68 P3; xem `delete_provider`)."""
     p = await _provider(db, user.org_id, pid)
     row = (await db.execute(text("DELETE FROM agent.provider_keys WHERE id = :k AND provider_id = :p RETURNING label"),
                             {"k": kid, "p": pid})).one_or_none()

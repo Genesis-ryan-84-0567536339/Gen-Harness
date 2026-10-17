@@ -23,13 +23,16 @@ import orjson
 from fastapi import APIRouter, Depends, Request, Response, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh import crypto
 from gh.auth import rbac, service
 from gh.auth.deps import require, require_owner, require_pin
+from gh.boss_checks import service as boss_checks
 from gh.chassis import actionlog
 from gh.db import DB, sessionmaker
+from gh.gen.coach import cache as coach_cache
 from gh.social import platforms, protocol
 from gh.social import service as social
 
@@ -129,8 +132,18 @@ class ReadIn(BaseModel):
 async def read(account_id: uuid.UUID, request: Request, body: ReadIn | None = None,
                _m: service.CurrentUser = Depends(MANAGE), user: service.CurrentUser = Depends(require_owner),
                db: AsyncSession = DB) -> dict[str, Any]:
-    return await social.request_read(db, _redis(request), org_id=user.org_id, account_id=account_id, via="user",
-                                     user=user, what=list(body.what) if body and body.what else None)
+    job = await social.request_read(db, _redis(request), org_id=user.org_id, account_id=account_id, via="user",
+                                    user=user, what=list(body.what) if body and body.what else None)
+    # v0.1.68 (F028): "Đọc ngay" ở đây cũng là một lần kiểm Facebook của "Việc Sếp cần làm" (cùng bản ghi 'pending'
+    # như nút Kiểm tra ở đó; `boss_checks.resolve_pending` chốt Đạt/Lỗi theo lượt đọc). Chỉ lượt do Sếp bấm, chỉ
+    # tài khoản Facebook.
+    platform = (await db.execute(text("SELECT platform FROM core.social_accounts WHERE id = :a AND org_id = :o"),
+                                 {"a": account_id, "o": user.org_id})).scalar_one_or_none()
+    if platform is not None and str(platform).startswith("facebook"):
+        await boss_checks.record(db, user.org_id, "facebook", "pending", detail={"job_status": job["status"]},
+                                 ref_id=uuid.UUID(job["id"]), user_id=user.id)
+        await coach_cache.commit_and_invalidate(db, _redis(request), user.org_id)
+    return job
 
 
 @router.post("/accounts/{account_id}/pause")

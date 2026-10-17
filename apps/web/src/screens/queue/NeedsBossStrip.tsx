@@ -22,20 +22,36 @@ import { WARN } from './queueModel';
  * Chỉ vai trò có `system.manage` (Owner): mọi nút ở đây dẫn tới chỗ CHỈ người quản lý hệ thống làm được (Sao lưu ngay,
  * đăng nhập lại kênh/model, thử lại cập nhật). Vai trò chỉ có `system.read` (Auditor) không thấy dải — tình trạng vẫn
  * xem được ở thẻ "Sức khoẻ hệ thống" (Dữ liệu & lưu trữ), không có nút chết.
- * Không có gì ⇒ không vẽ gì (dòng "Đã đạt x/N việc bắt buộc" của v0.1.54 là phần riêng, xem `BossProgressLine`). Lỗi tải sức khoẻ không chặn Tổng quan: bỏ qua phần đó (thẻ "Sức khoẻ hệ thống" ở
+ * Không có gì ⇒ chỉ một dòng "Không có việc nào cần Sếp xử lý" (v0.1.68, F039 — đích làm sáng của bài học N07 luôn có mặt;
+ * dòng "Đã đạt x/N việc bắt buộc" của v0.1.54 là phần riêng, xem `BossProgressLine`). Lỗi tải sức khoẻ không chặn Tổng quan: bỏ qua phần đó (thẻ "Sức khoẻ hệ thống" ở
  * Dữ liệu & lưu trữ báo lỗi kèm "Chi tiết kỹ thuật").
  */
 export function NeedsBossStrip() {
-  const followUp = useQuery({ queryKey: FOLLOW_UP_KEY, queryFn: ({ signal }) => api.setup.followUp(signal) });
-  const health = useSystemHealth(useCan('system.manage'));
+  const canManage = useCan('system.manage');
+  // Chỉ vai quản lý hệ thống (Owner) — API `GET /setup/follow-up` chỉ trả cho Owner; vai khác không gọi (v0.1.42 F-26, nay ở đây).
+  const followUp = useQuery({ queryKey: FOLLOW_UP_KEY, queryFn: ({ signal }) => api.setup.followUp(signal), enabled: canManage });
+  const health = useSystemHealth(canManage);
   const step4 = Array.isArray(followUp.data) ? followUp.data.find((s) => s.n === 4) : undefined;
   const noModel = !!step4 && !step4.done;
   const issues = Array.isArray(health.data?.issues) ? sortIssues(health.data.issues) : [];
+  // v0.1.68 (F039): phần tử `overview.needs_boss` (đích "Làm thử" của bài học N07) LUÔN có mặt — lúc khoẻ chỉ còn một dòng báo
+  // yên tâm. Chỉ nói "không có việc" khi cả hai nguồn đã tải xong và thành công (lỗi tải ≠ khoẻ).
+  const calm = !noModel && issues.length === 0 && canManage && followUp.isSuccess && health.isSuccess;
   return (
     <>
-      {noModel || issues.length > 0 ? <StripBody noModel={noModel} issues={issues} /> : null}
+      {noModel || issues.length > 0 ? <StripBody noModel={noModel} issues={issues} /> : calm ? <StripCalm /> : null}
       <BossProgressLine />
     </>
+  );
+}
+
+/** Lúc không có sự cố / chưa chọn model: một dòng gọn, vẫn gắn đích làm sáng của dải. */
+function StripCalm() {
+  return (
+    <section className="needs-boss-calm" aria-label="Cần Sếp xử lý" data-testid="needs-boss-calm" data-gen-target="overview.needs_boss">
+      <Icon name="ph ph-check-circle" size={14} color="var(--color-ok, currentColor)" />
+      <span>Không có việc nào cần Sếp xử lý</span>
+    </section>
   );
 }
 

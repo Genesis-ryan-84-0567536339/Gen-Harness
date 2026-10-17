@@ -15,6 +15,7 @@ import { isPublicHttpsUrl } from '../screens/mcp/mcpModel';
 import { useHubLink, useUpdateHubLink } from '../screens/mcp/queries';
 import { ClaudeRiskNotice, CliLoginPanel } from '../screens/system/CliCard';
 import { useCliLogin } from '../screens/system/useCliLogin';
+import { AI_SOURCE_PATH } from '../setup/steps';
 import { accountStatus, qkSocial } from '../social/socialModel';
 import { TELEGRAM_GUIDE_PATH, TELEGRAM_KEY } from '../screens/connections/telegramModel';
 import {
@@ -243,15 +244,15 @@ function AiRow({ data, done }: { data: Results; done: boolean }) {
       required
       title="Có ít nhất 1 nguồn AI chạy được"
       done={done}
-      todo="Gen cần một nguồn AI để trả lời và lọc tin: thêm khoá API hoặc đăng nhập Google / Claude Code ở Kết nối › Bộ não AI, rồi bấm Kiểm tra. Gen đã trả lời được rồi thì dòng này tự đạt."
+      todo="Gen cần một nguồn AI để trả lời và lọc tin: thêm khoá API hoặc đăng nhập Google / Claude Code ở màn Thiết lập nguồn AI, rồi bấm Kiểm tra. Gen đã trả lời được rồi thì dòng này tự đạt."
       results={<ResultCell check={res} okText={(c) => aiSourceOkText(c, tz)} />}
     >
       <div className="boss-actions">
         <Button variant={done ? 'secondary' : 'primary'} className="btn-27" icon="ph ph-pulse" loading={run.isPending} onClick={() => run.mutate({ key: 'ai_source' })}>
           Kiểm tra
         </Button>
-        <Link to="/connections#brain" className="gh-btn gh-btn--secondary btn-27">
-          Mở Kết nối › Bộ não AI
+        <Link to={AI_SOURCE_PATH} className="gh-btn gh-btn--secondary btn-27">
+          Mở Thiết lập nguồn AI
           <Icon name="ph ph-arrow-right" size={13} />
         </Link>
       </div>
@@ -477,7 +478,7 @@ function FacebookRow({ data, done }: { data: Results; done: boolean }) {
 // ── 3. Google / Antigravity ───────────────────────────────────────────────────────────────────────────────
 /**
  * v0.1.55: bỏ bài kiểm "đổi qua lại hai tài khoản" (bài kiểm của nhà phát triển, không phải việc của Sếp) — thêm tài khoản
- * thứ hai và Đổi tài khoản vẫn dùng được ở Kết nối › Bộ não AI. Dòng chỉ cần đăng nhập + Gọi thử.
+ * thứ hai và Đổi tài khoản vẫn dùng được ở màn Thiết lập nguồn AI. Dòng chỉ cần đăng nhập + Gọi thử.
  */
 function AgyRow({ data, done }: { data: Results; done: boolean }) {
   const profiles = useCliProfiles('antigravity_cli');
@@ -491,7 +492,7 @@ function AgyRow({ data, done }: { data: Results; done: boolean }) {
       n={3}
       title="Google (Antigravity)"
       done={done}
-      todo="Đăng nhập tài khoản Google rồi bấm Gọi thử. Muốn dùng thêm tài khoản hoặc đổi qua lại, làm ở Kết nối › Bộ não AI."
+      todo="Đăng nhập tài khoản Google rồi bấm Gọi thử. Muốn dùng thêm tài khoản hoặc đổi qua lại, làm ở màn Thiết lập nguồn AI."
       results={
         <>
           <ResultCell label="Đăng nhập" check={resultOf(data, 'agy_login')} emptyText={list.length > 0 ? 'Đã có phiên (đăng nhập trước đây)' : undefined} />
@@ -520,15 +521,15 @@ function AgyRow({ data, done }: { data: Results; done: boolean }) {
                 Gọi thử
               </Button>
             ) : null}
-            <Link to="/connections#brain" className="gh-btn gh-btn--secondary btn-27">
-              Thêm / đổi tài khoản ở Kết nối
+            <Link to={AI_SOURCE_PATH} className="gh-btn gh-btn--secondary btn-27">
+              Thêm / đổi tài khoản ở Thiết lập nguồn AI
               <Icon name="ph ph-arrow-right" size={13} />
             </Link>
           </div>
           {list.length > 0 ? <p className="muted-note">Đang dùng: {list.find((p) => p.active)?.email ?? '—'}</p> : null}
           {relogin ? (
             <p className="muted-note" role="note">
-              Bấm Đăng nhập lại rồi đăng nhập đúng tài khoản Google cần dùng — hoặc làm ở <Link to="/connections#brain">Kết nối › Bộ não AI</Link>.
+              Bấm Đăng nhập lại rồi đăng nhập đúng tài khoản Google cần dùng — hoặc làm ở <Link to={AI_SOURCE_PATH}>màn Thiết lập nguồn AI</Link>.
             </p>
           ) : null}
           <CliLoginPanel login={login} />

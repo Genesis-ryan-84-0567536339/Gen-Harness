@@ -86,6 +86,7 @@ function renderGuide8(agent: Record<string, unknown>) {
         const body = JSON.parse(String(init.body)) as { name: string };
         return json(200, { ...state, agent: { id: 'a1', name: body.name, try_reply: null, ...agent } });
       }
+      if (u.includes('/auth/me')) return json(200, { role: { code: 'owner' } }); // GuideStepPage đọc /auth/me thật (review v0.1.68)
       if (u.includes('/setup/state')) return json(200, state);
       return json(200, []);
     }),

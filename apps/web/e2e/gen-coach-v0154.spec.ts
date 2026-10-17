@@ -26,7 +26,7 @@ const panel = (page: Page) => page.getByRole('complementary', { name: /Gen — t
 const card = (page: Page) => page.getByRole('region', { name: CARD });
 const todoTitles = async (page: Page) => (await card(page).getByTestId('coach-todo').locator('.coach-card__item-title').allTextContents()).map((t) => t.trim());
 
-test('chấm đỏ → mở khung → việc đúng thứ tự (nguồn AI P1, Gen-hub gợi ý P3) → "Chỉ cho em" làm sáng thẻ Bộ não AI', async ({ page }) => {
+test('chấm đỏ → mở khung → việc đúng thứ tự (nguồn AI P1, Gen-hub gợi ý P3) → "Chỉ cho em" mở màn Thiết lập nguồn AI', async ({ page }) => {
   await page.goto('/overview');
   // Chấm đỏ ở nút Gen, nút báo "có việc mới", khung KHÔNG tự mở.
   const dot = page.getByTestId('gen-coach-dot');
@@ -54,23 +54,9 @@ test('chấm đỏ → mở khung → việc đúng thứ tự (nguồn AI P1, G
   const convs = (await (await page.request.get('/api/v1/gen/conversations')).json()) as unknown[];
   expect(convs).toHaveLength(0);
 
-  // "Chỉ cho em" ở việc nguồn AI → mở Kết nối và làm sáng thẻ Bộ não AI (vòng sáng bao đúng phần tử).
+  // "Chỉ cho em" ở việc nguồn AI → dẫn thẳng màn Thiết lập nguồn AI (v0.1.68, F029: một đích, như việc "Chưa có model").
   await c.getByTestId('coach-todo').first().getByRole('button', { name: 'Chỉ cho em' }).click();
-  await expect(page).toHaveURL(/\/connections/);
-  const row = page.locator('[data-gen-target="connections.brain"]');
-  await expect(row).toBeVisible();
-  const spot = page.getByTestId('gen-spotlight');
-  await expect(spot).toBeVisible();
-  const ring = spot.locator('.gen-spot__ring');
-  await expect(ring).toBeVisible();
-  await expect(spot.getByRole('dialog', { name: 'Gen đang chỉ' })).toContainText('Kiểm tra nguồn AI chạy được');
-  await expect
-    .poll(async () => {
-      const [r, b] = [await ring.boundingBox(), await row.boundingBox()];
-      if (!r || !b) return false;
-      return Math.abs(r.x - (b.x - 6)) < 10 && Math.abs(r.y - (b.y - 6)) < 10 && Math.abs(r.width - (b.width + 12)) < 14 && Math.abs(r.height - (b.height + 12)) < 14;
-    })
-    .toBe(true);
+  await expect(page).toHaveURL(/\/setup\?buoc=nguon-ai/);
 });
 
 test('"Không dùng việc này" → hộp cảnh báo → xác nhận → việc biến mất → Cài đặt có dòng đó → "Bật lại" → việc quay lại', async ({ page }) => {

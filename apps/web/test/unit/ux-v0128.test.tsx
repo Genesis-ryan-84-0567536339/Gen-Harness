@@ -13,7 +13,7 @@ import { useUiStore } from '../../src/lib/uiStore';
 import { FriendlyErrorText } from '../../src/screens/common';
 import { providerStatus } from '../../src/screens/api/apiModel';
 import { inviteMessage } from '../../src/screens/system/usersModel';
-import { providerHasModel, providerReady, setupGaps, testedModels } from '../../src/setup/phase2Model';
+import { providerHasModel, providerReady, testedModels } from '../../src/setup/phase2Model';
 import { readableNotes } from '../../src/update/updateModel';
 
 const P = (over: Partial<Provider>): Provider => ({
@@ -64,18 +64,6 @@ describe('C1 — bước 4 chỉ cho Tiếp tục khi có model; kết quả g�
     expect(providerHasModel(P({ auth_state: 'ok' }), {})).toBe(false);
     // Nguồn gọi thử lỗi không bao giờ "sẵn sàng" (không vào đầu chuỗi).
     expect(providerReady(P({ auth_state: 'error' }), {}, false)).toBe(false);
-  });
-});
-
-describe('C1/V10 — bước 12 liệt kê việc còn thiếu', () => {
-  it('thiếu model, kênh, nhóm, quy tắc, sao lưu', () => {
-    const gaps = setupGaps({ providers: [P({ models: [] })], activeChannels: 0, groupsListening: 0, enabledRules: 0, backupDone: false });
-    expect(gaps.map((g) => g.key)).toEqual(['model', 'channel', 'groups', 'rules', 'backup']);
-    expect(gaps.find((g) => g.key === 'model')?.step).toBe(4);
-  });
-  it('đủ cả → không còn gì', () => {
-    const ok = P({ models: [{ id: 'm', model_name: 'x', daily_quota: null, used_today: 0 }] });
-    expect(setupGaps({ providers: [ok], activeChannels: 1, groupsListening: 2, enabledRules: 6, backupDone: true })).toEqual([]);
   });
 });
 

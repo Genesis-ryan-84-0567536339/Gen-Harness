@@ -23,7 +23,6 @@ RUNNABLE = ("hub", "facebook", "agy_call", "agy_switch", "claude_call", "jev", "
 STATUSES = ("pass", "fail", "pending")
 KEEP_PER_KEY = 50
 MESSAGE_MAX = 300
-SWITCHES_NEEDED = 2   # v0.1.55: không còn dùng cho dòng agy (giữ hằng số cho tương thích)
 
 #: v0.1.55 (G2, Boss "gọn"): CHỈ dòng 0 "nguồn AI" là bắt buộc — mọi kết nối khác (Gen-hub, Facebook, Google, Claude,
 #: Telegram, từ xa, Jev…) là tuỳ chọn. Số dòng giữ nguyên 1–9 như trước (nhãn Gen, e2e); dòng "ai" đứng đầu mang số 0.
@@ -222,29 +221,38 @@ async def pass_count(db: AsyncSession, org_id: uuid.UUID, key: str) -> int:
                                          AND status = 'pass'"""), {"o": org_id, "k": key})).scalar_one())
 
 
-async def switch_passes(db: AsyncSession, org_id: uuid.UUID) -> int:
-    """Số lần ĐỔI THẬT đã đạt, theo thời gian:
+#: Lỗi TẠM (bận / hạn mức) — KHÔNG ghi thành bản kiểm (thay kết quả đã lưu bằng một lỗi chỉ vì bấm quá nhanh là sai).
+TRANSIENT_CODES = frozenset({"SOCIAL_BUSY", "SOCIAL_RATE_LIMIT", "PROBE_RATE_LIMITED", "HUB_RATE_LIMITED",
+                             "CLI_LOGIN_IN_PROGRESS", "TELEGRAM_RATE_LIMITED"})
 
-    - bản ghi có `from_profile` (hồ sơ đang hoạt động NGAY TRƯỚC khi đổi, từ v0.1.39 sau review): chỉ đếm khi
-      `from_profile` ≠ `target_profile` — "đổi" sang chính tài khoản đang dùng không đổi gì cả (F-76);
-    - bản ghi cũ không có `from_profile`: đếm khi tài khoản đích KHÁC lượt đạt ngay trước. Tài khoản đích =
-      `target_profile` (hồ sơ), thiếu thì email đã che; không có cả hai → coi là khác."""
-    rows = (await db.execute(text("""
-        SELECT id, COALESCE(detail->>'target_profile', detail->>'expected_masked') AS target,
-               detail->>'from_profile' AS source, (detail->'from_profile' IS NOT NULL) AS has_source
-        FROM ops.boss_checks WHERE org_id = :o AND check_key = 'agy_switch' AND status = 'pass'
-        ORDER BY checked_at, id"""), {"o": org_id})).all()
-    n, prev = 0, None
-    for r in rows:
-        target = r.target or f"row:{r.id}"
-        if r.has_source:
-            # from_profile null = chưa có hồ sơ nào hoạt động trước đó → vẫn là một lần đổi thật.
-            if r.source != target:
-                n += 1
-        elif target != prev:
-            n += 1
-        prev = target
-    return n
+
+async def record_hub_result(db: AsyncSession, org_id: uuid.UUID, r: dict[str, Any],
+                            user_id: uuid.UUID | None = None) -> dict[str, Any] | None:
+    """Ghi bản kiểm `hub` từ kết quả `hub_link.service.test_link` (v0.1.68, F028) — DÙNG CHUNG cho nút Kiểm tra ở
+    "Việc Sếp cần làm" (`/boss-checks/hub/run`) và nút "Lưu & kiểm tra" ở Kết nối › Gen-hub (`/hub/link/test`),
+    để hai nơi
+    không bao giờ lệch (Hướng dẫn "Đã xong" mà Việc Sếp cần làm "Chưa kiểm", Gen vẫn nhắc "Nối Gen-hub").
+    Lỗi TẠM → None (không ghi). Không commit."""
+    ok = bool(r.get("ok"))
+    if not ok and r.get("error_code") in TRANSIENT_CODES:
+        return None
+    detail: dict[str, Any] = {"latency_ms": r.get("latency_ms"), "exposed_tools": len(r.get("exposed_tools") or []),
+                              "missing_tools": list(r.get("missing_tools") or [])}
+    # v0.1.49 (QD-16): quyền ĐỌC thêm (lịch/mail/việc/Drive) chỉ để hiển thị — KHÔNG quyết định Đạt/Lỗi. Chỉ lưu khi
+    # Kiểm tra XANH: lượt đỏ (mạng, token bị từ chối…) trả quyền cũ trong CSDL (toàn False nếu chưa từng xanh) — hiện
+    # "Lịch ✗ … tick thêm quyền" cạnh "Lỗi …" là chỉ sai cách sửa.
+    scopes = r.get("read_scopes")
+    if ok and isinstance(scopes, dict):
+        detail["read_scopes"] = {str(k): bool(v) for k, v in scopes.items()}
+        detail["read_missing"] = [str(x) for x in (r.get("read_missing") or [])]
+    # v0.1.50 (F-81): quyền GHI Kho (kho_create, kho_update) — cũng chỉ để hiển thị, cùng quy tắc "chỉ khi kiểm xanh".
+    wscopes = r.get("write_scopes")
+    if ok and isinstance(wscopes, dict):
+        detail["write_scopes"] = {str(k): bool(v) for k, v in wscopes.items()}
+        detail["write_missing"] = [str(x) for x in (r.get("write_missing") or [])]
+    return await record(db, org_id, "hub", "pass" if ok else "fail",
+                        error_code=None if ok else (r.get("error_code") or "HUB_ERROR"),
+                        message=None if ok else r.get("error"), detail=detail, user_id=user_id)
 
 
 def _passed(results: dict[str, dict[str, Any] | None], key: str) -> bool:
@@ -358,9 +366,10 @@ async def overview(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
     Claude / Google gọi thử đạt, hoặc bấm Kiểm tra đạt — `ai_source`); agy = agy_call đạt (không còn đòi đổi qua lại
     hai tài khoản); claude = claude_login đạt VÀ claude_call đạt; còn lại = kiểm tương ứng đạt. Chỉ dòng `ai` bắt buộc.
 
-    `switch_passes` vẫn trả kèm (tương thích web cũ / Kết nối): `results.agy_switch.runs` đếm MỌI bản ghi, cả lỗi."""
+    v0.1.68 (F040): bỏ `switch_passes` (web không còn đọc; mỗi lần `overview` thừa một truy vấn).
+    `results.agy_switch.runs`
+    đếm MỌI bản ghi, cả lỗi."""
     results = await latest(db, org_id)
-    switches = await switch_passes(db, org_id)
     ai = await _resolve_ai(db, org_id, results)
     results["ai_source"] = ai
     rows: list[dict[str, Any]] = []
@@ -373,5 +382,4 @@ async def overview(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
             done = _passed(results, row["checks"][0])
         rows.append({**row, "checks": list(row["checks"]), "done": done})
     required_done = sum(1 for r in rows if r["done"] and not r["optional"])
-    return {"rows": rows, "results": results, "required_done": required_done, "required_total": REQUIRED_TOTAL,
-            "switch_passes": switches}
+    return {"rows": rows, "results": results, "required_done": required_done, "required_total": REQUIRED_TOTAL}

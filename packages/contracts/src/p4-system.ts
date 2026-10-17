@@ -225,6 +225,8 @@ export interface Step8Agent {
   /** v0.1.30: mã lỗi (vd `MODEL_UNAVAILABLE`) + lý do kỹ thuật. */
   try_error_code?: string | null;
   try_reasons?: string[];
+  /** v0.1.68 (F079): số kênh agent nghe (agent mới nghe sẵn mọi kênh đã nối; 0 = chưa nối kênh nào). Máy chủ cũ không có trường. */
+  listening_channels?: number;
 }
 
 export interface Step9Body {

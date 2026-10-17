@@ -1,6 +1,6 @@
 /**
  * v0.1.59 (g5-thiet-lap) — khung thử cho các bước 5–12 của máy chủ. `SetupPage` nay là Thiết lập MỘT màn 3 bước nên không còn
- * vẽ các bước 5–12; các form đó chỉ còn ở /guide/5…/guide/11 (GuideStepPage) và `Step12Finish`. Khung này đi dây giống `SetupPage`
+ * vẽ các bước 5–12; các form đó chỉ còn ở /guide/5…/guide/11 (GuideStepPage). Khung này đi dây giống `SetupPage`
  * 12 bước cũ (trạng thái máy chủ → bước hiện tại, "Để sau", lưu thì sang bước kế) để các test hành vi của từng bước vẫn chạy
  * nguyên — không còn là mã sản phẩm. Dùng: `<LegacyWizard />` trong `QueryClientProvider` + `MemoryRouter`.
  */
@@ -12,7 +12,6 @@ import { qk } from '../../src/lib/queries';
 import { queryClient } from '../../src/lib/queryClient';
 import { Step10Team } from '../../src/setup/Step10Team';
 import { Step11Backup } from '../../src/setup/Step11Backup';
-import { Step12Finish } from '../../src/setup/Step12Finish';
 import { Step4Brain } from '../../src/setup/Step4Brain';
 import { Step5Channels } from '../../src/setup/Step5Channels';
 import { Step6Groups } from '../../src/setup/Step6Groups';
@@ -23,6 +22,11 @@ import { STEP_DESCRIPTIONS } from '../../src/setup/steps';
 import { mergeSteps } from '../../src/setup/stepState';
 import { describeError, type StepProps } from '../../src/setup/types';
 
+/** Bước 12 (Hoàn tất) không còn mã sản phẩm (v0.1.68, Nợ #36: Step12Finish đã gỡ — Thiết lập một màn có `StepDone`); chỉ giữ tiêu đề để các test đi tới bước cuối. */
+function Step12Stub({ meta }: StepProps) {
+  return <h1 className="screen-title">{meta.title}</h1>;
+}
+
 const BUILT: Record<number, (p: StepProps) => JSX.Element> = {
   4: Step4Brain,
   5: Step5Channels,
@@ -32,7 +36,7 @@ const BUILT: Record<number, (p: StepProps) => JSX.Element> = {
   9: Step9Autonomy,
   10: Step10Team,
   11: Step11Backup,
-  12: Step12Finish,
+  12: Step12Stub,
 };
 
 const formRef = createRef<HTMLFormElement>();

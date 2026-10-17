@@ -68,7 +68,7 @@ function setup(w: Partial<World> = {}) {
       if (path === '/boss-checks' && method === 'GET') {
         const aiDone = world.results.ai_source?.status === 'pass';
         const rows = world.rows.map((r) => (r.key === 'ai' ? { ...r, done: aiDone } : r));
-        return json(200, { rows, results: world.results, required_done: aiDone ? Math.max(world.done, 1) : world.done, required_total: world.total, switch_passes: 0 });
+        return json(200, { rows, results: world.results, required_done: aiDone ? Math.max(world.done, 1) : world.done, required_total: world.total });
       }
       const run = /^\/boss-checks\/([a-z_]+)\/run$/.exec(path);
       if (run && method === 'POST') {
@@ -134,7 +134,7 @@ describe('Việc Sếp cần làm — chỉ dòng "nguồn AI" bắt buộc (x/N
     expect(calls).toContain('POST /boss-checks/ai_source/run');
     expect(await screen.findByText('Đã đạt đủ 1 dòng bắt buộc — nguồn AI chạy thật.')).toBeInTheDocument();
     expect(within(ai).getByText('Xong')).toBeInTheDocument();
-    expect(within(ai).getByRole('link', { name: /Mở Kết nối › Bộ não AI/ })).toHaveAttribute('href', '/connections#brain');
+    expect(within(ai).getByRole('link', { name: /Mở Thiết lập nguồn AI/ })).toHaveAttribute('href', '/setup?buoc=nguon-ai');
   });
 
   it('lỗi AI_NO_SOURCE ⇒ câu thân thiện + "Chi tiết kỹ thuật" có mã lỗi, không render object', async () => {

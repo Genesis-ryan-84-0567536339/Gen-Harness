@@ -30,7 +30,6 @@ const BOSS: BossOverview = {
   results: { hub: null, facebook: null, agy_login: null, agy_call: null, agy_switch: null, claude_login: null, claude_call: null, jev: null, telegram: null, remote_access: null },
   required_done: 0,
   required_total: 1,
-  switch_passes: 0,
 };
 
 function renderGuide(done: number[]) {
@@ -122,6 +121,7 @@ describe('Làm một việc từ hướng dẫn (/guide/:n) — sau khi đã Ho�
           saved = JSON.parse(String(init.body));
           return reply({ ...finished([11], [5, 6, 7, 8, 9, 10]), backup: saved });
         }
+        if (u.includes('/auth/me')) return reply({ role: { code: 'owner' } }); // GuideStepPage đọc /auth/me thật (review v0.1.68)
         if (u.endsWith('/setup/follow-up')) return reply(followUp(saved ? [11] : []));
         return reply(finished([], [5, 6, 7, 8, 9, 10, 11]));
       }),

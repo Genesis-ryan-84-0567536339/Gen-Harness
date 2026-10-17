@@ -404,30 +404,18 @@ async def _owner_step(db: AsyncSession, user: service.CurrentUser | None, *,
     return row, owner
 
 
-async def _owner_step_after(db: AsyncSession, user: service.CurrentUser | None,
-                            *needs: int, after_finish: bool = False) -> tuple[Any, service.CurrentUser]:
-    """Như `_owner_step`, cộng thêm yêu cầu các bước `needs` đã `done` — cùng cách `step4` đòi hỏi bước 1–3 xong
-    (qua `console_ready`), dùng cho bước 8 (đòi 4 — có bộ não AI để thử trò chuyện) và bước 9 (đòi 8). Bước 5–7
-    tuỳ chọn nên không còn là điều kiện: agent tạo trước, gán kênh/nhóm sau ở Console."""
-    row, owner = await _owner_step(db, user, after_finish=after_finish)
-    done = (row.completed or {}).get("steps", {})
-    missing = [n for n in needs if done.get(str(n)) != "done"]
-    if missing:
-        raise incomplete("Cần hoàn thành bước " + ", ".join(str(n) for n in missing) + " trước")
-    return row, owner
-
-
 @router.put("/steps/4")
 async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
                 user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
     """Bộ não AI: thứ tự ưu tiên chuyển dự phòng. Cần ít nhất một nhà cung cấp đã gọi thử thành công.
 
     v0.1.29: lưu được cả sau Hoàn tất (Owner "Để sau" bước 4 rồi chọn model từ `/guide/4`).
-    v0.1.55 (G2): chỉ lưu thứ tự nguồn + bảo đảm có dòng model (`agent.models`); KHÔNG gán `agent.bindings`."""
+    v0.1.55 (G2): chỉ lưu thứ tự nguồn + bảo đảm có dòng model (`agent.models`); KHÔNG gán `agent.bindings`.
+    v0.1.68 (F003): KHÔNG tự bật lại nguồn đã tắt; sau Hoàn tất đổi thứ tự cần PIN (xem bên dưới)."""
     row, owner = await _owner_step(db, user, after_finish=True)
     ids = list(dict.fromkeys(body.provider_ids))
     found = (await db.execute(text("""
-        SELECT p.id, p.kind, p.auth_state, COALESCE((p.last_test->>'ok')::boolean, false) AS tested,
+        SELECT p.id, p.kind, p.auth_state, p.is_enabled, COALESCE((p.last_test->>'ok')::boolean, false) AS tested,
                CASE WHEN jsonb_typeof(p.last_test->'models') = 'array' THEN
                     ARRAY(SELECT jsonb_array_elements_text(p.last_test->'models')) END AS test_models,
                p.last_test->>'probe_model' AS probe_model, p.last_test->>'probe_effort' AS probe_effort,
@@ -436,9 +424,14 @@ async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
         {"o": row.org_id, "ids": ids})).all()
     if len(found) != len(ids):
         raise field_errors({"provider_ids": "Có nhà cung cấp không tồn tại"})
-    ready = [p for p in found if p.kind != "system_one"  # Jev không sinh được văn bản
+    # v0.1.68 (F003): nguồn Sếp đã TẮT không "sẵn sàng" và không bao giờ được bước này tự bật lại (bật lại =
+    # PATCH /providers, cần PIN `ai.route_change`).
+    ready = [p for p in found if p.kind != "system_one" and p.is_enabled  # Jev không sinh được văn bản
              and (p.cli_ok if p.kind in CLI_KINDS else p.tested and p.auth_state == "ok")]
     if not ready:
+        # Review v0.1.68 (P2-1): mọi nguồn gửi lên đều TẮT ⇒ nói đúng điều đó + chỉ chỗ bật lại.
+        if found and not any(p.is_enabled for p in found):
+            raise incomplete("Nguồn AI đã tắt — bật lại ở API & Model (hoặc thêm một nguồn mới) rồi quay lại bước này")
         raise incomplete("Cần ít nhất một nhà cung cấp đã gọi thử thành công, hoặc một CLI (Antigravity / Claude Code) "
                          "đã đăng nhập")
     # v0.1.28 (UX C1): nguồn đã gọi thử OK mà Owner chưa bấm "Dùng model này" → tự dùng model đầu tiên nhận được khi
@@ -465,10 +458,18 @@ async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
     rest = (await db.execute(text("""SELECT id FROM agent.providers WHERE org_id = :o AND NOT (id = ANY(:ids))
                                      ORDER BY failover_rank NULLS LAST, created_at"""),
                              {"o": row.org_id, "ids": ids})).scalars().all()
-    for rank, pid in enumerate([*ids, *rest], start=1):
-        await db.execute(text("""UPDATE agent.providers SET failover_rank = :r,
-                                 is_enabled = CASE WHEN id = ANY(:ids) THEN true ELSE is_enabled END WHERE id = :i"""),
-                         {"r": rank, "i": pid, "ids": ids})
+    new_order = [*ids, *rest]
+    # v0.1.68 (F003): SAU Hoàn tất, ĐỔI hạng chuỗi nguồn AI cần phiên PIN `ai.route_change` (cùng PATCH /providers);
+    # gửi lại đúng thứ tự đang có thì không đòi PIN. Đang thiết lập lần đầu (chưa Hoàn tất) không đòi. Thứ tự:
+    # 422/409 → 423.
+    if row.finished_at is not None and not owner.pin_active():
+        current = (await db.execute(text("""SELECT id FROM agent.providers WHERE org_id = :o
+                                            ORDER BY failover_rank NULLS LAST, created_at"""),
+                                    {"o": row.org_id})).scalars().all()
+        if list(current) != new_order:
+            raise pin_required()
+    for rank, pid in enumerate(new_order, start=1):
+        await db.execute(text("UPDATE agent.providers SET failover_rank = :r WHERE id = :i"), {"r": rank, "i": pid})
     # v0.1.55 (G2): KHÔNG ghi agent.bindings nữa — hồ sơ tiêu chuẩn (gh.defaults) tự phủ cho Gen, Sàng lọc, Trả lời…;
     # Owner vẫn gán riêng từng agent ở màn API & Model khi muốn.
     out = await _mark_done(db, request, row, owner, 4, {"provider_ids": [str(i) for i in ids],
@@ -651,6 +652,15 @@ class Step8In(BaseModel):
         return _check_template(v if v != "" else None)
 
 
+async def _setup_agent_id(db: AsyncSession, row: Any) -> uuid.UUID | None:
+    """Agent đã tạo ở bước 8 (`completed.setup_agent_id`) nếu còn tồn tại — làm lại bước 8 thì cập nhật nó (F044)."""
+    aid = (row.completed or {}).get("setup_agent_id")
+    if not aid:
+        return None
+    return (await db.execute(text("SELECT id FROM agent.identities WHERE org_id = :o AND id = CAST(:i AS uuid)"),
+                             {"o": row.org_id, "i": aid})).scalar_one_or_none()
+
+
 @router.put("/steps/8")
 async def step8(body: Step8In, request: Request, db: AsyncSession = DB,
                 user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
@@ -659,15 +669,38 @@ async def step8(body: Step8In, request: Request, db: AsyncSession = DB,
     chuyện một lượt qua `ModelRouter` (`gh.biz.people.routes.try_chat`) — KHÔNG lưu vào hội thoại thật, chỉ để
     Owner nghe thử giọng agent. Model chưa gọi được (chưa cấu hình xong ở bước 4, hoặc lỗi tạm thời) không được
     chặn việc tạo agent — trả `try_reply: null` kèm lý do, Owner thử lại ngay ở đây hoặc ở màn Agent Identity."""
-    row, owner = await _owner_step_after(db, user, 4, after_finish=True)
+    # v0.1.68 (F026): KHÔNG đòi bước 4 `done` — "Để sau" bước 4 (đã có model thật) ghi 'skipped' nhưng vẫn tạo được
+    # agent, đúng như
+    # docstring này; bước 8 từ v0.1.55 không gọi model trừ khi có `try_message`.
+    row, owner = await _owner_step(db, user, after_finish=True)
     name, role_desc, voice, speak_when = (body.name.strip(), body.role_desc.strip(), body.voice.strip(),
                                           body.speak_when.strip())
-    agent_id = (await db.execute(text("""
-        INSERT INTO agent.identities (org_id, name, role_desc, template, addressing, voice, speak_when,
-                                      autonomy_level)
-        VALUES (:o, :n, :rd, :tpl, '{}'::jsonb, :v, :sw, :al) RETURNING id"""),
-        {"o": row.org_id, "n": name, "rd": role_desc, "tpl": body.template, "v": voice, "sw": speak_when,
-         "al": policy.DEFAULT_AUTONOMY})).scalar_one()
+    # v0.1.68 (F044): làm lại bước 8 ⇒ CẬP NHẬT agent của bước 8 (`completed.setup_agent_id`), không tạo thêm agent
+    # trùng.
+    agent_id = await _setup_agent_id(db, row)
+    if agent_id is not None:
+        await db.execute(text("""UPDATE agent.identities SET name = :n, role_desc = :rd, voice = :v, speak_when = :sw,
+                                 template = COALESCE(:tpl, template), updated_at = now() WHERE id = :i"""),
+                         {"n": name, "rd": role_desc, "v": voice, "sw": speak_when, "tpl": body.template,
+                          "i": agent_id})
+    else:
+        agent_id = (await db.execute(text("""
+            INSERT INTO agent.identities (org_id, name, role_desc, template, addressing, voice, speak_when,
+                                          autonomy_level)
+            VALUES (:o, :n, :rd, :tpl, '{}'::jsonb, :v, :sw, :al) RETURNING id"""),
+            {"o": row.org_id, "n": name, "rd": role_desc, "tpl": body.template, "v": voice, "sw": speak_when,
+             "al": policy.DEFAULT_AUTONOMY})).scalar_one()
+        # v0.1.68 (F079): agent mới nghe sẵn MỌI kênh đã nối (cả kênh, chưa thu hẹp theo nhóm) — không thì agent
+        # không nghe
+        # kênh nào cho tới khi Sếp tự tick (biz/duty/context chỉ chọn agent có phạm vi). Bỏ bớt ở Danh tính Agent.
+        await db.execute(text("""
+            INSERT INTO agent.channel_scopes (agent_id, channel_id, group_id)
+            SELECT :a, c.id, NULL FROM core.channels c
+            WHERE c.org_id = :o AND EXISTS (SELECT 1 FROM core.channel_sessions s WHERE s.channel_id = c.id
+                                            AND s.state = 'active' AND s.ended_at IS NULL)"""),
+                         {"a": agent_id, "o": row.org_id})
+    listening = int((await db.execute(text("SELECT count(*) FROM agent.channel_scopes WHERE agent_id = :a"),
+                                      {"a": agent_id})).scalar_one())
     try_reply: str | None = None
     try_error: str | None = None
     try_error_code: str | None = None
@@ -687,7 +720,7 @@ async def step8(body: Step8In, request: Request, db: AsyncSession = DB,
     state = await _mark_done(db, request, row, owner, 8, {"agent_id": str(agent_id), "name": name},
                              remember={"setup_agent_id": str(agent_id)})
     state["agent"] = {"id": str(agent_id), "name": name, "try_reply": try_reply, "try_error": try_error,
-                      "try_error_code": try_error_code, "try_reasons": try_reasons}
+                      "try_error_code": try_error_code, "try_reasons": try_reasons, "listening_channels": listening}
     return state
 
 
@@ -774,15 +807,20 @@ class Step10In(BaseModel):
 async def step10(body: Step10In, request: Request, db: AsyncSession = DB,
                  user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
     """Mời đội ngũ: bước tuỳ chọn, tạo tài khoản + mật khẩu tạm cho từng người (chưa có SMTP thật gửi lời mời —
-    mật khẩu tạm trả thẳng về đây để Owner tự gửi qua kênh riêng). Danh sách rỗng vẫn đánh dấu xong được (Owner
-    có thể mời sau ở trang Hướng dẫn kết nối — bước này vẫn mở sau khi Hoàn tất); gọi
-    `POST /setup/steps/10/skip` nếu muốn bỏ qua hẳn.
+    mật khẩu tạm trả thẳng về đây để Owner tự gửi qua kênh riêng). v0.1.68 (F038): danh sách rỗng chỉ qua được khi đã
+    có người dùng khác Owner đang hoạt động, còn không → 409 STEP_INCOMPLETE (gọi `POST /setup/steps/10/skip` nếu
+    muốn để sau).
 
     v0.1.45 (F-20): SAU Hoàn tất, danh sách mời KHÁC RỖNG (tạo tài khoản + mật khẩu tạm) cần phiên PIN
     `user.manage` (423); danh sách rỗng, hoặc đang thiết lập lần đầu, không đòi PIN."""
     row, owner = await _owner_step(db, user, after_finish=True)
     if body.invites and row.finished_at is not None and not owner.pin_active():
         raise pin_required()
+    # v0.1.68 (F038): danh sách RỖNG không phải "đã mời" — chỉ coi là xong khi đã có người mới đang hoạt động (cùng
+    # định nghĩa
+    # `staff.active` của Gen); chưa có thì nói thật và chỉ lối "Để sau".
+    if not body.invites and not bool((await db.execute(text(STAFF_ACTIVE_SQL), {"o": row.org_id})).scalar()):
+        raise incomplete("Chưa nhập người nào — thêm ít nhất một người để mời, hoặc bấm \"Để sau\"")
     errors: dict[str, str] = {}
     seen: set[str] = set()
     created: list[dict[str, Any]] = []
@@ -868,6 +906,10 @@ async def step11(body: Step11In, request: Request, db: AsyncSession = DB,
 # đang bật, có khoá
 # bật / phiên CLI chưa hết hạn, có model bật), không chỉ có dòng model. Xem `follow_up_status`.
 AI_STEP = 4
+STAFF_ACTIVE_SQL = """SELECT EXISTS (SELECT 1 FROM core.users u JOIN core.user_roles ur ON ur.user_id = u.id
+                                     JOIN core.roles r ON r.id = ur.role_id
+                                     WHERE u.org_id = :o AND u.is_active AND u.deleted_at IS NULL
+                                       AND r.code <> 'owner')"""
 FOLLOW_UP_SQL: dict[int, str] = {
     5: """SELECT EXISTS (SELECT 1 FROM core.channel_sessions s JOIN core.channels c ON c.id = s.channel_id
                          WHERE c.org_id = :o AND s.state = 'active' AND s.ended_at IS NULL)""",
@@ -877,7 +919,9 @@ FOLLOW_UP_SQL: dict[int, str] = {
     8: "SELECT EXISTS (SELECT 1 FROM agent.identities WHERE org_id = :o)",
     # Mức tự trị đặt ngay trong form tạo/sửa agent ở Console → có agent là đã có mức tự trị.
     9: "SELECT EXISTS (SELECT 1 FROM agent.identities WHERE org_id = :o)",
-    10: "SELECT (SELECT count(*) FROM core.users WHERE org_id = :o) > 1",
+    # v0.1.68 (F038): có người dùng KHÁC Owner đang hoạt động (không tính tài khoản đã khoá / xoá) — giống
+    # `staff.active` của Gen.
+    10: STAFF_ACTIVE_SQL,
     11: "SELECT (SELECT settings ? 'backup' FROM core.organizations WHERE id = :o)",
 }
 
@@ -885,10 +929,16 @@ FOLLOW_UP_SQL: dict[int, str] = {
 # "Hướng dẫn thiết lập" — xong theo dữ liệu thật: Facebook đã từng đăng nhập; Gen-hub đã Kiểm tra xanh ít nhất một lần.
 FOLLOW_UP_EXTRA: tuple[tuple[int, str, str, str], ...] = (
     (13, "social", "Kết nối Facebook",
+     # v0.1.68 (F028): `needs_login` (phiên hết, phải đăng nhập lại) KHÔNG tính là xong.
      "SELECT EXISTS (SELECT 1 FROM core.social_accounts WHERE org_id = :o AND platform LIKE 'facebook%' "
-     "AND status IN ('active', 'paused', 'needs_login'))"),
+     "AND status IN ('active', 'paused'))"),
+    # v0.1.68 (F028): theo bản kiểm `hub` MỚI NHẤT — cùng nguồn với dòng Gen-hub ở "Việc Sếp cần làm"; chưa có bản
+    # kiểm nào
+    # (máy nâng cấp từ bản cũ) thì theo `last_ok_at` như trước.
     (14, "hub", "Nối Gen-hub",
-     "SELECT EXISTS (SELECT 1 FROM agent.hub_links WHERE org_id = :o AND last_ok_at IS NOT NULL)"),
+     "SELECT COALESCE((SELECT b.status = 'pass' FROM ops.boss_checks b WHERE b.org_id = :o AND b.check_key = 'hub' "
+     "AND b.status IN ('pass', 'fail') ORDER BY b.checked_at DESC, b.id DESC LIMIT 1), "
+     "EXISTS (SELECT 1 FROM agent.hub_links WHERE org_id = :o AND last_ok_at IS NOT NULL))"),
 )
 
 
@@ -915,8 +965,9 @@ async def follow_up_status(db: AsyncSession, row: Any) -> list[dict[str, Any]]:
             real = bool((await readiness.ai_ready(db, row.org_id))["ok"])
         else:
             real = bool((await db.execute(text(FOLLOW_UP_SQL[n]), {"o": row.org_id})).scalar())
-        # Bước 4 chỉ theo dữ liệu thật: tắt / gỡ khoá / hết phiên nguồn sau khi đã xong bước 4 thì lại "Chưa có model".
-        done = real if n == 4 else status.get(str(n)) == "done" or real
+        # Bước 4: tắt / gỡ khoá / hết phiên nguồn sau khi đã xong bước 4 thì lại "Chưa có model".
+        # Bước 4 và 10 chỉ theo dữ liệu thật (10: bấm Tiếp tục với danh sách rỗng không phải "đã mời"; F038).
+        done = real if n in (4, 10) else status.get(str(n)) == "done" or real
         out.append({"n": n, "key": key, "title": title, "status": status.get(str(n), "todo"), "done": done})
     for n, key, title, sql in FOLLOW_UP_EXTRA:
         done = bool((await db.execute(text(sql), {"o": row.org_id})).scalar())

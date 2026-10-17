@@ -90,6 +90,7 @@ describe('/guide/8 — thử trò chuyện lỗi vì Antigravity CLI tạm lỗi
           const body = JSON.parse(String(init.body)) as { name: string };
           return json(200, { ...state, agent: { id: 'a1', name: body.name, try_reply: null, try_error: HINT, try_error_code: 'MODEL_UNAVAILABLE', try_reasons: [REASON] } });
         }
+        if (u.includes('/auth/me')) return json(200, { role: { code: 'owner' } }); // GuideStepPage đọc /auth/me thật (review v0.1.68)
         if (u.includes('/setup/state')) return json(200, state);
         return json(200, []);
       }),
