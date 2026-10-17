@@ -18,6 +18,7 @@ khẳng định trong cùng PR (kế hoạch sửa sau kiểm kê 16/10/2026, l�
   chặn và nói rõ; Q2/Q3: xem test_*_quyet_dinh_* của gói liên quan.
 """
 
+import ast
 import json
 import re
 from datetime import UTC, datetime
@@ -301,7 +302,7 @@ def test_q1_agy_core_in_process_outer_layer_through_the_box() -> None:
         assert d(box=agy_policy.BOX_NOT_INSTALLED, **kw).code == agy_policy.CODE_BOX_NOT_INSTALLED, kw
     rule_test = d("core.gen", purpose="rule_test", box=ok)
     assert not rule_test.allowed and rule_test.code == agy_policy.CODE_UNTRUSTED_TEXT
-    assert "hộp riêng" in agy_policy.REASON_BOX_DOWN
+    assert "hộp riêng" in agy_policy.REASON_BOX_DOWN.lower()
 
 
 # ─── 16/10 · Telegram chỉ đề xuất ─────────────────────────────────────────────────────────────────────────────
@@ -312,15 +313,27 @@ _TELEGRAM_FORBIDDEN = ("write_kho", "kho_write", "confirm_proposal", "approve_dr
 
 def test_telegram_modules_cannot_execute_writes() -> None:
     """16/10: Telegram chỉ ĐỀ XUẤT — không module nào của gh/telegram import/gọi đường ghi Kho, duyệt nháp, kiểm mã PIN
-    (PIN không đi qua bên thứ ba). Quét mọi tệp trong gh/telegram (kể cả inbound/commands khi có). Ngoại lệ DUY NHẤT:
+    (PIN không đi qua bên thứ ba). Quét mọi tệp trong gh/telegram bằng cây cú pháp: tên import, tên hàm/thuộc tính và
+    chuỗi đối số TRONG LỜI GỌI (docstring/chú thích nói «không có đường ghi» không bị tính). Ngoại lệ DUY NHẤT:
     `routes.py` (API cấu hình của Console, người dùng đã đăng nhập) được đòi mã PIN để đổi cấu hình Telegram."""
     bad: list[str] = []
     for path in sorted((GH_DIR / "telegram").rglob("*.py")):
         banned = tuple(w for w in _TELEGRAM_FORBIDDEN if not (path.name == "routes.py" and w == "require_pin"))
-        for no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            code = line.split("#", 1)[0]
-            if re.match(r"\s*(from|import)\s", code) or "(" in code:
-                bad += [f"{path.relative_to(ROOT)}:{no}: {w}" for w in banned if w in code]
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            names: list[str] = []
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                names = [node.module or "", *(a.name for a in node.names)]
+            elif isinstance(node, ast.Call):
+                for sub in ast.walk(node):
+                    if isinstance(sub, ast.Name):
+                        names.append(sub.id)
+                    elif isinstance(sub, ast.Attribute):
+                        names.append(sub.attr)
+                    elif isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                        names.append(sub.value)
+            bad += [f"{path.relative_to(ROOT)}:{node.lineno}: {w}" for w in banned if any(w in n for n in names)]
     assert bad == []
 
 
@@ -329,10 +342,9 @@ def test_telegram_modules_cannot_execute_writes() -> None:
 def test_q5_group_members_are_collected_for_every_group_including_off() -> None:
     """16/10 Q5 (=2): thu thành viên MỌI nhóm, kể cả "Không nghe" — nhập danh sách nhóm không xét `listen_mode`."""
     src = (GH_DIR / "data" / "ingest.py").read_text(encoding="utf-8")
-    start = src.index("for m in (g.get(\"members\") or [])")
-    block = src[max(0, start - 600): start + 600]
+    block = src[src.index("async def handle_directory"): src.index("async def handle_group_discovered")]
     assert "listen_mode" not in block
-    assert "_member(db, row.id, ident.person_id)" in block
+    assert "for m in members:" in block and "_member(db, row.id, ident.person_id" in block
 
 
 def test_q6_tagged_only_group_messages_are_still_stored() -> None:
