@@ -1129,7 +1129,7 @@ async def test_lessons_per_day_via_prefs(owner_api: Api, sigbox: list[sg.Signals
 
 async def test_prefs_get_patch_and_audit(owner_api: Api, sigbox: list[sg.Signals], clock: list[datetime]) -> None:
     p = (await owner_api.get("/gen/coach/prefs")).json()
-    assert p == {"enabled": True, "bell": True, "lessons_per_day": 1, "quiet_start": 22, "quiet_end": 7,
+    assert p == {"enabled": True, "bell": True, "lessons_per_day": 1, "quiet_start": 21, "quiet_end": 7,
                  "snooze_until": None, "followup_snoozed_until": None, "dismissed": []}
     r = await owner_api.send("PATCH", "/gen/coach/prefs", {"bell": False, "quiet_start": 8, "quiet_end": 16,
                                                            "snooze_all_days": 3})

@@ -185,7 +185,7 @@ Job `gen_coach` (worker, **09:05 / 11:05 / 14:05 giờ Asia/Ho_Chi_Minh**, `gh.g
 - **Điều kiện** (`bell_due`): hướng dẫn bật + chuông bật + không "Hoãn tất cả" + không ổn định + ngoài giờ yên lặng + có việc P0/P1 hiện trên thẻ + (có khoá P0/P1 **mới** so với lần chuông trước, hoặc cùng tập khoá mà lần chuông trước đã ≥ 3 ngày).
   Sự cố `health.*` và `hub.token_expiring` không tính là "mới" vì đã có chuông riêng.
 - **Cổng nguyên tử** `claim_bell`: MỘT câu `UPDATE … RETURNING` — chỉ thắng khi hôm nay chưa chuông **và** Sếp chưa xem thẻ hôm nay; hai tiến trình chạy cùng lúc chỉ một bên chuông; chạy lại cùng ngày không chuông thứ hai.
-- **Giờ yên lặng** theo `core.organizations.timezone` (mặc định 22:00 → 07:00; `quiet_start == quiet_end` ⇒ không có giờ yên lặng).
+- **Giờ yên lặng** theo `core.organizations.timezone` (mặc định 21:00 → 07:00, QD-20; `quiet_start == quiet_end` ⇒ không có giờ yên lặng).
 - **Liên kết chuông**: `/overview?gen=coach` khi Gen đang bật cho Owner (mở khung Gen với thẻ), `/guide/viec-sep` khi Gen tắt. **Không đẩy Telegram.**
 
 ## 9. "Hệ thống đã ổn định"
@@ -235,7 +235,7 @@ Một nguồn sinh việc P0/P1 đọc lỗi ⇒ giữ nguyên mốc và **khôn
 
 ## 12. Dữ liệu — migration `0033` (`db/sql/0033_v0154_gen_coach.sql`, `revision 0033 ← 0032`)
 
-- **`agent.gen_coach_prefs`** (một hàng / Owner, khoá `user_id`): `enabled`, `bell`, `lessons_per_day` (0..2, mặc định 1), `quiet_start` 22, `quiet_end` 7, `snooze_until`, `stable_since`, `last_seen_at`, `last_bell_at`, `last_bell_keys`.
+- **`agent.gen_coach_prefs`** (một hàng / Owner, khoá `user_id`): `enabled`, `bell`, `lessons_per_day` (0..2, mặc định 1), `quiet_start` 21, `quiet_end` 7, `snooze_until`, `stable_since`, `last_seen_at`, `last_bell_at`, `last_bell_keys`.
 - **`agent.gen_coach_items`** (khoá `(user_id, item_key)`): `status` ∈ `shown` · `understood` · `snoozed` · `done` · `dismissed`, `snooze_until`, `shown_count`, `first_shown_at`, `last_shown_at`.
 - RLS `org_isolation` + `GRANT … TO gh_app` như 0032; chạy lại an toàn (`IF NOT EXISTS`, `DROP … IF EXISTS`). v0.1.53 không có migration nên 0033 nối thẳng sau 0032.
 - Hai bảng **không** thuộc `purge_gen` (hạn lưu hội thoại Gen): lựa chọn "Tắt hướng dẫn"/"Để mai" của Sếp phải sống lâu hơn hội thoại.
