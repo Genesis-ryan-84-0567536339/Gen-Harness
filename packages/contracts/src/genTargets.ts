@@ -63,6 +63,7 @@ export const GEN_SCREEN_BY_KEY: Record<string, GenScreen> = Object.fromEntries(G
 export const GEN_TARGETS: GenTarget[] = [
   // ── Hôm nay (overview) ──
   { id: 'overview.needs_boss', screen: 'overview', label: 'Dải "Cần Sếp xử lý"', description: 'Đầu trang Hôm nay: các sự cố Sếp cần tự tay xử lý (kênh rớt, model hết đăng nhập, cập nhật lỗi, sao lưu quá hạn…)', permission: 'system.manage' },
+  { id: 'overview.setup_followup', screen: 'overview', label: 'Thẻ "Việc thiết lập tiếp"', description: 'Thẻ ở Tổng quan liệt kê các việc thiết lập tuỳ chọn còn lại (Zalo/WhatsApp, nhóm lắng nghe, sàng lọc, agent, đội, sao lưu, Facebook, Gen-hub); nút "Để sau 7 ngày" ẩn thẻ cùng các việc P3 của Gen', permission: 'system.manage' },
   { id: 'overview.kpis', screen: 'overview', label: 'Hàng chỉ số chính', description: 'Các ô số liệu đầu trang Hôm nay (cơ hội, cảnh báo, chờ duyệt…)' },
   { id: 'overview.queue', screen: 'overview', label: 'Hàng đợi cần xử lý', description: 'Khung liệt kê cơ hội, cảnh báo, bản nháp chờ duyệt, việc đến hạn' },
   { id: 'overview.queue.row', screen: 'overview', label: 'Một dòng hàng đợi', description: 'Một mục cụ thể trong Hàng đợi cần xử lý', dynamic: 'row' },

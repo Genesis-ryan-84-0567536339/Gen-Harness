@@ -133,6 +133,15 @@
       "permission": "system.manage"
     },
     {
+      "id": "overview.setup_followup",
+      "screen": "overview",
+      "label": "Thẻ \"Việc thiết lập tiếp\"",
+      "description": "Thẻ ở Tổng quan liệt kê các việc thiết lập tuỳ chọn còn lại (Zalo/WhatsApp, nhóm lắng nghe, sàng lọc, agent, đội, sao lưu, Facebook, Gen-hub); nút \"Để sau 7 ngày\" ẩn thẻ cùng các việc P3 của Gen",
+      "dynamic": null,
+      "params": null,
+      "permission": "system.manage"
+    },
+    {
       "id": "overview.kpis",
       "screen": "overview",
       "label": "Hàng chỉ số chính",

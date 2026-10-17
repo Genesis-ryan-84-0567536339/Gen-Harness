@@ -59,6 +59,12 @@ BOSS_KEYS = ("ai", "hub", "facebook", "agy", "claude", "jev", "telegram", "remot
 FOLLOWUP_NS = (5, 6, 7, 8, 9, 10, 11, 13, 14)
 #: Chỉ 5–10 từng là VIỆC trên thẻ (11 trùng `backup.unset`; 13, 14 trùng `boss.facebook` / `boss.hub`).
 FOLLOWUP_TODO_NS = (5, 6, 7, 8, 9, 10)
+#: v0.1.70 (F031/F138): các việc `followup.5`–`followup.10` KHÔNG đứng riêng trên thẻ Hôm nay — gộp thành MỘT việc có
+#: khoá này, đếm đúng như thẻ "Việc thiết lập tiếp" ở Tổng quan (`FOLLOWUP_NS` chưa xong). Khoá `followup.<n>` vẫn hợp
+#: lệ cho hàng "Không dùng việc này" cũ và để tính bài G<n>.
+MERGED_FOLLOWUP_KEY = "followup"
+#: Khoá mục lưu CSDL của thẻ "Việc thiết lập tiếp" (nút "Để sau 7 ngày" hoãn thẻ VÀ mọi việc P3 của Gen).
+CARD_FOLLOWUP = "card:setup_followup"
 
 STATE_SIGNALS: frozenset[str] = frozenset({
     "model.bound", "api_key.present", "ai_budget.set", "pin.set", "telegram.briefing_on", "hub.kho_write_missing",
@@ -94,7 +100,10 @@ TODO_TARGETS: dict[str, str] = {
     "backup.unset": "system.backup.schedule",
     "hub.token_expiring": "mcp.hub_link.token",
     "drafts.pending": "workbench.drafts",
+    # v0.1.70: việc gộp trỏ thẳng thẻ "Việc thiết lập tiếp" (data-gen-target ở SetupFollowUp). Từng `followup.<n>` chỉ
+    # còn là thành viên bị gộp (không hiện riêng) — vẫn giữ đích của nó cho bài học và hàng cũ.
     **{f"followup.{n}": f"guide.item.do:{n}" for n in FOLLOWUP_TODO_NS},
+    MERGED_FOLLOWUP_KEY: "overview.setup_followup",
 }
 ALL_TARGETS: frozenset[str] = frozenset(TODO_TARGETS.values())
 
@@ -184,9 +193,11 @@ TODO_COPY: dict[str, tuple[str, str]] = {
     "boss.ai": ("Kiểm tra nguồn AI chạy được",
                 "Em đã có nguồn AI nhưng chưa gọi thật được lần nào — Sếp bấm Kiểm tra để em chắc là trả lời và lọc "
                 "tin được."),
-    "boss.hub": ("Nối Gen-hub nếu Sếp muốn",
-                 "Gen-hub là cầu để em đọc lịch, mail và Kho dữ liệu của Sếp — không nối thì em vẫn làm việc bình "
-                 "thường."),
+    # v0.1.70 (F138): cùng tên "Nối Gen-hub" với dòng ở Việc Sếp cần làm và việc thiết lập 14; "nếu Sếp muốn" chuyển
+    # vào lý do (việc này không bắt buộc).
+    "boss.hub": ("Nối Gen-hub",
+                 "Không bắt buộc — Gen-hub là cầu để em đọc lịch, mail và Kho dữ liệu của Sếp; không nối thì em vẫn "
+                 "làm việc bình thường."),
     "boss.remote": ("Thử mở Console từ điện thoại",
                     "Đã có người trong đội dùng Console — mở được từ máy khác thì mọi người xử lý việc khi đi ngoài."),
     "backup.unset": ("Đặt lịch sao lưu",
@@ -195,6 +206,7 @@ TODO_COPY: dict[str, tuple[str, str]] = {
                            "Hết hạn thì em mất kết nối lịch, mail và Kho — Sếp tạo token mới ở thẻ Gen-hub."),
     "drafts.pending": ("Có bản nháp chờ Sếp duyệt",
                        "Em không tự gửi gì ra ngoài — nháp nằm chờ Sếp duyệt ở Bàn làm việc."),
+    MERGED_FOLLOWUP_KEY: ("Việc thiết lập tiếp", "Các việc tuỳ chọn ở Tổng quan — không bắt buộc, làm khi sẵn sàng."),
     "followup.5": ("Kết nối Zalo / WhatsApp",
                    "Có kênh em mới đọc được tin nhắn trong các nhóm chat của Sếp."),
     "followup.6": ("Chọn nhóm cho agent lắng nghe",
@@ -219,6 +231,8 @@ DISMISS_WARNINGS: dict[str, str] = {
     "boss.remote": "Không thử truy cập từ xa thì cả đội có thể không mở được Console khi đi ngoài.",
     "backup.unset": "Không đặt lịch sao lưu thì hỏng ổ đĩa hay lỡ tay xoá là mất dữ liệu.",
     "hub.token_expiring": "Bỏ qua thì khi token hết hạn Gen mất kết nối lịch, mail và Kho.",
+    MERGED_FOLLOWUP_KEY: "Tắt thì em không nhắc các việc thiết lập tuỳ chọn nữa — thẻ “Việc thiết lập tiếp” ở Tổng "
+                         "quan vẫn còn đó khi Sếp cần.",
     "followup.5": "Không kết nối Zalo / WhatsApp thì hệ thống chưa có tin nhắn nào để làm việc.",
     "followup.6": "Không chọn nhóm lắng nghe thì agent không đọc nhóm nào cả.",
     "followup.7": "Không bật sàng lọc thì tin thô không được lọc và chấm điểm trước khi agent dùng.",
@@ -257,11 +271,13 @@ def static_todo_keys() -> frozenset[str]:
 def todo_key_known(key: str) -> bool:
     if key.startswith("health."):
         return key.removeprefix("health.") in health_kinds()
-    return key in static_todo_keys()
+    return key == MERGED_FOLLOWUP_KEY or key in static_todo_keys()
 
 
 def static_level(key: str) -> str | None:
     """Mức mặc định của khoá việc tĩnh; health.<kind> không có mức cố định (P0 nếu 'bad', P1 nếu 'warn')."""
+    if key == MERGED_FOLLOWUP_KEY:
+        return "P3"
     for r in TODO_RULES:
         if r.key == key and r.kind != "health":
             return r.level
@@ -278,6 +294,12 @@ def todo_copy(key: str) -> tuple[str, str]:
             return (f"Hoàn tất mục {row['title']} ở Việc Sếp cần làm",
                     "Mục này còn thiếu trong danh sách việc bắt buộc — Sếp mở Việc Sếp cần làm để làm tiếp.")
     return (GENERIC_HEALTH_TITLE, HEALTH_WHY["warn"])
+
+
+def followup_why(left: int) -> str:
+    """Lý do của việc gộp: số việc tuỳ chọn còn lại, đếm như thẻ "Việc thiết lập tiếp" (mọi `FOLLOWUP_NS` chưa xong)."""
+    return (f"Còn {left} việc tuỳ chọn, không bắt buộc — làm khi sẵn sàng, xong sẽ tự biến mất khỏi thẻ “Việc thiết "
+            "lập tiếp” ở Tổng quan.")
 
 
 def drafts_title(n: int) -> str:

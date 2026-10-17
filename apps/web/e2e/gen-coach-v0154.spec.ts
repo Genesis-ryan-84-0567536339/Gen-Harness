@@ -13,7 +13,7 @@ import { apiCall, loginAs, loginAsOwner, p3Hook, resetMock } from './support';
  */
 
 const CARD = 'Hôm nay của Sếp';
-const TITLES = ['Kiểm tra nguồn AI chạy được', 'Nối Gen-hub nếu Sếp muốn'];
+const TITLES = ['Kiểm tra nguồn AI chạy được', 'Nối Gen-hub'];
 
 test.beforeEach(async ({ page }) => {
   await resetMock(page.request, 'finished');
@@ -78,7 +78,7 @@ test('"Không dùng việc này" → hộp cảnh báo → xác nhận → việ
   await card(page).getByTestId('coach-todo').first().getByRole('button', { name: 'Không dùng việc này' }).click();
   await page.getByRole('dialog', { name: /Không dùng việc này\?/ }).getByRole('button', { name: 'Xác nhận tắt việc này' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect.poll(() => todoTitles(page)).toEqual(['Nối Gen-hub nếu Sếp muốn']);
+  await expect.poll(() => todoTitles(page)).toEqual(['Nối Gen-hub']);
 
   // Cài đặt › Bộ não AI › Gen hướng dẫn: dòng "Việc Sếp đã chọn không dùng".
   await page.goto('/system?tab=brain');
@@ -380,7 +380,7 @@ test('"Không dùng việc này" ở nguồn AI → cảnh báo hậu quả → 
   await expect(dlg.getByTestId('coach-dismiss-warning')).toContainText('Gen sẽ không nhắc kiểm tra nguồn AI nữa');
   await dlg.getByRole('button', { name: 'Xác nhận tắt việc này' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect.poll(() => todoTitles(page)).toEqual(['Nối Gen-hub nếu Sếp muốn']);
+  await expect.poll(() => todoTitles(page)).toEqual(['Nối Gen-hub']);
   // Tắt nhắc KHÔNG phải là đạt: x/N giữ nguyên.
   await expect(progress).toContainText('Đã đạt 0/1 việc bắt buộc');
   expect(await requiredOf()).toMatchObject({ required_done: 0, required_total: 1 });

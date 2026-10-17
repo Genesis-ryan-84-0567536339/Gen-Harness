@@ -16,7 +16,7 @@
  * Việc `boss.*` suy từ bảng "Việc Sếp cần làm" của mock-boss-checks (`opts.boss`) nên làm xong một dòng là việc biến mất.
  * Hook e2e `POST /api/v1/__mock/p3/genCoach/{hook}`:
  *   scenario {extras?: string[], stable?: boolean, unseen?: boolean, staff?: boolean} — thêm việc mẫu (health.channel.down P0, model.missing P0
- *                                  [ẩn boss.ai như máy chủ], backup.unset, hub.token_expiring, drafts.pending, followup.7), ép nhãn "ổn định", ép chấm
+ *                                  [ẩn boss.ai như máy chủ], backup.unset, hub.token_expiring, drafts.pending, followup [việc gộp followup.5–10, v0.1.70]), ép nhãn "ổn định", ép chấm
  *                                  đỏ, `staff` = đã mời nhân viên (bật việc boss.remote);
  *   notify {} — chuông `gen.coach` cho Owner (link theo Gen bật/tắt) + bật `unseen`;
  *   state {} — đọc trạng thái nội bộ (kiểm tra; `nonOwnerCalls` = lời gọi bị 403 của vai trò khác Owner); reset {} — về máy mới.
@@ -71,7 +71,7 @@ const BOSS_DEFS: Record<string, Def> = {
     warning: 'Nếu tắt, Gen sẽ không nhắc kiểm tra nguồn AI nữa — tới lúc cần trả lời mới biết lỗi.',
   },
   hub: {
-    title: 'Nối Gen-hub nếu Sếp muốn',
+    title: 'Nối Gen-hub',
     why: 'Gen-hub là cầu để em đọc lịch, mail và Kho dữ liệu của Sếp — không nối thì em vẫn làm việc bình thường.',
     level: 'P3',
     target: 'boss_checks.row.hub',
@@ -123,12 +123,13 @@ const EXTRA_DEFS: Record<string, Def> = {
     target: 'workbench.drafts',
     warning: 'Nếu tắt, Gen sẽ không nhắc duyệt nháp nữa.',
   },
-  'followup.7': {
-    title: 'Bật sàng lọc dữ liệu',
-    why: 'Tin nhắn thô được lọc, phân loại và chấm điểm trước khi vào kho sạch.',
+  // v0.1.70 (F031/F138): như máy chủ — các việc thiết lập 5–10 gộp thành MỘT việc trỏ thẻ "Việc thiết lập tiếp".
+  followup: {
+    title: 'Việc thiết lập tiếp',
+    why: 'Còn 3 việc tuỳ chọn, không bắt buộc — làm khi sẵn sàng, xong sẽ tự biến mất khỏi thẻ “Việc thiết lập tiếp” ở Tổng quan.',
     level: 'P3',
-    target: 'guide.item.do:7',
-    warning: 'Nếu tắt, Gen sẽ không nhắc bật sàng lọc dữ liệu nữa.',
+    target: 'overview.setup_followup',
+    warning: 'Tắt thì em không nhắc các việc thiết lập tuỳ chọn nữa — thẻ “Việc thiết lập tiếp” ở Tổng quan vẫn còn đó khi Sếp cần.',
   },
 };
 
@@ -257,6 +258,8 @@ function allTodos(opts: GenCoachOptions): CoachTodo[] {
   const rank = { P0: 0, P1: 1, P2: 2, P3: 3 } as const;
   return out
     .filter((x) => !S.dismissed.has(x.key) && !S.tomorrow.has(x.key))
+    // v0.1.70: "Để sau 7 ngày" của thẻ "Việc thiết lập tiếp" ẩn luôn mọi việc P3 của Gen (như máy chủ).
+    .filter((x) => !(x.def.level === 'P3' && !!S.followupSnoozedUntil && Date.parse(S.followupSnoozedUntil) > Date.now()))
     .sort((a, b) => rank[a.def.level] - rank[b.def.level])
     .map((x) => todoFrom(x.key, x.def));
 }

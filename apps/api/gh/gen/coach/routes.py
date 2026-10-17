@@ -37,7 +37,7 @@ DISMISS_P0_TITLE = "Việc khẩn cấp không tắt được — Sếp xử lý
 DISMISS_P2_TITLE = "Việc này không tắt được — Sếp chọn Để mai giúp em nhé"
 CONFIRM_TITLE = "Sếp xác nhận giúp em trước khi tắt việc này"
 ACTION_TITLE = "Thao tác này không dùng được cho mục đó"
-CARD_FOLLOWUP = "card:setup_followup"
+CARD_FOLLOWUP = sg.CARD_FOLLOWUP
 
 
 def _now() -> datetime:

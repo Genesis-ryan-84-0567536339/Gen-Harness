@@ -201,7 +201,9 @@ def test_every_target_resolves_in_registry() -> None:
     for target in sorted(sg.ALL_TARGETS):
         assert gen_registry.resolve_target(target) is not None, target
     # mỗi việc tĩnh có ĐÚNG một cách chỉ đường: đích làm sáng (TODO_TARGETS) hoặc liên kết trang (TODO_LINKS).
-    assert set(sg.TODO_TARGETS) | set(sg.TODO_LINKS) == {r.key for r in sg.TODO_RULES if r.kind != "health"}
+    # v0.1.70: + việc gộp `followup` (không phải một dòng TODO_RULES — nó gộp các `followup.5`–`followup.10`).
+    assert set(sg.TODO_TARGETS) | set(sg.TODO_LINKS) == {r.key for r in sg.TODO_RULES if r.kind != "health"} | {
+        sg.MERGED_FOLLOWUP_KEY}
     assert not set(sg.TODO_TARGETS) & set(sg.TODO_LINKS)
 
 
@@ -289,7 +291,7 @@ def test_boss_ai_is_deduped_with_model_missing_and_gen_hub_is_only_a_p3_hint() -
     assert [(t.key, t.level) for t in todos] == [("boss.hub", "P3")]
     plan = today_of(optional_off)
     assert plan.p01_keys == [] and keys_of(plan) == ["boss.hub"]
-    assert plan.payload["todos"][0]["title"] == "Nối Gen-hub nếu Sếp muốn"
+    assert plan.payload["todos"][0]["title"] == "Nối Gen-hub"       # v0.1.70 (F138): một tên ở ba nơi
     assert OLD_NAME not in todos[0].why and "Kho dữ liệu" in todos[0].why
 
 
@@ -439,12 +441,14 @@ def test_guide_lesson_dropped_when_followup_todo_shown_or_dismissed() -> None:
     p = today_of(crowded, items=done)
     assert keys_of(p) == ["boss.ai", "backup.unset", "hub.token_expiring"]  # 3 việc P1 chiếm hết ⇒ followup không hiện
     assert lesson_ids(p) == "G05"                                             # nên bài G05 vẫn còn
+    # v0.1.70 (F031/F138): các việc followup.5–10 gộp thành MỘT việc ⇒ bài G05–G10 đều bị bỏ (việc của chúng nằm
+    # trong thẻ gộp), bài kế tiếp là G11 (11 không phải việc của Gen).
     p5 = today_of(mk_sig(state=state), items=done)
-    assert keys_of(p5) == ["followup.5", "followup.6", "followup.7"]
-    assert lesson_ids(p5) == "G08"                                            # G05/6/7 bị bỏ vì việc đang hiện
+    assert keys_of(p5) == ["followup"]
+    assert lesson_ids(p5) == "G11"
     dismissed = {**done, "todo:followup.8": Item("todo:followup.8", "dismissed", None, 1, T0, T0)}
     p6 = today_of(mk_sig(state=state), items=dismissed)
-    assert keys_of(p6) == ["followup.5", "followup.6", "followup.7"] and lesson_ids(p6) == "G09"
+    assert keys_of(p6) == ["followup"] and lesson_ids(p6) == "G11"
 
 
 def test_lessons_per_day_zero_one_two() -> None:
@@ -835,7 +839,7 @@ async def test_fresh_machine_shows_first_three_by_table_then_done_row_vanishes(
     assert todo_keys(await today(owner_api)) == ["model.missing", "backup.unset", "boss.hub"]   # còn trong cache
     await redis.delete(sg.CACHE_KEY.format(org))
     d2 = await today(owner_api)
-    assert todo_keys(d2) == ["backup.unset", "followup.5", "followup.6"]   # có nguồn dùng được ⇒ model.missing hết
+    assert todo_keys(d2) == ["backup.unset", "followup"]   # có nguồn dùng được ⇒ model.missing hết; followup.5–10 gộp
     assert d2["progress"]["required_done"] == 1 and d2["progress"]["required_total"] == 1
 
 
@@ -858,7 +862,7 @@ async def test_followup_11_13_14_never_appear_through_the_api(owner_api: Api, si
                                                               clock: list[datetime]) -> None:
     sigbox[0] = mk_sig(state={f"followup.{n}.done": False for n in (5, 6, 7, 8, 9, 10, 11, 13, 14)})
     d = await today(owner_api)
-    assert todo_keys(d) == ["followup.5", "followup.6", "followup.7"]
+    assert todo_keys(d) == ["followup"]                       # v0.1.70: gộp một; 11/13/14 chỉ góp vào số "Còn N việc"
     assert all(t["level"] == "P3" and t["can_dismiss"] for t in d["todos"])
 
 
@@ -1774,10 +1778,10 @@ async def test_coach_status_tool_result_is_small_static_and_does_not_mark_shown(
     assert res.ok and len(res.text.encode()) <= 4000
     data = res.data
     assert set(data) == {"enabled", "todos", "progress", "lesson", "lessons"}
-    assert [t["key"] for t in data["todos"]] == ["model.missing", "followup.5"]
+    assert [t["key"] for t in data["todos"]] == ["model.missing", "followup"]
     # v0.1.59: model.missing chỉ đường bằng `link` (màn Thiết lập nguồn AI), không còn `target`.
     assert data["todos"][0]["link"] == "/setup?buoc=nguon-ai" and "target" not in data["todos"][0]
-    assert data["todos"][1]["n"] == 5 and "5" in runner.seen_ids
+    assert data["todos"][1]["target"] == "overview.setup_followup" and "n" not in data["todos"][1]   # v0.1.70: gộp
     assert data["progress"]["required_done"] == 0 and data["progress"]["required_total"] == 1
     assert data["lesson"]["id"] == "N01" and set(data["lesson"]) == {"id", "k", "total", "title", "status"}
     assert len(data["lessons"]) == 19 and set(data["lessons"][0]) == {"id", "title", "status"}
@@ -1812,7 +1816,7 @@ async def test_gen_turn_with_coach_question_gets_the_block_and_runs_the_tool(
     system = router.calls[0][0].content
     assert system.count(engine.BLOCK_HEADER) == 1
     assert "model.missing · Gen chưa có model để trả lời · /setup?buoc=nguon-ai" in system
-    assert "boss.hub · Nối Gen-hub nếu Sếp muốn · boss_checks.row.hub" in system
+    assert "boss.hub · Nối Gen-hub · boss_checks.row.hub" in system
     block = system[system.index(engine.BLOCK_HEADER):].split("\n\n")[0]
     assert len(block) <= 500
     assert "Việc vận hành (tool coach.status" in system and "coach.status: Việc vận hành Sếp cần làm ngay" in system

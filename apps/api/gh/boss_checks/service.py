@@ -30,7 +30,7 @@ ROWS: tuple[dict[str, Any], ...] = (
     # Đạt khi có lượt gọi model thật thành công trong 30 ngày, HOẶC Claude/Google đã gọi thử đạt, HOẶC bấm Kiểm tra
     # (gọi thử nguồn đầu chuỗi) — xem `ai_source_evidence` / `overview`.
     {"row": 0, "key": "ai", "title": "Có ít nhất 1 nguồn AI chạy được", "optional": False, "checks": ["ai_source"]},
-    {"row": 1, "key": "hub", "title": "Gen-hub", "optional": True, "checks": ["hub"]},
+    {"row": 1, "key": "hub", "title": "Nối Gen-hub", "optional": True, "checks": ["hub"]},
     {"row": 2, "key": "facebook", "title": "Facebook", "optional": True, "checks": ["facebook"]},
     # v0.1.55: bỏ `agy_switch` khỏi dòng (bài kiểm của nhà phát triển, đổi qua lại hai tài khoản); việc đổi tài khoản
     # vẫn dùng được ở Kết nối.
