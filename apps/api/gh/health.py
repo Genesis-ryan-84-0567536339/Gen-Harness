@@ -1221,7 +1221,7 @@ async def _eval_background_source(db: AsyncSession, org_id: uuid.UUID, redis: An
 AGY_BOX_DOWN_TITLE = "Hộp riêng Antigravity chưa chạy"
 AGY_BOX_DOWN_BODY = ("Việc có người ngoài (soạn trả lời khách, sàng lọc tin người lạ) tạm không dùng Antigravity và "
                      "chuyển sang nguồn AI khác. Thường tự hết sau khi hộp khởi động lại; nếu kéo dài, chạy "
-                     "`genh update` trên máy chủ để dựng lại hộp.")
+                     "`genh start` trên máy chủ để dựng lại hộp (xem lỗi bằng `genh logs agy-box`).")
 
 
 async def _eval_agy_box(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: datetime) -> None:

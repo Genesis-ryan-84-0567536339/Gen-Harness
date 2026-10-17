@@ -903,7 +903,7 @@ async def identity_revert(log_id: uuid.UUID, user: service.CurrentUser = Depends
     return out
 
 
-# ─── Nhật ký lắng nghe (v0.1.71): dòng thời gian gộp tin + sự kiện kênh ──────────────────────────────────────────────
+# ─── Nhật ký lắng nghe (v0.1.68): dòng thời gian gộp tin + sự kiện kênh ──────────────────────────────────────────────
 from gh.data_api import listen_log  # noqa: E402
 
 router.include_router(listen_log.router)

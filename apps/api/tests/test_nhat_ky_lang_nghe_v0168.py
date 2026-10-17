@@ -1,4 +1,4 @@
-"""v0.1.71 — Nhật ký lắng nghe: dòng thời gian gộp tin + sự kiện kênh, "hệ thống đã làm gì", phân trang con trỏ,
+"""v0.1.68 — Nhật ký lắng nghe: dòng thời gian gộp tin + sự kiện kênh, "hệ thống đã làm gì", phân trang con trỏ,
 lọc, quyền (403, 1-1 chỉ Owner/người phụ trách, che số, tìm chữ không dò được số bị che), sự kiện WebSocket."""
 
 import uuid
@@ -25,7 +25,7 @@ async def _channel(db: Any, org: uuid.UUID, type_: str = "zalo") -> Any:
 
 
 async def _agent_decision(db: Any, org: uuid.UUID, raw_id: uuid.UUID, decision: str = "draft", *, draft: bool = True,
-                          outcome: str = "held") -> dict[str, Any]:
+                          outcome: str = "held", rationale: str | None = None) -> dict[str, Any]:
     """Một agent đã quyết định cho tin `raw_id` (đơn vị ý nghĩa + chứng cứ + bản nháp thật nếu cần)."""
     unit = (await db.execute(text("""
         INSERT INTO clean.meaning_units (org_id, observed_at, event_type, conclusion, entities, confidence, run_id)
@@ -46,9 +46,11 @@ async def _agent_decision(db: Any, org: uuid.UUID, raw_id: uuid.UUID, decision: 
             VALUES (:o, 'DR-0001', 'message', :a, '{"text": "Dạ em gửi báo giá"}'::jsonb, 4, 'pending')
             RETURNING id"""), {"o": org, "a": agent})).scalar_one()
     did = (await db.execute(text("""
-        INSERT INTO agent.decisions (org_id, agent_id, trigger_ref, trigger_unit_id, decision, outcome, draft_id)
-        VALUES (:o, :a, CAST(:tr AS jsonb), :u, :d, :oc, :dr) RETURNING id"""),
+        INSERT INTO agent.decisions (org_id, agent_id, trigger_ref, trigger_unit_id, decision, outcome, draft_id,
+                                     rationale)
+        VALUES (:o, :a, CAST(:tr AS jsonb), :u, :d, :oc, :dr, :why) RETURNING id"""),
                             {"o": org, "a": agent, "u": unit, "d": decision, "oc": outcome, "dr": draft_id,
+                             "why": rationale,
                              "tr": orjson.dumps({"type": "meaning_unit", "id": str(unit)}).decode()})).scalar_one()
     await db.commit()
     return {"unit": unit, "agent": agent, "draft": draft_id, "decision": did}
@@ -135,6 +137,23 @@ async def test_message_shows_screening_and_agent_decision_with_draft_link(owner_
     assert (await _log(owner_api, "?acted=true"))["items"] == []
 
 
+async def test_blocked_silent_decision_names_the_real_reason(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    """Review Opus P2-2: nhóm Lắng nghe im lặng chặn trả lời ⇒ nhãn nói đúng «nhóm Lắng nghe im lặng», không đổ cho
+    «mức tự trị không cho phép»; quyết định bị chặn vì mức tự trị vẫn giữ nhãn cũ."""
+    from gh.biz.duty.engine import SILENT_GROUP_REASON
+    org = await org_id(db)
+    await listen(db, org, "g1", mode="silent")
+    [raw] = await put(sessionmaker(), org, msg("Báo giá container nhé", mentions=True))
+    await _agent_decision(db, org, raw, "silent", draft=False, outcome="blocked", rationale=SILENT_GROUP_REASON)
+    item = next(i for i in (await _log(owner_api))["items"] if i["kind"] == "message" and i["id"] == str(raw))
+    [dec] = item["decisions"]
+    assert dec["label"] == "Im lặng (nhóm Lắng nghe im lặng — không bao giờ trả lời, kể cả khi được tag)"
+    await db.execute(text("UPDATE agent.decisions SET rationale = 'mức 1 (chỉ đọc) không gợi ý hay soạn tin'"))
+    await db.commit()
+    item = next(i for i in (await _log(owner_api))["items"] if i["id"] == str(raw))
+    assert item["decisions"][0]["label"] == "Im lặng (mức tự trị không cho phép)"
+
+
 async def test_why_nothing_happened_notes(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
     org = await org_id(db)
     await listen(db, org, "g1", mode="silent")
@@ -146,8 +165,7 @@ async def test_why_nothing_happened_notes(owner_api: Api, db) -> None:  # type: 
                              WHERE event_id = :e"""), {"e": c})
     await db.commit()
     by_id = {i["id"]: i for i in (await _log(owner_api, "?kind=message"))["items"]}
-    assert by_id[str(a)]["note"] == ("Nhóm ở chế độ Lắng nghe im lặng — chỉ lưu, không bao giờ trả lời "
-                                     "(kể cả khi được tag)")
+    assert by_id[str(a)]["note"] == "Nhóm Lắng nghe im lặng — chỉ lưu và sàng lọc, không đưa cho agent trực"
     assert by_id[str(b)]["note"] == "Tin riêng ở chế độ lưu im lặng — không đưa cho agent trực"
     assert by_id[str(c)]["screening"]["note"] == "Đã loại khi sàng lọc: Trùng hẳn một tin đã có"
     assert by_id[str(c)]["note"] == "Đã loại ở sàng lọc nên không đưa cho agent"
@@ -277,6 +295,29 @@ async def test_directory_events_first_sync_is_summary_then_changes_are_events(ow
     assert "group_rejoined" in {i["event_type"] for i in (await _log(owner_api, "?kind=event"))["items"]}
 
 
+async def test_many_new_groups_after_first_sync_are_capped_with_a_summary_line(owner_api: Api, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """Review Opus P3: quét danh bạ KHÔNG phải lần đầu thấy hàng trăm nhóm mới (đổi tài khoản) ⇒ chỉ ghi ≤ 50 dòng
+    «nhóm mới» (kèm WebSocket), phần dư gom một dòng tóm tắt; nhóm vẫn được tạo đủ."""
+    org = await org_id(db)
+    await handle_directory(db, redis, org, {"channel": "zalo", "groups_complete": False,
+                                            "groups": [{"external_id": "g0", "name": "Nhóm đầu"}]})
+    await db.commit()
+    total = listen_events.MAX_GROUP_NEW_EVENTS + 20
+    await handle_directory(db, redis, org, {"channel": "zalo", "groups_complete": False,
+                                            "groups": [{"external_id": f"gn{i}", "name": f"Nhóm mới {i}"}
+                                                       for i in range(total)]})
+    n_groups = (await db.execute(text("SELECT count(*) FROM core.groups WHERE external_id LIKE 'gn%'"))).scalar_one()
+    assert n_groups == total
+    counts = {r.kind: r.n for r in (await db.execute(text(
+        "SELECT kind, count(*) AS n FROM ops.listen_events GROUP BY kind"))).all()}
+    assert counts.get("group_new", 0) == listen_events.MAX_GROUP_NEW_EVENTS
+    assert counts.get("groups_synced", 0) == 2        # lần quét đầu + dòng tóm tắt phần dư
+    assert len(listen_events.take_pending(db)) == listen_events.MAX_GROUP_NEW_EVENTS + 2   # + 2 dòng tóm tắt
+    await db.commit()
+    texts = [i["text"] for i in (await _log(owner_api, "?kind=event"))["items"] if i["event_type"] == "groups_synced"]
+    assert any("còn 20 nhóm mới nữa" in t for t in texts)
+
+
 async def test_new_group_follows_new_group_mode_setting(owner_api: Api, db, redis) -> None:  # type: ignore[no-untyped-def]
     org = await org_id(db)
     await db.execute(text("""UPDATE core.organizations
@@ -299,7 +340,7 @@ async def test_old_messages_without_recorded_mode_fall_back_to_current_mode(owne
     org = await org_id(db)
     await listen(db, org, "g1", mode="proactive")
     [seed] = await put(sessionmaker(), org, msg("Tin mẫu"))
-    # Tin vào kho TRƯỚC v0.1.71 (không có `listen_mode`): bảng thô chỉ-INSERT nên dựng bằng một INSERT thẳng.
+    # Tin vào kho TRƯỚC v0.1.68 (không có `listen_mode`): bảng thô chỉ-INSERT nên dựng bằng một INSERT thẳng.
     raw = uuid.uuid4()
     await db.execute(text("""
         INSERT INTO raw.events (id, org_id, received_at, occurred_at, channel_id, group_id, sender_identity_id,
@@ -408,6 +449,23 @@ async def test_auditor_sees_group_rows_masked_but_not_direct_unless_assigned(own
     items = (await _log(aud))["items"]
     assert any(i["kind"] == "message" and i["direct"] and i["text"] == "Tin riêng bí mật" for i in items)
     assert any(i["kind"] == "event" and i["event_type"] == "direct_new" for i in items)
+
+
+async def test_search_cannot_probe_masked_numbers_written_in_unicode_digits(owner_api: Api, client, db) -> None:  # type: ignore[no-untyped-def]
+    """Review Opus P3: `mask_text` (Python `\\d`) che cả chữ số toàn chiều rộng / Ả Rập–Ấn Độ; bộ lọc tìm chữ ở
+    PostgreSQL cũng phải bỏ chúng, không thì vai dưới Owner dò được số đã che bằng chính chữ số đó."""
+    org = await org_id(db)
+    await listen(db, org, "g1", mode="silent")
+    full = "０９１２３４５６７８"                      # toàn chiều rộng
+    arab = "٠٩١٢٣٤٥٦٧٨"                              # Ả Rập–Ấn Độ
+    await put(sessionmaker(), org, msg(f"Số tài khoản {full} nhé"), msg(f"Số điện thoại {arab} nhé"))
+    aud = await login_as(client, db, "auditor")
+    shown = " ".join(i["text"] or "" for i in (await _log(aud))["items"] if i["kind"] == "message")
+    assert full not in shown and arab not in shown and "•" in shown
+    assert (await _log(aud, f"?q={full}"))["items"] == []
+    assert (await _log(aud, f"?q={arab}"))["items"] == []
+    assert len((await _log(aud, "?q=Số tài khoản"))["items"]) == 1               # chữ thường vẫn tìm được
+    assert len((await _log(owner_api, f"?q={full}"))["items"]) == 1              # Owner thì tìm được
 
 
 async def test_group_scope_limits_rows_for_scoped_role(owner_api: Api, client, db) -> None:  # type: ignore[no-untyped-def]

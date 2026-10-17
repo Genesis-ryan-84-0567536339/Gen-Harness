@@ -263,7 +263,7 @@ async def channel_logout(type_: str, request: Request, user: service.CurrentUser
                            detail={"sessions": [str(r.id) for r in rows]}, ip=user.ip)
     # v0.1.36 (F-6a): Sếp chủ động đăng xuất
     await health.clear(db, user.org_id, f"channel.down:{type_}", redis=request.app.state.redis)
-    if rows:   # v0.1.71: dòng "Kênh … đã đăng xuất" cho Nhật ký lắng nghe
+    if rows:   # v0.1.68: dòng "Kênh … đã đăng xuất" cho Nhật ký lắng nghe
         await listen_events.record(db, user.org_id, "channel_ended", channel_id=ch.id, channel_type=type_,
                                    detail={"reason": "logged_out", "by": "owner"})
     await db.commit()
@@ -410,6 +410,8 @@ async def channel_group_mode(type_: str, gid: uuid.UUID, body: GroupModeIn, requ
         if not user.pin_active():
             raise pin_required()
         await _save_new_group_mode(db, user, type_, body.mode)
+        # cờ «nhóm mới» của bridge, làm mới cả khi nhóm này không đổi chế độ
+        await sync_listen_sets(db, request.app.state.redis, user.org_id)
     else:
         await set_channel_setting(db, user.org_id, "new_group_asked", type_, True)
     return await update_group(db, request.app.state.redis, user, gid, GroupPatch(listen_mode=body.mode))

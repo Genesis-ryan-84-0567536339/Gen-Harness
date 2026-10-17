@@ -1,4 +1,4 @@
-"""Nhật ký lắng nghe (v0.1.71): MỘT dòng thời gian gộp tin nghe được (Kho thô) + sự kiện trên mọi kênh, kèm "hệ thống đã
+"""Nhật ký lắng nghe (v0.1.68): MỘT dòng thời gian gộp tin nghe được (Kho thô) + sự kiện trên mọi kênh, kèm "hệ thống đã
 làm gì" (sàng lọc, quyết định của agent trực, bản nháp ở Bàn làm việc). Chỉ ĐỌC — không ghi, không lách quyền:
 
 - Quyền vào màn = `data.read` (như Kho thô). Tin nhóm theo phạm vi `data.read` của vai (`Scope.group_id_sql`).
@@ -12,6 +12,7 @@ làm gì" (sàng lọc, quyết định của agent trực, bản nháp ở Bàn
 """
 
 import re
+import unicodedata
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
@@ -24,6 +25,7 @@ from gh.auth import rbac, service
 from gh.auth.deps import require
 from gh.biz.core.routes import _readable_draft_ids
 from gh.biz.core.scope import Scope, direct_visible_sql, scope_for
+from gh.biz.duty.engine import SILENT_GROUP_REASON
 from gh.data import listen_events as lev
 from gh.data.common import CHANNEL_NAME, LISTENING_MODES, iso, mask_text, ref, since_cutoff
 from gh.db import DB
@@ -35,7 +37,24 @@ READ = require("data.read")
 
 #: Số dài (≥ 8 chữ số) mà `mask_text` che — dạng PostgreSQL. Dùng để BỎ khỏi chuỗi tìm kiếm của vai dưới Owner; mẫu này
 #: khớp rộng hơn một chút so với mẫu Python (có thể bỏ thừa, không bao giờ bỏ thiếu) nên không lộ số bị che.
-_LONGNUM_PG = r"(?<![0-9])[0-9][0-9 .-]{7,22}[0-9](?![0-9])"
+def _nd_class() -> str:
+    """Mọi chữ số Unicode (loại Nd) dạng lớp ký tự regex — đúng tập mà `\\d` của Python (`mask_text`) coi là chữ số,
+    kể cả số Ả Rập–Ấn Độ, số toàn chiều rộng…; `[0-9]` / `[[:digit:]]` của PostgreSQL chỉ khớp ASCII nên người xem dò
+    được số đã che bằng chữ số Unicode. Dựng từ `unicodedata` lúc nạp mô-đun để hai bên luôn khớp nhau."""
+    out: list[str] = []
+    start: int | None = None
+    for c in range(0x110000 + 1):
+        nd = c < 0x110000 and unicodedata.category(chr(c)) == "Nd"
+        if nd and start is None:
+            start = c
+        elif not nd and start is not None:
+            out.append(chr(start) if start == c - 1 else f"{chr(start)}-{chr(c - 1)}")
+            start = None
+    return "".join(out)
+
+
+_ND = _nd_class()
+_LONGNUM_PG = rf"(?<![{_ND}])[{_ND}][{_ND} .-]{{7,22}}[{_ND}](?![{_ND}])"
 _CURSOR_RE = re.compile(r"^(\d{1,20})_([0-9a-fA-F-]{36})$")
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 MAX_TEXT = 400
@@ -206,8 +225,10 @@ def _screening_note(state: str, detail: Any, label: str | None) -> str:
     return base
 
 
-def _decision_label(decision: str, outcome: str | None, draft_status: str | None) -> str:
+def _decision_label(decision: str, outcome: str | None, draft_status: str | None, rationale: str | None = None) -> str:
     if decision == "silent":
+        if outcome == "blocked" and SILENT_GROUP_REASON in (rationale or ""):
+            return "Im lặng (nhóm Lắng nghe im lặng — không bao giờ trả lời, kể cả khi được tag)"
         return {"rejected": "Im lặng (phản hồi của model bị loại)", "blocked": "Im lặng (mức tự trị không cho phép)"
                 }.get(outcome or "", "Im lặng")
     if decision in ("draft", "send"):
@@ -234,8 +255,8 @@ def _quiet_note(r: Any, decisions: list[dict[str, Any]], can_see_decisions: bool
     if r.group_id is None and r.listen_mode == "silent":
         return "Tin riêng ở chế độ lưu im lặng — không đưa cho agent trực"
     if r.group_id is not None and (r.listen_mode or r.group_mode_now) == "silent":
-        # QD 17/10: nhóm Lắng nghe im lặng chỉ lưu — không bao giờ trả lời, kể cả khi được tag.
-        return "Nhóm ở chế độ Lắng nghe im lặng — chỉ lưu, không bao giờ trả lời (kể cả khi được tag)"
+        # QD 17/10: nhóm Lắng nghe im lặng chỉ lưu + sàng lọc; không vào ứng viên agent trực (không có quyết định nào).
+        return "Nhóm Lắng nghe im lặng — chỉ lưu và sàng lọc, không đưa cho agent trực"
     return "Chưa có agent nào quyết định cho tin này"
 
 
@@ -245,7 +266,7 @@ async def _decisions_for(db: AsyncSession, user: service.CurrentUser,
         return {}
     rows = (await db.execute(text("""
         SELECT x.raw_event_id AS eid, d.id, d.at, d.agent_id, a.name AS agent_name, d.decision, d.outcome,
-               d.draft_id, ad.code AS draft_code, ad.status AS draft_status
+               d.draft_id, d.rationale, ad.code AS draft_code, ad.status AS draft_status
         FROM clean.evidence x
         JOIN agent.decisions d ON d.trigger_unit_id = x.meaning_unit_id AND d.org_id = :o
         JOIN agent.identities a ON a.id = d.agent_id
@@ -261,7 +282,8 @@ async def _decisions_for(db: AsyncSession, user: service.CurrentUser,
         out.setdefault(r.eid, []).append({
             "id": str(r.id), "at": iso(r.at), "agent": {"id": str(r.agent_id), "name": r.agent_name},
             "decision": r.decision, "outcome": r.outcome,
-            "label": _decision_label(r.decision, r.outcome, r.draft_status if r.draft_id else None), "draft": draft})
+            "label": _decision_label(r.decision, r.outcome, r.draft_status if r.draft_id else None, r.rationale),
+            "draft": draft})
     return out
 
 

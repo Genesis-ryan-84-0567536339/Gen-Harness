@@ -231,15 +231,18 @@ async def test_no_api_key_still_sends(owner_api, db, redis) -> None:  # type: ig
     assert (await db.execute(text("SELECT count(*) FROM agent.model_calls"))).scalar_one() == 0
 
 
-async def test_agy_source_summarizes_briefing(owner_api, db, redis) -> None:  # type: ignore[no-untyped-def]
-    """v0.1.62: Owner chỉ có Antigravity CLI (không khoá API) ⇒ Bản tin Gen tóm tắt bằng agy, không nhắc dán khoá."""
+async def test_agy_source_summarizes_briefing(owner_api, db, redis, boxctl) -> None:  # type: ignore[no-untyped-def]
+    """v0.1.62: Owner chỉ có Antigravity CLI (không khoá API) ⇒ Bản tin Gen tóm tắt bằng agy, không nhắc dán khoá.
+    Review v0.1.63 (P2-3): Bản tin có tên hiển thị khách / tiêu đề việc ⇒ agy chạy QUA HỘP, không bao giờ trong tiến
+    trình (agy trong tiến trình là `Boom` — bị gọi là hỏng)."""
     from tests.test_background_cli_v0141 import FakeCli
 
     org = await org_id(db)
     await cli_provider(db, org, "antigravity_cli", 1)
     agy = FakeCli("agy")
+    boxctl.state = "ok"
     router = ModelRouter(sessionmaker(), redis, transport=transport(lambda host, key: (200, OK)),
-                         claude_factory=Boom(), cli_factory=agy)
+                         claude_factory=Boom(), cli_factory=Boom(), box_factory=lambda: agy)
     await briefing.run_briefing(sessionmaker(), redis, router, now=_today(7, 31))
     c = (await _messages(db))[0]
     assert c["summary_source"] == "model" and c["needs_api_key"] is False
@@ -247,6 +250,23 @@ async def test_agy_source_summarizes_briefing(owner_api, db, redis) -> None:  # 
     calls = (await db.execute(text("""SELECT mc.purpose, mc.agent_key, mc.status FROM agent.model_calls mc"""))).all()
     assert [(x.purpose, x.agent_key, x.status) for x in calls] == [("gen.briefing", "core.briefing", "ok")]
     assert HINT not in (await _bells(db))[0].body
+
+
+async def test_briefing_with_box_down_never_runs_agy_inproc(owner_api, db, redis, boxctl) -> None:  # type: ignore[no-untyped-def]
+    """Review v0.1.63 (P2-3): hộp tắt + chỉ có Antigravity ⇒ bản tin vẫn gửi đủ mục, không có đoạn tóm tắt bằng model,
+    và KHÔNG chạy agy trong tiến trình."""
+    from tests.test_background_cli_v0141 import FakeCli
+
+    org = await org_id(db)
+    await cli_provider(db, org, "antigravity_cli", 1)
+    inproc, boxed = FakeCli("agy"), FakeCli("agy")
+    boxctl.state = "down"
+    router = ModelRouter(sessionmaker(), redis, transport=transport(lambda host, key: (200, OK)),
+                         claude_factory=Boom(), cli_factory=inproc, box_factory=lambda: boxed)
+    await briefing.run_briefing(sessionmaker(), redis, router, now=_today(7, 31))
+    c = (await _messages(db))[0]
+    assert c["summary_source"] != "model" and inproc.calls == 0 and boxed.calls == 0
+    assert c["steps"][0] == {"kind": "tool", "name": "briefing.sources"}
 
 
 async def test_content_marks_untrusted(owner_api, db, redis) -> None:  # type: ignore[no-untyped-def]

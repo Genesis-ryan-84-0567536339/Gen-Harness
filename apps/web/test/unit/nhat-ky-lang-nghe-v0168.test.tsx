@@ -1,5 +1,5 @@
 /**
- * v0.1.71 — Nhật ký lắng nghe (màn): phần logic thuần, vẽ dòng tin + sự kiện + "hệ thống đã làm gì", ghi chú nhóm Không
+ * v0.1.68 — Nhật ký lắng nghe (màn): phần logic thuần, vẽ dòng tin + sự kiện + "hệ thống đã làm gì", ghi chú nhóm Không
  * nghe, "Xem thêm" theo con trỏ, lọc gửi đúng tham số cho máy chủ, 403 thân thiện, cập nhật trực tiếp qua WebSocket.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -302,6 +302,47 @@ describe('cập nhật trực tiếp qua WebSocket', () => {
     });
     expect(urls.length).toBe(before);
     setListenLogLive(true);
+  });
+
+  it('bật lại "Cập nhật trực tiếp" sau lúc tạm dừng ⇒ tải bù ngay một lần (tin đến lúc dừng hiện ra)', async () => {
+    const urls = await mounted();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const sw = screen.getByRole('switch', { name: 'Cập nhật trực tiếp' });
+    await user.click(sw);
+    const paused = urls.length;
+    act(() => ping('raw.new', { id: 'z' }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(urls.length).toBe(paused); // đang dừng: không tải
+    await user.click(sw);
+    await waitFor(() => expect(urls.length).toBe(paused + 1)); // bật lại: tải bù ngay, không đợi tín hiệu
+  });
+
+  it('setListenLogLive: chỉ tải bù khi chuyển tắt → bật và có qc; bật sẵn / thiếu qc thì không', () => {
+    const qc = new QueryClient();
+    const spy = vi.spyOn(qc, 'invalidateQueries');
+    setListenLogLive(true, qc); // đang bật sẵn
+    expect(spy).not.toHaveBeenCalled();
+    setListenLogLive(false, qc);
+    setListenLogLive(true); // thiếu qc (rời màn)
+    expect(spy).not.toHaveBeenCalled();
+    setListenLogLive(false);
+    setListenLogLive(true, qc);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith({ queryKey: qkLog.listRoot });
+  });
+
+  it('tín hiệu WebSocket chỉ làm mới danh sách, không làm mới số liệu 24 giờ (review Opus P3)', async () => {
+    const qc = new QueryClient();
+    qc.setQueryData([...qkLog.listRoot, {}], { pages: [], pageParams: [] });
+    qc.setQueryData(qkLog.stats, STATS);
+    const spy = vi.spyOn(qc, 'invalidateQueries');
+    vi.useFakeTimers();
+    applyEvent(qc, { type: 'listen.event', data: {} } as never);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith({ queryKey: qkLog.listRoot });
   });
 
   it('không tải lại khi màn không mở (chưa có truy vấn nhật ký trong bộ nhớ đệm)', async () => {

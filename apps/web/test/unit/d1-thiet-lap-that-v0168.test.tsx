@@ -103,6 +103,9 @@ describe('F038 / F079 — bước 10 và bước 8 nói thật', () => {
     const next = await screen.findByRole('button', { name: /Tiếp tục/ });
     expect(next).toBeDisabled();
     expect(screen.getByText(/Thêm ít nhất một người/)).toBeInTheDocument();
+    // Hướng dẫn không có nút "Để sau" ⇒ gợi ý chỉ lối ra thật là "Quay lại" (không chỉ vào nút không tồn tại).
+    expect(screen.getByText(/chưa muốn mời thì bấm "Quay lại"/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Để sau' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Thêm người/ }));
     expect(screen.getByRole('button', { name: /Tiếp tục/ })).toBeDisabled();           // dòng trống vẫn không tính
     await user.type(screen.getByLabelText('Tên hiển thị'), 'Lan');

@@ -100,9 +100,12 @@ class SoftBoxGate:
     """Mặc định: luật thật — `placement.box_required` và `agybox.client.box_status` (lỗi ⇒ đóng an toàn)."""
 
     def required(self, role: str | None, agent_key: Any, *, owner: bool = True, purpose: str | None = None) -> bool:
-        if role is None:                                 # khoá lạ không có hồ sơ: không có lý do để bắt buộc hộp
-            return False
         try:
+            if role is None:
+                # Review v0.1.63 (P3): khoá lạ (không có hồ sơ vai) ⇒ bộ định tuyến xếp QUA HỘP (`placement.UNKNOWN_
+                # PLACEMENT`, đóng an toàn) ⇒ readiness cũng coi là cần hộp, để kết luận khớp việc bộ định tuyến làm.
+                key = agent_key if isinstance(agent_key, str) else ""
+                return placement.box_required(key, None, owner=owner, purpose=purpose)
             return placement.box_required(role, agent_key, owner=owner, purpose=purpose)
         except Exception:  # noqa: BLE001 — hỏi hộp là phần thêm; lỗi không được làm sập câu trả lời "dùng được không"
             log.warning("placement.box_required lỗi (%s) — coi như không bắt buộc hộp", role, exc_info=True)

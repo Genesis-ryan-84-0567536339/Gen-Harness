@@ -760,7 +760,7 @@ export function createPhase2(opts: Phase2Options) {
   // ── realtime simulation ──
   let simSeq = 0;
 
-  // ── Nhật ký lắng nghe (v0.1.71): dòng thời gian gộp tin Kho thô + sự kiện kênh, dựng từ chính `raw` ở trên ──
+  // ── Nhật ký lắng nghe (v0.1.68): dòng thời gian gộp tin Kho thô + sự kiện kênh, dựng từ chính `raw` ở trên ──
   const MODE_LABEL: Record<string, string> = {
     pending: 'Chờ Sếp chọn', off: 'Không nghe', tagged_only: 'Nghe hết, chỉ trả lời khi được tag', silent: 'Lắng nghe im lặng',
     proactive: 'Chủ động bắt tín hiệu', paused: 'Tạm dừng',
@@ -1013,7 +1013,7 @@ export function createPhase2(opts: Phase2Options) {
     // pipeline
     if (p === '/data/pipeline' && m === 'GET') return need('data.read') ? reply(200, pipeline()) : true;
 
-    // Nhật ký lắng nghe (v0.1.71)
+    // Nhật ký lắng nghe (v0.1.68)
     if (seg[0] === 'listen-log') {
       if (!need('data.read')) return true;
       if (seg[1] === 'stats' && m === 'GET') {

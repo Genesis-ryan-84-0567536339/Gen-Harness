@@ -112,6 +112,57 @@ test('tin từ nhóm LẠ: không đi luồng inbound, phát group.discovered đ
   mgr.shutdown();
 });
 
+// ── P2-1 (review v0.1.65): chỉ gắn first_message khi chắc chắn là nhóm MỚI và nhóm sẽ vào «Lắng nghe im lặng» ──
+
+test('first_message CHỈ gắn khi danh bạ đã quét xong; chưa quét xong ⇒ group.discovered không mang nội dung tin', async () => {
+  const api = makeZaloApi({ groups: GROUPS });
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const real = api.getAllGroups;
+  api.getAllGroups = async () => { await gate; return real(); };
+  const env = await setup({ zalo: makeZaloLib({ api }), discoverDelayMs: 10, discoverMinGapMs: 0 });
+  const blob = env.keyring.encryptTransport(JSON.stringify({ imei: 'i', cookie: [], userAgent: 'u' }), 'zalo:s1');
+  await env.mgr.handleControl(ctl('session.login', { channel: 'zalo', session_id: 's1', credential: blob }));
+  await waitFor(() => env.bus.of(STREAMS.status, 'session.active')[0]);
+  // bridge vừa khởi động lại: danh bạ chưa quét xong ⇒ nhóm "Không nghe" cũ cũng trông như nhóm lạ
+  api.listener.emit('message', zaloMessage({ threadId: 'G2', content: 'nhóm tắt nghe cũ', msgId: '71' }));
+  const found = await waitFor(() => env.bus.of(STREAMS.directory, 'group.discovered')[0]);
+  assert.equal(found.payload.group_id, 'G2');
+  assert.equal('first_message' in found.payload, false);
+  assert.ok(!JSON.stringify(env.bus.events).includes('nhóm tắt nghe cũ'));
+  release();
+  env.mgr.shutdown();
+});
+
+for (const mode of ['ask', 'off']) {
+  test(`first_message KHÔNG gắn khi cờ new_group_mode của kênh = ${mode} (nhóm mới không vào «Lắng nghe im lặng»)`, async () => {
+    const api = makeZaloApi({ groups: GROUPS });
+    const env = await loginZalo(api, { discoverDelayMs: 10, discoverMinGapMs: 0 });
+    await waitFor(() => env.bus.of(STREAMS.directory, 'groups')[0]);
+    env.bus.groupMode.zalo = mode;
+    api.listener.emit('message', zaloMessage({ threadId: 'G9', content: 'tin không được rò', msgId: '72' }));
+    const found = await waitFor(() => env.bus.of(STREAMS.directory, 'group.discovered')[0]);
+    assert.equal(found.payload.group_id, 'G9');
+    assert.equal('first_message' in found.payload, false);
+    assert.ok(!JSON.stringify(env.bus.events).includes('tin không được rò'));
+    env.mgr.shutdown();
+  });
+}
+
+test('first_message gắn khi cờ new_group_mode = silent (và khi lõi cũ chưa ghi cờ)', async () => {
+  const api = makeZaloApi({ groups: GROUPS });
+  const env = await loginZalo(api, { discoverDelayMs: 10, discoverMinGapMs: 0 });
+  await waitFor(() => env.bus.of(STREAMS.directory, 'groups')[0]);
+  env.bus.groupMode.zalo = 'silent';
+  api.listener.emit('message', zaloMessage({ threadId: 'G7', msgId: '73' }));
+  api.listener.emit('message', zaloMessage({ threadId: 'G8', msgId: '74' }));
+  await waitFor(() => env.bus.of(STREAMS.directory, 'group.discovered').length === 2);
+  const [a, b] = env.bus.of(STREAMS.directory, 'group.discovered');
+  assert.equal(a.payload.first_message.external_msg_id, '73');
+  assert.equal(b.payload.first_message.external_msg_id, '74');
+  env.mgr.shutdown();
+});
+
 test('quét lại sau phát hiện bị giới hạn tần suất: không quét hai lần trong discoverMinGapMs', async () => {
   const api = makeZaloApi({ groups: GROUPS });
   const { bus, mgr } = await loginZalo(api, { discoverDelayMs: 5, discoverMinGapMs: 400 });

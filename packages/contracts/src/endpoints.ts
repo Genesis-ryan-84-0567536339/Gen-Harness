@@ -328,7 +328,7 @@ export function createEndpoints(client: ApiClient) {
     diagnostics: diagnosticsEndpoints(r),
     /** v0.1.55 (G1): "Chế độ tiêu chuẩn" / "Về mặc định" — chỉ Owner. */
     defaults: defaultsEndpoints(r),
-    /** v0.1.71: Nhật ký lắng nghe — `api.listenLog.list(q) · stats()` (quyền `data.read`). */
+    /** v0.1.68: Nhật ký lắng nghe — `api.listenLog.list(q) · stats()` (quyền `data.read`). */
     listenLog: listenLogEndpoints(r),
     /**
      * v0.1.55 (G5) + v0.1.59 (G1): Mặt tiền Owner `/owner/*` — chỉ đọc, chỉ Owner, không gọi model:

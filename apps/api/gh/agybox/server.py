@@ -1,18 +1,24 @@
 """Dịch vụ `agy-box` (v0.1.63 H1): `python -m gh.agybox.server` — nhận yêu cầu ký HMAC từ api/worker qua mạng nội bộ
 `agy-bus` và chạy `agy` bằng ĐÚNG `AgyClient` có sẵn (cwd rỗng 0700 mỗi lượt, env sạch, prompt qua stdin, killpg).
 
-Cô lập (docs/api/agybox-protocol.md): tiến trình này chỉ đọc 6 biến môi trường trong ALLOWED_ENV, tự xoá mọi biến GH_*
-khác khỏi môi trường của mình, KHÔNG import `gh.config`/DB/Redis/crypto, chỉ giữ một khoá `gh_agy_key` (ký yêu cầu) và
-tệp token agy trong volume `agy_state`. Hộp không bao giờ gọi ngược api. Nhật ký chỉ ghi mã yêu cầu + kết quả, không ghi
-prompt."""
+Cô lập (docs/api/agybox-protocol.md): tiến trình này chỉ đọc các biến môi trường trong ALLOWED_ENV, tự xoá mọi
+biến GH_* khác khỏi môi trường của mình, KHÔNG import `gh.config`/DB/Redis/crypto, chỉ giữ một khoá `gh_agy_key`
+(ký yêu cầu). Review v0.1.63 (P1-1): hộp KHÔNG có volume / kho phiên nào — tệp token agy đến trong từng yêu cầu đã
+ký (`session`), được đặt vào HOME tạm 0700 của đúng lượt đó (xoá sau lượt) và không bao giờ được ghi lại đâu cả.
+Review lần 2 (P2-1): sau MỖI lượt (generate, models, cả `agy --version` của /healthz) hộp dọn sạch — giết mọi tiến
+trình agy để lại kể cả tiến trình đã `setsid` thoát nhóm, rồi xoá nội dung /tmp và /dev/shm (`gh.agybox.reaper`) — nên
+lượt sau không còn tiến trình hay tệp nào lượt trước để lại. Mọi lần chạy agy và lần dọn đi qua MỘT khoá (không bao giờ
+dọn khi đang có lượt chạy). Hộp không bao giờ gọi ngược api. Nhật ký chỉ ghi mã yêu cầu + kết quả, không ghi prompt
+hay token."""
 
 import asyncio
 import logging
 import math
 import os
 import re
+import shutil
 import time
-from collections.abc import Callable, MutableMapping
+from collections.abc import Callable, Coroutine, MutableMapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -24,8 +30,8 @@ from starlette.responses import Response
 from starlette.routing import Route
 
 from gh.agybox import protocol as P
+from gh.agybox import reaper
 from gh.providers.clients import (
-    TOKEN_FILE,
     AgyClient,
     AuthFailed,
     BadRequest,
@@ -34,8 +40,9 @@ from gh.providers.clients import (
     ProviderError,
     RateLimited,
     cli_env,
-    cli_home_dir,
+    make_turn_home,
     redact,
+    valid_token_json,
 )
 
 log = logging.getLogger("agybox")
@@ -44,22 +51,31 @@ ENV_KEY_FILE = "GH_AGYBOX_KEY_FILE"
 ENV_MAX_JOBS = "GH_AGYBOX_MAX_JOBS"
 ENV_HOST = "GH_AGYBOX_HOST"
 ENV_PORT = "GH_AGYBOX_PORT"
-ENV_CLI_HOME = "GH_CLI_HOME"
 ENV_CLI_BINARY = "GH_CLI_BINARY"
-#: Toàn bộ biến GH_* hộp được phép đọc. Mọi biến GH_* khác (DB, Redis, khoá master/bridge/browser…) bị bỏ qua và xoá.
-ALLOWED_ENV = frozenset({ENV_KEY_FILE, ENV_MAX_JOBS, ENV_HOST, ENV_PORT, ENV_CLI_HOME, ENV_CLI_BINARY})
+#: "1" ⇒ dọn hộp sau mỗi lượt (P2-1). Chỉ compose của hộp đặt; thiếu ⇒ không dọn (chạy nhầm ngoài container vô hại).
+ENV_REAP = "GH_AGYBOX_REAP"
+#: Toàn bộ biến GH_* hộp được phép đọc. Mọi biến GH_* khác (DB, Redis, khoá master/bridge/browser…, cả GH_CLI_HOME của
+#: ảnh api — hộp không có kho phiên) bị bỏ qua và xoá.
+ALLOWED_ENV = frozenset({ENV_KEY_FILE, ENV_MAX_JOBS, ENV_HOST, ENV_PORT, ENV_CLI_BINARY, ENV_REAP})
 VERSION_TTL_S = 300.0
+#: Số chữ ký còn trong cửa sổ chống phát lại (2 × MAX_SKEW_S) tối đa được nhớ. Đầy ⇒ TỪ CHỐI yêu cầu mới (bận, thử lại)
+#: thay vì ngừng ghi — review v0.1.63 (P3): trước đây đầy thì chữ ký mới không được nhớ nên phát lại được.
+SEEN_MAX = 4096
 _VERSION_RE = re.compile(r"\d+\.\d+\.\d+\S*")
 
 
 @dataclass
 class Config:
     key_file: str
-    cli_home: str = "~/.gemini/antigravity-cli"
     cli_binary: str = "agy"
-    max_jobs: int = 2
+    #: Review v0.1.63 (P3): MỘT lượt agy mỗi lúc — hai lượt cùng uid `gh` đọc được /proc và HOME tạm của nhau (prompt,
+    #: token) nên không cho chạy song song; lượt thứ hai nhận `busy` (thử lại sau 5 giây).
+    max_jobs: int = 1
     host: str = "0.0.0.0"  # noqa: S104 — chỉ nghe trong mạng nội bộ agy-bus, không publish cổng ra máy chủ
     port: int = P.DEFAULT_PORT
+    #: Review lần 2 (P2-1): dọn hộp sau mỗi lượt (`gh.agybox.reaper.clean_box`). main() chỉ giữ True khi là tiến trình
+    #: chính của container (`reaper.reap_allowed`).
+    reap: bool = False
 
 
 def load_config(env: "MutableMapping[str, str] | dict[str, str]") -> Config:
@@ -67,13 +83,15 @@ def load_config(env: "MutableMapping[str, str] | dict[str, str]") -> Config:
     if not key_file:
         raise RuntimeError(f"Thiếu {ENV_KEY_FILE} — hộp agy không chạy được nếu không có khoá ký")
     try:
-        jobs = max(1, int(env.get(ENV_MAX_JOBS) or 2))
+        asked = int(env.get(ENV_MAX_JOBS) or 1)
+        jobs = 1                                   # luôn 1 (xem Config.max_jobs); GH_AGYBOX_MAX_JOBS > 1 bị bỏ qua
+        if asked > 1:
+            log.warning("agy-box: GH_AGYBOX_MAX_JOBS=%d bị hạ về 1 (mỗi lúc một lượt agy)", asked)
         port = int(env.get(ENV_PORT) or P.DEFAULT_PORT)
     except ValueError as e:
         raise RuntimeError("GH_AGYBOX_MAX_JOBS / GH_AGYBOX_PORT phải là số nguyên") from e
-    return Config(key_file=key_file, cli_home=env.get(ENV_CLI_HOME) or "~/.gemini/antigravity-cli",
-                  cli_binary=env.get(ENV_CLI_BINARY) or "agy", max_jobs=jobs, host=env.get(ENV_HOST) or "0.0.0.0",  # noqa: S104
-                  port=port)
+    return Config(key_file=key_file, cli_binary=env.get(ENV_CLI_BINARY) or "agy", max_jobs=jobs,
+                  host=env.get(ENV_HOST) or "0.0.0.0", port=port, reap=env.get(ENV_REAP) == "1")  # noqa: S104
 
 
 def scrub_environ(env: MutableMapping[str, str]) -> list[str]:
@@ -114,10 +132,53 @@ def _number(v: Any, default: float, lo: float, hi: float) -> float:
     return min(max(float(v), lo), hi)
 
 
-def create_app(cfg: Config, *, clock: Callable[[], float] = time.time) -> Starlette:
+async def _disconnected(request: Request) -> None:
+    """Trả về khi client ngắt kết nối (ASGI `http.disconnect`). Gọi SAU khi đã đọc hết thân yêu cầu."""
+    while True:
+        msg = await request.receive()
+        if msg.get("type") == "http.disconnect":
+            return
+
+
+async def until_disconnect(request: Request, job: "Coroutine[Any, Any, dict[str, Any]]") -> dict[str, Any] | None:
+    """Chạy `job` (một lượt agy); client ngắt trước khi xong ⇒ HUỶ lượt (AgyClient giết cả nhóm tiến trình agy và xoá
+    HOME tạm) và trả None — review v0.1.63 (P3): trước đây agy chạy tiếp tới hết `timeout_s` dù api đã bỏ đi, giữ chỗ
+    của lượt kế (MAX_JOBS)."""
+    work = asyncio.ensure_future(job)
+    watch = asyncio.ensure_future(_disconnected(request))
+    try:
+        done, _ = await asyncio.wait({work, watch}, return_when=asyncio.FIRST_COMPLETED)
+        if work in done:
+            return work.result()
+        log.info("agy-box: client ngắt — dừng lượt agy")
+        work.cancel()
+        await asyncio.gather(work, return_exceptions=True)
+        return None
+    finally:
+        for t in (work, watch):
+            if not t.done():
+                t.cancel()
+        await asyncio.gather(work, watch, return_exceptions=True)
+
+
+def create_app(cfg: Config, *, clock: Callable[[], float] = time.time,
+               cleaner: Callable[[], None] | None = None) -> Starlette:
+    """`cleaner` = việc dọn sau mỗi lượt; None ⇒ `reaper.clean_box` nếu `cfg.reap`, không thì không dọn (test, dev)."""
     key = P.load_key(cfg.key_file)
     state: dict[str, Any] = {"active": 0, "seen": {}, "version": None, "version_at": -1e18}
-    version_lock = asyncio.Lock()
+    clean = cleaner if cleaner is not None else (reaper.clean_box if cfg.reap else None)
+    #: P2-1: MỌI lần chạy agy (lượt, `--version`) + lần dọn sau nó giữ khoá này — dọn (giết mọi tiến trình khác) không
+    #: bao giờ trúng một lượt đang chạy, và `--version` không chạy chen giữa một lượt.
+    box_lock = asyncio.Lock()
+
+    def after_turn() -> None:
+        """Dọn hộp sau một lần chạy agy. ĐỒNG BỘ (nhanh: /proc ≤ pids_limit, tmpfs) ⇒ không bị huỷ giữa chừng khi
+        client ngắt; khoá hộp chỉ nhả sau khi dọn xong."""
+        if clean is not None:
+            try:
+                clean()
+            except Exception:  # noqa: BLE001 — dọn lỗi không làm hỏng trả lời
+                log.exception("agy-box: lỗi khi dọn sau lượt")
 
     def reply(status: int, obj: dict[str, Any], req_sig: str | None = None, headers: dict[str, str] | None = None
               ) -> Response:
@@ -160,8 +221,10 @@ def create_app(cfg: Config, *, clock: Callable[[], float] = time.time) -> Starle
         if why is not None:
             log.warning("agy-box: từ chối %s %s (%s)", request.method, request.url.path, why)
             raise _Reject(P.E_UNAUTHORIZED, "Chữ ký không hợp lệ hoặc đã hết hạn")
-        if len(seen) < 4096:
-            seen[sig] = now
+        if len(seen) >= SEEN_MAX:
+            log.warning("agy-box: bộ nhớ chống phát lại đầy (%d) — từ chối yêu cầu mới", len(seen))
+            raise _Reject(P.E_BUSY, "Hộp đang bận", retry_after=P.BUSY_RETRY_AFTER_S)
+        seen[sig] = now
         return sig
 
     def parse(body: bytes) -> dict[str, Any]:
@@ -176,6 +239,14 @@ def create_app(cfg: Config, *, clock: Callable[[], float] = time.time) -> Starle
             raise _Reject(P.E_BAD_REQUEST, "request_id không hợp lệ")
         return obj
 
+    def session_of(obj: dict[str, Any]) -> bytes:
+        """Tệp token agy gửi kèm yêu cầu: chuỗi JSON đối tượng ≤ 64 KiB (khuôn tối thiểu như kho phiên của api)."""
+        raw = obj.get("session")
+        data = raw.encode() if isinstance(raw, str) else b""
+        if not valid_token_json(data):
+            raise _Reject(P.E_BAD_REQUEST, "session phải là tệp phiên Antigravity (đối tượng JSON ≤ 64 KiB)")
+        return data
+
     async def run_job(request: Request, kind: str) -> Response:
         rid: str | None = None
         sig: str | None = None
@@ -186,6 +257,7 @@ def create_app(cfg: Config, *, clock: Callable[[], float] = time.time) -> Starle
             sig = authenticate(request, body)
             obj = parse(body)
             rid = obj["request_id"]
+            session = session_of(obj)
             if kind == "generate":
                 prompt, model, effort = obj.get("prompt"), obj.get("model"), obj.get("effort")
                 if not isinstance(prompt, str) or not prompt.strip():
@@ -205,18 +277,30 @@ def create_app(cfg: Config, *, clock: Callable[[], float] = time.time) -> Starle
                 raise _Reject(P.E_BUSY, "Hộp đang bận", retry_after=P.BUSY_RETRY_AFTER_S)
             state["active"] += 1
             try:
-                agy = AgyClient(cfg.cli_binary, cfg.cli_home, timeout=timeout)
-                if kind == "generate":
-                    assert isinstance(prompt, str) and isinstance(model, str)  # đã kiểm ở trên (cho mypy)
-                    c = await agy.generate(model, [Message("user", prompt)], json_mode=bool(obj.get("json_mode")),
-                                           temperature=0.0, effort=effort)
-                    out = {"request_id": rid, "text": c.text, "tokens_in": c.tokens_in, "tokens_out": c.tokens_out,
-                           "raw": {k: v for k, v in c.raw.items() if isinstance(v, (int, float, str, type(None)))}}
-                else:
+                # Không có kho phiên: `cli_home` không dùng tới khi có `session` (không đọc, không ghi, không khoá).
+                agy = AgyClient(cfg.cli_binary, "/nonexistent/agy-box", timeout=timeout, session=session)
+
+                async def work() -> dict[str, Any]:
+                    if kind == "generate":
+                        assert isinstance(prompt, str) and isinstance(model, str)  # đã kiểm ở trên (cho mypy)
+                        c = await agy.generate(model, [Message("user", prompt)],
+                                               json_mode=bool(obj.get("json_mode")), temperature=0.0, effort=effort)
+                        return {"request_id": rid, "text": c.text, "tokens_in": c.tokens_in,
+                                "tokens_out": c.tokens_out,
+                                "raw": {k: v for k, v in c.raw.items() if isinstance(v, (int, float, str, type(None)))}}
                     models = await agy.discover_models()
-                    out = {"request_id": rid, "models": models, "raw_text": agy.last_models_raw}
+                    return {"request_id": rid, "models": models, "raw_text": agy.last_models_raw}
+
+                async with box_lock:
+                    try:
+                        out = await until_disconnect(request, work())
+                    finally:
+                        after_turn()
             finally:
                 state["active"] -= 1
+            if out is None:
+                code = "client_gone"
+                return Response(status_code=499)     # không ai nhận — api đã ngắt (hết giờ / huỷ lượt)
             return reply(200, out, sig)
         except _Reject as r:
             code = r.code
@@ -234,15 +318,20 @@ def create_app(cfg: Config, *, clock: Callable[[], float] = time.time) -> Starle
                      int((time.monotonic() - started) * 1000))
 
     async def agy_version() -> str | None:
-        async with version_lock:
+        if box_lock.locked():
+            # Đang có lượt (hay đang hỏi phiên bản): trả kết quả gần nhất (có thể null — chỉ để hiển thị), không chờ
+            # lượt xong (healthcheck chỉ đợi 5 giây) và không chạy agy chen vào lượt.
+            return state["version"]
+        async with box_lock:
             now = time.monotonic()
             if now - state["version_at"] < VERSION_TTL_S:
                 return state["version"]
             version: str | None = None
+            home = make_turn_home(None)
             try:
                 proc = await asyncio.create_subprocess_exec(
                     cfg.cli_binary, "--version", stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.DEVNULL, env=cli_env(cfg.cli_home), start_new_session=True)
+                    stderr=asyncio.subprocess.DEVNULL, env=cli_env("", home=home), start_new_session=True)
                 try:
                     out, _ = await asyncio.wait_for(proc.communicate(), 10)
                 except TimeoutError:
@@ -253,13 +342,16 @@ def create_app(cfg: Config, *, clock: Callable[[], float] = time.time) -> Starle
                 version = m.group(0) if m else None
             except OSError:
                 version = None
+            finally:
+                shutil.rmtree(home, ignore_errors=True)
+                after_turn()                 # P2-1: dọn cả sau `agy --version`
             state["version"], state["version_at"] = version, now
             return version
 
     async def healthz(request: Request) -> Response:
-        token = cli_home_dir(cfg.cli_home) / TOKEN_FILE
+        # Hộp không giữ phiên (token đến theo từng yêu cầu) ⇒ `cli_logged_in` luôn null; api tự biết có phiên hay không.
         return reply(200, {"ok": True, "service": P.SERVICE, "protocol": P.PROTOCOL_VERSION,
-                           "agy_version": await agy_version(), "cli_logged_in": token.exists()})
+                           "agy_version": await agy_version(), "cli_logged_in": None})
 
     async def generate(request: Request) -> Response:
         return await run_job(request, "generate")
@@ -283,6 +375,11 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     cfg = load_config(os.environ)
+    if cfg.reap and not reaper.reap_allowed(True):
+        log.warning("agy-box: %s=1 nhưng không phải tiến trình chính của container — KHÔNG dọn sau lượt", ENV_REAP)
+        cfg.reap = False
+    elif not cfg.reap:
+        log.warning("agy-box: thiếu %s=1 — không dọn tiến trình/tệp sót lại sau lượt", ENV_REAP)
     scrubbed = scrub_environ(os.environ)
     if scrubbed:
         log.info("agy-box: đã xoá %d biến GH_* ngoài danh sách khỏi môi trường tiến trình", len(scrubbed))

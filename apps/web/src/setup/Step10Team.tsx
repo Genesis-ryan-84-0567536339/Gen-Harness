@@ -60,6 +60,8 @@ export function Step10Team({ meta, description, onBack, onSaved, formRef, onSkip
   const hasPartial = rows.some(isPartial);
   // v0.1.68 (F038): danh sách rỗng KHÔNG phải "đã mời" — phải có ít nhất một dòng đủ tên + email; chưa muốn mời thì bấm "Để sau".
   const canContinue = !hasPartial && rows.some(isFilled);
+  // Trình thiết lập có nút "Để sau"; mở từ Hướng dẫn thì không có (onSkip rỗng) — lối ra là "Quay lại".
+  const exitLabel = onSkip ? 'Để sau' : 'Quay lại';
 
   const save = async () => {
     setBusy(true);
@@ -154,7 +156,7 @@ export function Step10Team({ meta, description, onBack, onSaved, formRef, onSkip
       description={description}
       formRef={formRef}
       canContinue={canContinue}
-      blockedHint={!hasPartial && !canContinue ? 'Thêm ít nhất một người để mời — chưa muốn mời thì bấm "Để sau".' : null}
+      blockedHint={!hasPartial && !canContinue ? `Thêm ít nhất một người để mời — chưa muốn mời thì bấm "${exitLabel}".` : null}
       busy={busy}
       onContinue={() => void save()}
       onBack={onBack}
@@ -166,7 +168,7 @@ export function Step10Team({ meta, description, onBack, onSaved, formRef, onSkip
         <div className="setup-section__title">Thành viên được mời</div>
         {finished ? <PinHint text={PIN_TEXT} title={PIN_TEXT} /> : null}
         {rows.length === 0 ? (
-          <EmptyState icon="ph ph-users-three" title="Chưa mời ai" description="Bấm Thêm người để mời. Chưa muốn mời ai thì bấm Để sau — việc này chỉ tính xong khi có người thật." />
+          <EmptyState icon="ph ph-users-three" title="Chưa mời ai" description={`Bấm Thêm người để mời. Chưa muốn mời ai thì bấm ${exitLabel} — việc này chỉ tính xong khi có người thật.`} />
         ) : (
           <div className="invite-rows">
             {rows.map((r) => (

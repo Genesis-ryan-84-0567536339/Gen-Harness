@@ -1,5 +1,5 @@
 /**
- * Hợp đồng v0.1.71 — Nhật ký lắng nghe: MỘT dòng thời gian gộp tin nghe được (Kho thô) + sự kiện trên mọi kênh, kèm
+ * Hợp đồng v0.1.68 — Nhật ký lắng nghe: MỘT dòng thời gian gộp tin nghe được (Kho thô) + sự kiện trên mọi kênh, kèm
  * "hệ thống đã làm gì" (sàng lọc, quyết định của agent trực, bản nháp ở Bàn làm việc). Chỉ đọc, quyền `data.read`.
  *
  * `GET /listen-log` (con trỏ: `next_cursor` là chuỗi mờ, đưa nguyên vào `cursor`) · `GET /listen-log/stats`.
