@@ -151,8 +151,8 @@ async def _alerts(db: AsyncSession, org_id: uuid.UUID) -> list[dict[str, Any]]:
 
 
 async def ai_ready(db: AsyncSession, org_id: uuid.UUID) -> bool:
-    """Có ít nhất một nguồn AI đạt — mục n=4 của `follow_up_status` (cùng nguồn dữ liệu `NoModelBanner` và Gen hướng dẫn
-    `model.bound` dùng). Không đọc được ⇒ coi là chưa."""
+    """Có ít nhất một nguồn AI đạt — mục n=4 của `follow_up_status` (= `readiness.ai_ready`; cùng nguồn dữ liệu thẻ
+    `NoModelNotice` và `model.bound` của Gen hướng dẫn dùng). Không đọc được ⇒ coi là chưa."""
     from gh.setup.routes import follow_up_status
 
     try:
