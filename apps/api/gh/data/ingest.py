@@ -18,6 +18,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh import crypto, realtime
+from gh.biz.relations import service as rsvc
 from gh.chassis import actionlog
 from gh.chassis.bus import BRIDGE_CONTROL, EventBus, uuid7
 from gh.data.common import (
@@ -262,7 +263,9 @@ async def ingest_message(db: AsyncSession, org_id: uuid.UUID, p: dict[str, Any])
          "pl": orjson.dumps(payload, default=str).decode(), "h": content_hash, "d": direction, "men": mentions})
     # Đường nhanh: tin tag agent và tin 1-1 (ARCHITECTURE §4.3, quyết định Q3). Tin của chính mình không cần.
     #   v0.1.65: tin 1-1 im lặng (silent) không cần nhanh — chỉ "reply" mới đi đường nhanh cho agent trực.
-    fast = direction == "inbound" and (mentions or (group is None and dm == "reply"))
+    #   Người được gán BOT (B8) thì tin 1-1 của họ cũng đi nhanh: BOT phụ trách đích danh dù kênh để im lặng.
+    direct_fast = group is None and (dm == "reply" or await rsvc.person_has_bot(db, identity.person_id))
+    fast = direction == "inbound" and (mentions or direct_fast)
     await db.execute(text("""
         INSERT INTO refinery.event_state (event_id, event_received_at, org_id, state, fast)
         VALUES (:e, :r, :o, 'pending', :f)"""), {"e": event_id, "r": received_at, "o": org_id, "f": fast})

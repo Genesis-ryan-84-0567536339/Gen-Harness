@@ -28,7 +28,7 @@ Một đơn vị ý nghĩa thuộc phạm vi agent khi **agent đang bật** (`a
 |---|---|
 | có dòng `agent.channel_scopes` `(agent_id, channel_id, group_id)` khớp nhóm của đơn vị, **hoặc** dòng cả kênh `(agent_id, channel_id, NULL)` khớp kênh của đơn vị, **hoặc** `core.groups.assigned_agent_id` = agent | `group_id NULL` = mọi nhóm của kênh **và** tin 1-1 trên kênh đó. Tin 1-1 chỉ tới agent có phạm vi cả kênh. |
 | `hours` (ca trực, `tstzrange[]`) rỗng/NULL hoặc chứa `observed_at` của đơn vị | |
-| nhóm đang nghe: `proactive`, `silent`; `tagged_only` chỉ với đơn vị có tin tag agent (`raw.events.mentions_agent`) | `off`, `paused` → không xét. Tin 1-1 chỉ vào ứng viên khi kênh đặt `direct_mode = reply` (mặc định `silent`: lưu nhưng không đưa cho agent trực). |
+| nhóm đang nghe: `proactive`, `silent`; `tagged_only` chỉ với đơn vị có tin tag agent (`raw.events.mentions_agent`) | `off`, `paused` → không xét. Tin 1-1 chỉ vào ứng viên khi kênh đặt `direct_mode = reply` (mặc định `silent`: lưu nhưng không đưa cho agent trực) HOẶC người gửi đã được gán BOT đích danh (`core.persons.attrs.agent_id`, Gán BOT ở Khách & Nhóm › Con người; v0.1.65, F080) — khi đó đúng agent đó phụ trách, kể cả khi kênh im lặng và agent không có phạm vi cả kênh, và agent đọc được tin 1-1 của người đó. |
 | chưa có quyết định của agent này cho đơn vị này | chống trùng |
 
 Dữ liệu đưa vào ngữ cảnh cũng chỉ lấy trong phạm vi ("tầm với") của agent: nhóm được gán (từng nhóm, cả kênh, hoặc

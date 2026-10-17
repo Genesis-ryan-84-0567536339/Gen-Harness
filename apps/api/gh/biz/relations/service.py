@@ -101,6 +101,20 @@ async def set_person_bot(db: AsyncSession, person_id: uuid.UUID, *, agent_id: uu
                      {"a": orjson.dumps(attrs).decode(), "i": person_id})
 
 
+async def persons_of_agent(db: AsyncSession, org_id: uuid.UUID, agent_id: uuid.UUID) -> list[uuid.UUID]:
+    """Những người được gán BOT này (`core.persons.attrs.agent_id`) — F080: agent trực đọc gán này cho tin nhắn 1-1."""
+    rows = (await db.execute(text("""SELECT id FROM core.persons WHERE org_id = :o AND attrs->>'agent_id' = :a
+                                     AND merged_into_id IS NULL"""), {"o": org_id, "a": str(agent_id)})).scalars().all()
+    return list(rows)
+
+
+async def person_has_bot(db: AsyncSession, person_id: uuid.UUID) -> bool:
+    """Người này đã được gán một BOT (còn tồn tại, đang bật) chưa — tin 1-1 của họ đi đường nhanh cho BOT đó."""
+    return (await db.execute(text("""SELECT 1 FROM core.persons p JOIN agent.identities a
+                                      ON a.id::text = p.attrs->>'agent_id' AND a.org_id = p.org_id AND a.is_enabled
+                                      WHERE p.id = :p"""), {"p": person_id})).first() is not None
+
+
 async def set_group_bot(db: AsyncSession, group_id: uuid.UUID, *, agent_id: uuid.UUID | None,
                         autonomy_level: int | None, set_autonomy: bool) -> None:
     await _ensure_agent(db, "core.groups", group_id, agent_id)

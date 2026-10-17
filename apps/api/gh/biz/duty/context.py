@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.biz.core.explain import DIMENSION_LABELS
+from gh.biz.relations.service import persons_of_agent
 from gh.data.common import DIRECT_MODE_SQL
 from gh.memory.notebook import SECTIONS
 
@@ -101,17 +102,23 @@ FROM u
 JOIN agent.identities a ON a.org_id = :o AND a.is_enabled
 JOIN core.channels c ON c.id = u.channel_id
 JOIN core.organizations o ON o.id = :o
-WHERE (EXISTS (SELECT 1 FROM agent.channel_scopes s
+LEFT JOIN core.persons pp ON pp.id = u.person_id AND pp.org_id = :o
+WHERE (
+  -- v0.1.65 (B8, F080): tin 1-1 của người được GÁN BOT này — agent đó phụ trách, kể cả khi kênh để tin 1-1 im lặng
+  -- và agent không có phạm vi cả kênh (Sếp gán đích danh = bật trả lời cho người đó).
+  (u.group_id IS NULL AND pp.attrs->>'agent_id' = a.id::text)
+  OR (EXISTS (SELECT 1 FROM agent.channel_scopes s
                WHERE s.agent_id = a.id AND s.channel_id = u.channel_id
                  AND (s.group_id IS NULL OR s.group_id = u.group_id)
                  AND (s.hours IS NULL OR cardinality(s.hours) = 0
                       OR EXISTS (SELECT 1 FROM unnest(s.hours) h WHERE h @> u.observed_at)))
        OR (u.group_id IS NOT NULL
            AND EXISTS (SELECT 1 FROM core.groups ag WHERE ag.id = u.group_id AND ag.assigned_agent_id = a.id)))
-  AND (CASE WHEN u.group_id IS NULL
-            -- v0.1.65: tin 1-1 mặc định IM LẶNG (`silent`: lưu, không đưa cho agent trực); chỉ kênh đặt `reply` mới có
-            THEN {direct_mode} = 'reply'
-            ELSE u.listen_mode IN ('silent', 'proactive') OR (u.listen_mode = 'tagged_only' AND u.tagged) END)
+       AND (CASE WHEN u.group_id IS NULL
+                 -- v0.1.65: tin 1-1 mặc định IM LẶNG (`silent`: lưu, không đưa cho agent trực); chỉ `reply` mới có
+                 THEN {direct_mode} = 'reply'
+                 ELSE u.listen_mode IN ('silent', 'proactive') OR (u.listen_mode = 'tagged_only' AND u.tagged) END)
+  )
   AND NOT EXISTS (SELECT 1 FROM agent.decisions d WHERE d.agent_id = a.id AND d.trigger_unit_id = u.id)
 ORDER BY u.tagged DESC, u.observed_at, a.id
 LIMIT :n
@@ -143,15 +150,19 @@ class Reach:
 
     groups: list[uuid.UUID]
     channels: list[uuid.UUID]
+    persons: list[uuid.UUID] = field(default_factory=list)   # v0.1.65 (B8): người được gán BOT này (tin 1-1 của họ)
 
     def unit_sql(self, alias: str = "mu") -> str:
-        return f"""({alias}.group_id = ANY(CAST(:reach_g AS uuid[])) OR ({alias}.group_id IS NULL AND EXISTS (
+        return f"""({alias}.group_id = ANY(CAST(:reach_g AS uuid[]))
+            OR ({alias}.group_id IS NULL AND {alias}.person_id = ANY(CAST(:reach_p AS uuid[])))
+            OR ({alias}.group_id IS NULL AND EXISTS (
             SELECT 1 FROM clean.evidence rev JOIN raw.events re ON re.id = rev.raw_event_id
                    AND re.received_at = rev.raw_received_at
             WHERE rev.meaning_unit_id = {alias}.id AND re.channel_id = ANY(CAST(:reach_c AS uuid[])))))"""
 
     def params(self) -> dict[str, Any]:
-        return {"reach_g": [str(g) for g in self.groups], "reach_c": [str(c) for c in self.channels]}
+        return {"reach_g": [str(g) for g in self.groups], "reach_c": [str(c) for c in self.channels],
+                "reach_p": [str(p) for p in self.persons]}
 
 
 async def reach(db: AsyncSession, org_id: uuid.UUID, agent_id: uuid.UUID) -> Reach:
@@ -163,7 +174,7 @@ async def reach(db: AsyncSession, org_id: uuid.UUID, agent_id: uuid.UUID) -> Rea
     channels = (await db.execute(text("""SELECT channel_id FROM agent.channel_scopes
                                          WHERE agent_id = :a AND group_id IS NULL"""),
                                  {"a": agent_id})).scalars().all()
-    return Reach(list(groups), list(channels))
+    return Reach(list(groups), list(channels), await persons_of_agent(db, org_id, agent_id))
 
 
 # ─── ngữ cảnh ─────────────────────────────────────────────────────────────────

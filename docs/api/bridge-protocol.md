@@ -64,7 +64,7 @@ Lõi giữ tập `gh:bridge:listen:<channel>` = mã nhóm phía nền tảng có
 
 `listen_mode = pending` (v0.1.65): nhóm mới phát hiện, chờ Sếp chọn — không lưu tin nhưng vẫn thu thành viên. Nhóm đang `off` ở bản cũ giữ nguyên `off`.
 
-Tin 1-1 theo `core.organizations.settings.direct_mode.<kênh>`: `silent` (mặc định) lưu vào Kho thô nhưng không đi đường nhanh, không tự trả lời và **không đưa cho agent trực**; `reply` = như `listen_direct` bật của bản cũ (đường nhanh + agent trực được trả lời); `off` = không lưu.
+Tin 1-1 theo `core.organizations.settings.direct_mode.<kênh>`: `silent` (mặc định) lưu vào Kho thô nhưng không đi đường nhanh, không tự trả lời và **không đưa cho agent trực**; `reply` = như `listen_direct` bật của bản cũ (đường nhanh + agent trực được trả lời); `off` = không lưu. Ngoại lệ: người được Sếp gán BOT đích danh thì tin 1-1 của họ vẫn đi đường nhanh và BOT đó phụ trách dù kênh để `silent`.
 
 ## Ánh xạ thư viện (theo bridge của dự án cũ)
 
