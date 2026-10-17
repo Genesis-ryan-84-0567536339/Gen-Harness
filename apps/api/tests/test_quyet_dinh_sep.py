@@ -41,7 +41,7 @@ from tests.test_no_personal_info_v0156 import OLD_NAME
 
 ROOT = Path(__file__).resolve().parents[3]
 GH_DIR = ROOT / "apps" / "api" / "gh"
-SQL_0040 = ROOT / "db" / "sql" / "0040_v016x_theo_qd.sql"
+SQL_0041 = ROOT / "db" / "sql" / "0041_v016x_theo_qd.sql"
 VN = ZoneInfo("Asia/Ho_Chi_Minh")
 
 
@@ -89,7 +89,7 @@ async def test_qd20_new_owner_prefs_default_21_and_bell_once_a_day(owner_api: Ap
     assert await store.claim_bell(db, uid, today, ["todo:a"], datetime.now(UTC)) is False
 
 
-async def test_qd20_migration_0040_moves_default_rows_only_and_is_rerunnable(owner_api: Api, db: Any,
+async def test_qd20_migration_0041_moves_default_rows_only_and_is_rerunnable(owner_api: Api, db: Any,
                                                                              fresh_db: str) -> None:
     """QD-20: migration đổi hàng còn mặc định cũ 22→21; giá trị Sếp đã chỉnh (lệch hoặc có trong Nhật ký) được giữ."""
     org = await org_id(db)
@@ -98,7 +98,7 @@ async def test_qd20_migration_0040_moves_default_rows_only_and_is_rerunnable(own
                                {"o": org, "e": f"u{i}@example.test", "n": f"Owner {i}"})).scalar_one()
              for i in range(4)]
     await db.commit()
-    sql = SQL_0040.read_text(encoding="utf-8")
+    sql = SQL_0041.read_text(encoding="utf-8")
     with psycopg.connect(f"{PG}/{fresh_db}", autocommit=True) as c:
         ins = "INSERT INTO agent.gen_coach_prefs (user_id, org_id, quiet_start, quiet_end) VALUES (%s, %s, %s, %s)"
         c.execute("ALTER TABLE agent.gen_coach_prefs ALTER COLUMN quiet_start SET DEFAULT 22")   # máy v0.1.54–v0.1.68
@@ -150,7 +150,7 @@ def test_qd18_hub_server_note_says_write_needs_confirm_and_pin() -> None:
         assert "(chỉ đọc, chỉ Sếp)" not in raw
 
 
-async def test_qd18_migration_0040_updates_old_server_note_only_and_is_rerunnable(owner_api: Api, db: Any,
+async def test_qd18_migration_0041_updates_old_server_note_only_and_is_rerunnable(owner_api: Api, db: Any,
                                                                                   fresh_db: str) -> None:
     """QD-18 (F124): ghi chú máy chủ Gen-hub cũ "(chỉ đọc)" đã lưu → ghi chú mới (kể cả khi Owner đặt tên Kho khác);
     ghi chú Owner tự sửa, máy chủ khác, bản mới: giữ nguyên."""
@@ -159,7 +159,7 @@ async def test_qd18_migration_0040_updates_old_server_note_only_and_is_rerunnabl
     old = "Liên kết Gen-hub — Gen đọc {k}, lịch, mail, việc, Drive (chỉ đọc). Quản lý ở thẻ Gen-hub."
     ins = ("INSERT INTO agent.mcp_servers (org_id, name, transport, endpoint, note) "
            "VALUES (%s, %s, 'streamable_http', 'https://mcp.example.test/mcp', %s)")
-    sql = SQL_0040.read_text(encoding="utf-8")
+    sql = SQL_0041.read_text(encoding="utf-8")
     with psycopg.connect(f"{PG}/{fresh_db}", autocommit=True) as c:
         c.execute(ins, (org, "Gen-hub", old.format(k="Kho dữ liệu")))
         c.execute(ins, (org, "Gen-hub", old.format(k="Kho nhà tôi")))               # Owner tự đặt tên Kho (v0.1.57)
@@ -183,7 +183,7 @@ async def test_qd18_migration_0040_updates_old_server_note_only_and_is_rerunnabl
 
 # ─── QD-22 · không còn tên riêng trong dữ liệu đã lưu ─────────────────────────────────────────────────────────
 
-async def test_qd22_migration_0040_cleans_stored_old_kho_name_and_is_rerunnable(owner_api: Api, db: Any,
+async def test_qd22_migration_0041_cleans_stored_old_kho_name_and_is_rerunnable(owner_api: Api, db: Any,
                                                                                 fresh_db: str) -> None:
     """QD-22 (F122): hội thoại Gen + chuông đã lưu chữ "Kho <tên riêng cũ>" (v0.1.50–55) được thay bằng "Kho dữ liệu";
     dòng khác giữ nguyên; chạy lại không đổi gì."""
@@ -191,7 +191,7 @@ async def test_qd22_migration_0040_cleans_stored_old_kho_name_and_is_rerunnable(
     uid = (await db.execute(text("SELECT id FROM core.users WHERE org_id = :o LIMIT 1"), {"o": org})).scalar_one()
     await db.rollback()
     old = f"Kho {OLD_NAME.removeprefix('Kho ')}"
-    sql = SQL_0040.read_text(encoding="utf-8")
+    sql = SQL_0041.read_text(encoding="utf-8")
     with psycopg.connect(f"{PG}/{fresh_db}", autocommit=True) as c:
         conv = c.execute("""INSERT INTO agent.gen_conversations (org_id, user_id, title) VALUES (%s, %s, 'T')
                             RETURNING id""", (org, uid)).fetchone()
@@ -218,15 +218,15 @@ async def test_qd22_migration_0040_cleans_stored_old_kho_name_and_is_rerunnable(
         assert dump() == first
 
 
-async def test_qd22_migration_0040_only_rewrites_assistant_text_on_word_boundary(owner_api: Api, db: Any,
+async def test_qd22_migration_0041_only_rewrites_assistant_text_on_word_boundary(owner_api: Api, db: Any,
                                                                                  fresh_db: str) -> None:
-    """Review P3: 0040 mục c chỉ sửa lời Gen (role='assistant') — lời Sếp gõ (role='user') nguyên văn; chỉ khớp cả từ
+    """Review P3: 0041 mục c chỉ sửa lời Gen (role='assistant') — lời Sếp gõ (role='user') nguyên văn; chỉ khớp cả từ
     ("Kho Ryanx", "xKho Ryan" giữ nguyên) nhưng vẫn khớp sau xuống dòng (JSON lưu "\\n" ngay trước chữ Kho)."""
     org = await org_id(db)
     uid = (await db.execute(text("SELECT id FROM core.users WHERE org_id = :o LIMIT 1"), {"o": org})).scalar_one()
     await db.rollback()
     old = f"Kho {OLD_NAME.removeprefix('Kho ')}"
-    sql = SQL_0040.read_text(encoding="utf-8")
+    sql = SQL_0041.read_text(encoding="utf-8")
     rows = [("user", f"Sếp gõ: ghi vào {old} nhé"),
             ("assistant", f"Dòng một\n{old} là nơi lưu"),
             ("assistant", f"Không đụng {old}x hay x{old} hay {old}y"),
