@@ -70,6 +70,28 @@ async def test_channels_connected_keeps_expired_channel(owner_api: Api, db: Any)
     assert await svc.channels_connected(db, org) == 1
 
 
+async def test_channels_connected_zero_after_logout_of_only_channel(owner_api: Api, db: Any) -> None:
+    """Sếp đăng xuất kênh Zalo duy nhất ⇒ về "ngày đầu" (thẻ "Nối Zalo" quay lại, có chỉ dẫn); đăng nhập lại ⇒ đếm lại.
+    Khác kênh chỉ mất phiên (expired/error): kênh đó vẫn là "đã nối"."""
+    org = await _org(db)
+    zalo = await channel(db, org, "zalo")
+    await _session(db, zalo, "active", started=True, ended=False)
+    assert await svc.channels_connected(db, org) == 1
+    await db.execute(text("""UPDATE core.channel_sessions SET state = 'logged_out', credential_enc = NULL,
+                                    ended_at = now() + interval '1 second' WHERE channel_id = :c"""), {"c": zalo})
+    await _session(db, zalo, "expired", started=True, ended=True)          # phiên cũ hơn đăng xuất, hết hạn từ trước
+    await db.execute(text("""UPDATE core.channel_sessions SET started_at = now() - interval '1 hour',
+                                    ended_at = now() - interval '30 minutes' WHERE state = 'expired'"""))
+    await db.commit()
+    assert await svc.channels_connected(db, org) == 0
+    await _session(db, zalo, "pending_qr", started=False, ended=False)      # chờ QR sau đăng xuất: vẫn chưa nối
+    assert await svc.channels_connected(db, org) == 0
+    await db.execute(text("""INSERT INTO core.channel_sessions (channel_id, account_label, state, started_at)
+                             VALUES (:c, 'tk2', 'active', now() + interval '1 minute')"""), {"c": zalo})
+    await db.commit()
+    assert await svc.channels_connected(db, org) == 1                       # đăng nhập lại sau đăng xuất
+
+
 async def test_channels_connected_skips_non_intake_channels(owner_api: Api, db: Any) -> None:
     org = await _org(db)
     for kind in ("telegram", "facebook", "linkedin"):                        # không đưa tin khách về Thông tin

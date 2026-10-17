@@ -105,15 +105,21 @@ async def _count(db: AsyncSession, sql: str, params: dict[str, Any]) -> int:
 
 
 async def channels_connected(db: AsyncSession, org_id: uuid.UUID) -> int:
-    """Số kênh NHẬN TIN (Zalo, WhatsApp…) đang có phiên hoạt động HOẶC đã từng đăng nhập thành công (cùng nghĩa với
-    `GET /header` › `channels_connected`, v0.1.43). KHÔNG tính Facebook/Telegram/LinkedIn (không đưa tin khách về Thông
-    tin). 0 ⇒ "ngày đầu": Mặt tiền hiện một thẻ "Nối Zalo" thay các khối số. Kênh đã nối mà mất phiên (cần quét lại QR)
-    vẫn tính — nếu không Mặt tiền ẩn hết tin cũ trong khi huy hiệu vẫn đếm (P3 v0.1.61). Dùng chung cho brief / feed /
-    insights."""
+    """Số kênh NHẬN TIN (Zalo, WhatsApp…) đang có phiên hoạt động HOẶC đã từng đăng nhập thành công rồi chỉ MẤT phiên.
+    KHÁC `GET /header` › `channels_connected` (v0.1.43): header đếm mọi kênh từng đăng nhập kể cả Facebook/Telegram/
+    LinkedIn; ở đây các kênh đó bị loại (không đưa tin khách về Thông tin) và kênh Sếp đã chủ động ĐĂNG XUẤT cũng không
+    tính. 0 ⇒ "ngày đầu": Mặt tiền hiện một thẻ "Nối Zalo" thay các khối số — đăng xuất kênh duy nhất cũng về đây (có
+    chỉ dẫn nối lại, P3 v0.1.70). Kênh đã nối mà mất phiên (cần quét lại QR) vẫn tính — nếu không Mặt tiền ẩn hết tin
+    cũ trong khi huy hiệu vẫn đếm (P3 v0.1.61). Phiên đăng nhập sau lần đăng xuất lại được tính. Dùng chung cho brief /
+    feed / insights."""
     n = (await db.execute(text("""
         SELECT count(DISTINCT c.id) FROM core.channels c JOIN core.channel_sessions s ON s.channel_id = c.id
         WHERE c.org_id = :o AND NOT (c.type = ANY(:skip))
-          AND ((s.state = 'active' AND s.ended_at IS NULL) OR s.started_at IS NOT NULL)"""),
+          AND ((s.state = 'active' AND s.ended_at IS NULL)
+               OR (s.started_at IS NOT NULL AND s.state <> 'logged_out'
+                   AND NOT EXISTS (SELECT 1 FROM core.channel_sessions l
+                                   WHERE l.channel_id = s.channel_id AND l.state = 'logged_out'
+                                     AND l.ended_at > s.started_at)))"""),
                           {"o": org_id, "skip": list(NON_INTAKE_CHANNELS)})).scalar_one()
     return int(n or 0)
 
