@@ -15,6 +15,12 @@ Các bất biến:
   3. docs/runbook.md không được chỉ đường cũ (Tổng quan có thẻ Sức khoẻ, nút Cập nhật ở Trợ giúp).
   4. docs/reports/HANDOFF-v0.1.1.md không quá 200 dòng (CLAUDE.md: chỉ giữ hiện trạng + việc dở).
   5. Tiêu đề "sau vX.Y.Z" trong docs/ROADMAP.md phải bằng VERSION (lên bản mà quên cập nhật lộ trình ⇒ đỏ).
+  6. (v0.1.68, F119) HANDOFF chỉ có MỘT khối "Sếp cần làm" / "Boss phải làm" (một danh sách, đối chiếu "Việc Sếp cần làm"
+     trong app — không chồng khối của từng bản), và không còn dòng "Phát hành vX" của bản ĐÃ QUA (X < VERSION; bản
+     đang chờ phát hành = VERSION thì hợp lệ).
+  7. (v0.1.68, F120) docs/ARCHITECTURE.md không nhắc MinIO (deploy/compose.yaml không có MinIO — tệp ở volume `gh_objects`).
+  8. (v0.1.68, F120) Product Spec: phiên bản ở tiêu đề = phiên bản ở chân trang; mục O không còn là "những gì cần chốt tiếp"
+     (năm câu đó đã được chốt, mục O ghi trạng thái hiện hành).
 
 Chạy:  python3 .github/scripts/check_doc_facts.py [thư mục gốc repo]
 Thoát 0 nếu đúng, 1 nếu có lỗi (in từng lỗi, kèm dòng ::error:: cho GitHub Actions), 2 nếu thiếu tệp / không đọc được nguồn.
@@ -38,6 +44,8 @@ RUNBOOK = "docs/runbook.md"
 HANDOFF = "docs/reports/HANDOFF-v0.1.1.md"
 ROADMAP = "docs/ROADMAP.md"
 VERSION_FILE = "VERSION"
+ARCHITECTURE = "docs/ARCHITECTURE.md"
+SPEC = "docs/Gen-Harness-Product-Spec-LOCKED.md"
 
 HANDOFF_MAX_LINES = 200
 
@@ -169,9 +177,51 @@ def check_roadmap_version(root: Path) -> list[str]:
     return errors
 
 
+BOSS_BLOCK_RE = re.compile(r"^#{2,4}\s+(?:Boss phải làm|Sếp cần làm)", re.MULTILINE)
+RELEASE_LINE_RE = re.compile(r"Phát hành (v\d+\.\d+\.\d+)")
+
+
+def _semver(v: str) -> tuple[int, int, int]:
+    m = re.match(r"v?(\d+)\.(\d+)\.(\d+)", v)
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else (0, 0, 0)
+
+
+def check_handoff_lists(root: Path) -> list[str]:
+    text = _read(root, HANDOFF)
+    errors: list[str] = []
+    blocks = len(BOSS_BLOCK_RE.findall(text))
+    if blocks > 1:
+        errors.append(f"{HANDOFF}: có {blocks} khối 'Boss phải làm' / 'Sếp cần làm' — gộp thành MỘT danh sách "
+                      "'Sếp cần làm bây giờ' (đối chiếu Việc Sếp cần làm trong app; lịch sử từng bản ở docs/releases/)")
+    version = _read(root, VERSION_FILE).strip()
+    for v in dict.fromkeys(RELEASE_LINE_RE.findall(text)):
+        if _semver(v) < _semver(version):
+            errors.append(f"{HANDOFF}: còn dòng 'Phát hành {v}' nhưng VERSION là {version} — bản đó đã qua, xoá dòng")
+    return errors
+
+
+def check_architecture_no_minio(root: Path) -> list[str]:
+    if re.search(r"minio", _read(root, ARCHITECTURE), flags=re.IGNORECASE):
+        return [f"{ARCHITECTURE}: còn nhắc MinIO nhưng deploy/compose.yaml không có MinIO (tệp ở volume gh_objects)"]
+    return []
+
+
+def check_spec_consistency(root: Path) -> list[str]:
+    text = _read(root, SPEC)
+    errors: list[str] = []
+    head = re.search(r"LOCKED v(\d+\.\d+)", text)
+    foot = re.search(r"Product Spec v(\d+\.\d+)", text[-600:])
+    if head and foot and head.group(1) != foot.group(1):
+        errors.append(f"{SPEC}: tiêu đề ghi LOCKED v{head.group(1)} nhưng chân trang ghi Product Spec v{foot.group(1)}")
+    if re.search(r"^# O\.\s*NHỮNG GÌ CẦN CHỐT TIẾP", text, flags=re.MULTILINE):
+        errors.append(f"{SPEC}: mục O vẫn là 'NHỮNG GÌ CẦN CHỐT TIẾP' — năm câu đã chốt, ghi trạng thái hiện hành")
+    return errors
+
+
 def run_checks(root: Path) -> list[str]:
     errors: list[str] = []
-    for check in (check_boss_counts, check_onboarding_notice, check_runbook_paths, check_handoff_length, check_roadmap_version):
+    for check in (check_boss_counts, check_onboarding_notice, check_runbook_paths, check_handoff_length,
+                  check_roadmap_version, check_handoff_lists, check_architecture_no_minio, check_spec_consistency):
         errors.extend(check(root))
     return errors
 

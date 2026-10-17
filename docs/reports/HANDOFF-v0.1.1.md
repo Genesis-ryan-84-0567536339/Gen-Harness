@@ -48,7 +48,7 @@ Các bản cũ (v0.1.50 – v0.1.60: Gen nhớ + ghi Kho, tự cập nhật đê
 - **Vì sao**: kiểm kê 16/10 — app chỉ cho xem một phần dữ liệu, OTP đi thẳng vào model, mất mạng là mất phiên Zalo/WhatsApp; Sếp chốt Antigravity theo kiến trúc phân lớp.
 - **Thay đổi**: A4 A5 A8 A9 A10 A11 A12 (xem hết/tìm ở máy chủ, che OTP, Cung–Cầu, `check_doc_facts.py`); agy phân lớp + `prctl` + timeout/flock + canary shell; B4 kênh bền; B5 `bridge.silent` + hàng lỗi Phát lại/Xoá; B1 test hợp đồng; sửa review (dò SĐT, con trỏ, Dockerfile + so băm, chỉ api sinh mã thiết lập).
 - **Chưa làm**: hộp riêng agy (Nợ #34, v0.1.63); Telegram 2 chiều (Nợ #13, v0.1.64); Nợ #42–#45 (`list_promises` con trỏ, nút Chạy lại tin lỗi, allowlist egress `agy-out`, chuyển cả core vào hộp); `--live` canary agy và thử thật trên dev chưa chạy.
-- **Boss cần làm**: xem "Boss phải làm — v0.1.62" dưới. Chi tiết: [v0.1.62.md](../releases/v0.1.62.md).
+- **Sếp cần làm**: xem "Sếp cần làm bây giờ" ở mục Việc dở. Chi tiết: [v0.1.62.md](../releases/v0.1.62.md).
 
 ## Người lái và kế hoạch v0.1.63 – v0.1.70
 
@@ -73,79 +73,26 @@ Nhánh local đang làm (CHƯA push, ngoài `claude/v0162`): **H1** (dịch vụ
 
 ## Việc dở
 
-### Boss phải làm — v0.1.62 (chỉ bắt buộc nếu chưa có khoá API; chi tiết ở [v0.1.62.md](../releases/v0.1.62.md))
+### Sếp cần làm bây giờ (MỘT danh sách — khớp "Hướng dẫn › Việc Sếp cần làm" trong app; chỉ việc 1 là bắt buộc)
 
-1. Sau khi bản chính thức ra: `genh update` (hoặc đợi lịch đêm). Không migration.
-2. **Nếu chưa có khoá API**: agent trực kênh và Soạn lại / Dịch nháp sẽ dừng (không dùng agy) — dán khoá API (hoặc bật Claude Code CLI cho việc nền) để chạy tiếp; v0.1.63 hộp riêng sẽ cho chạy bằng Antigravity. Antigravity báo hết hạn ⇒ đăng nhập lại ở Kết nối. Thẻ Zalo/WhatsApp "Mất liên lạc" ⇒ **Nối lại bằng phiên đã lưu**.
-3. Tuỳ chọn: đọc "Câu hỏi mở — mặc định đã chọn" ở [ROADMAP](../ROADMAP.md) và sửa nếu muốn khác.
+1. **Bắt buộc duy nhất**: có ít nhất một nguồn AI chạy được — màn **Thiết lập nguồn AI** (`/setup?buoc=nguon-ai`) → dán khoá API hoặc đăng nhập Google / Claude Code → **Kiểm tra**. Antigravity báo hết hạn ⇒ đăng nhập lại ở đó.
+   Chưa có khoá API thì agent trực kênh và Soạn lại / Dịch nháp chưa chạy bằng Antigravity (tới khi có hộp riêng, v0.1.63).
+2. Sau khi bản mới ra: `genh update` (hoặc đợi lịch đêm). Thẻ Zalo/WhatsApp "Mất liên lạc" ⇒ **Nối lại bằng phiên đã lưu**.
 
-### Boss phải làm — v0.1.61 (đã qua; `genh update` + người được giao quyền tự đặt mã PIN ở Tài khoản của tôi; [v0.1.61.md](../releases/v0.1.61.md))
+### Tuỳ chọn — không bắt buộc, làm khi muốn (cách làm chi tiết ở `docs/releases/vX.Y.Z.md` của từng bản)
 
-### Boss phải làm — v0.1.60 (không cần làm gì; chi tiết ở [v0.1.60.md](../releases/v0.1.60.md))
-
-1. Không cần làm gì. Bản cài đang chạy đã thiết lập xong nên không phải làm lại; muốn đổi nguồn AI thì vào **Cài đặt › Nguồn AI › Đổi nguồn AI**.
-2. Sau khi phát hành: mở `/owner` xem trang **Tình báo**; mở **Thông tin** và **Quan hệ** ở thanh trái (điện thoại: thanh dưới) để dùng.
-
-### Boss phải làm — v0.1.59 (khoảng 5 phút; chi tiết ở [v0.1.59.md](../releases/v0.1.59.md))
-
-1. Trên máy chủ chạy `genh update` (hoặc chờ lịch đêm), rồi tải lại trang (F5). Gồm cả bản v0.1.58; Gen tự chọn lại model, không thao tác tay.
-2. WhatsApp: Kết nối › WhatsApp › **Tạo mã QR** → tích "Tôi hiểu rủi ro…" → **Tôi hiểu, hiện mã QR** → trên điện thoại WhatsApp › Thiết bị đã liên kết › **Liên kết thiết bị** → quét mã trên màn hình (điện thoại cách màn hình 20–30 cm, giữ yên).
-3. Vẫn lỗi ⇒ chụp thẻ WhatsApp (có dòng lý do lỗi, "Chi tiết kỹ thuật") gửi lại cho Claude.
-
-### Boss phải làm — v0.1.57 (không gấp; chi tiết ở [v0.1.57.md](../releases/v0.1.57.md))
-
-1. **Thêm secret `GH_PERSONAL_PATTERNS`**: GitHub › Settings › Secrets and variables › Actions › New repository secret, mỗi dòng một mẫu (tên miền / tên gọi / email riêng của Sếp, viết như biểu thức chính quy). Chưa thêm thì CI vẫn chạy quy tắc chung và chỉ cảnh báo "chưa cấu hình mẫu riêng".
-2. **Duyệt PR #137 ở repo Brain** (ghi chú vận hành riêng của Sếp dời từ repo công khai sang Brain).
-3. Tuỳ chọn: **đặt Tên Kho** ở Kết nối › Gen-hub › "Tên Kho (tuỳ chọn)" (≤ 40 ký tự, cần mã PIN); để trống là "Kho dữ liệu".
-
-### Boss phải làm — v0.1.56 (không bắt buộc; chi tiết ở [v0.1.56.md](../releases/v0.1.56.md))
-
-1. Không cần làm gì với máy đang chạy. Đã quyết (10/10): repo giữ công khai (Owner khác cần tải bản phát hành), ghi chú vận hành riêng dời sang repo Brain (riêng tư).
-2. Xem tên mẫu khách trong `docs/design/seed-data.json` và mock web có phải khách thật không (`seed_demo.py` đã dùng tên hư cấu).
-
-### Boss phải làm — v0.1.55 (không bắt buộc; chi tiết ở [v0.1.55.md](../releases/v0.1.55.md))
-
-1. Không cần làm gì. Lần tới mở trang chủ (cả trên điện thoại) sẽ thấy **Mặt tiền**: Hôm nay, Việc, Quan hệ, Hỏi Gen; màn quản trị cũ ở **Thêm › Cài đặt nâng cao**.
-2. Trang Hôm nay hiện thẻ **"Áp model chuẩn theo vai?"** ⇒ bấm **Mở** (ở Hôm nay), rồi **Áp model chuẩn theo vai** → **Xác nhận** (khoá API và nguồn AI giữ nguyên). Nút "Về mặc định tất cả" hỏi mã PIN.
-3. Hỏi Gen: chọn **Nhanh** hoặc **Kỹ hơn** ngay dưới ô nhập; để **Tự động** là chuẩn.
-4. Thẻ Cập nhật không có nút "Cập nhật ngay" ⇒ đọc dòng lý do trên thẻ và làm đúng việc ghi ở đó (vd `genh auto-update enable` trên máy chủ). Gen-hub, Facebook, Telegram, Truy cập từ xa giờ là tuỳ chọn.
-5. **Muốn dùng Jev**: Cài đặt › Bộ não AI › thẻ Jev → **"Dùng khóa OpenRouter đang có"** (hoặc dán khoá OpenRouter) → mã PIN → **"Thử 12 câu mẫu"** → gửi kết quả cho Claude (để làm v0.1.57). Không bật thì vẫn lọc bằng quy tắc như cũ.
-
-### Boss phải làm — v0.1.54 (không bắt buộc, ~3 phút, sau khi máy lên v0.1.54; chi tiết ở [v0.1.54.md](../releases/v0.1.54.md))
-
-1. Mở app → bấm nút **Gen** (có chấm đỏ) → xem thẻ **Hôm nay của Sếp** → bấm **Chỉ cho em** ở việc đầu tiên và làm theo.
-2. Việc nào Sếp không dùng (vd Facebook) thì bấm **Không dùng việc này** (đọc câu hậu quả, Xác nhận) để Gen thôi nhắc; bật lại ở Cài đặt › Bộ não AI › Gen hướng dẫn.
-3. Không bắt buộc: Cài đặt › Bộ não AI › **Gen hướng dẫn** để chỉnh giờ yên lặng hoặc số bài mỗi ngày. Ngoài ra không cần làm gì, bài học tự đến.
-4. **Chỉ khi** thẻ Sức khoẻ hiện "Người gác cập nhật — Đang chạy dự phòng (hết hạn mức inotify)": trên máy chủ chạy `sudo sysctl -w fs.inotify.max_user_instances=1024` rồi `genh auto-update enable`. Không thấy cảnh báo thì không cần làm gì.
-
-### Boss phải làm — v0.1.53 (một lần, ~2 phút, sau khi máy lên v0.1.53; chi tiết ở [v0.1.53.md](../releases/v0.1.53.md))
-
-1. Trên máy chủ chạy `genh auto-update status`: dòng đầu phải là **BẬT**, "Lịch đang chạy (active): có", có "Lần kế tiếp", "Linger: có". Có dòng **CẢNH BÁO** ⇒ chép đúng lệnh nó in ra và chạy. Thấy **BẬT NHƯNG KHÔNG CHẠY** hoặc **TẮT** mà Sếp không tắt ⇒ `genh auto-update enable` (Linger KHÔNG ⇒ chạy trước `sudo loginctl enable-linger $USER`).
-   Trước đây Sếp cố ý tắt tự cập nhật đêm thì bản này tự bật lại **một lần** — muốn tắt hẳn chạy `genh auto-update disable`.
-2. Sáng hôm sau, Console › Cài đặt › Sao lưu & cập nhật › thẻ **Sức khoẻ hệ thống** (`/system?tab=storage&focus=health`): dòng **Tự cập nhật đêm** ghi "Bình thường · chạy lần cuối …". Có chuông "Lịch tự cập nhật đêm chưa chạy N ngày" ⇒ bấm **Xem cách bật lại**.
-3. Xem timer bằng tay: `systemctl --user list-timers --all | grep gen-harness` (không phải `grep genh`). Muốn tắt hẳn tự cập nhật: `genh auto-update disable` (genh nhớ là Sếp đã tắt, không tự bật lại).
-
-### Boss phải làm — v0.1.50 (một lần, ~3 phút, sau khi máy tự cập nhật; chi tiết ở [v0.1.50.md](../releases/v0.1.50.md))
-
-1. **Quyền ghi Kho (tuỳ chọn)**: Gen-hub › token của Gen-Harness › tick thêm `kho_create`, `kho_update` (không tick gì khác), rồi Gen-Harness › Kết nối › Gen-hub › **Kiểm tra** (mã PIN):
-   khối "Quyền ghi Kho" hiện "Có". Chưa tick thì thẻ Ghi vào Kho dữ liệu bị khoá nút Xác nhận; phần còn lại vẫn chạy.
-2. **Duyệt đề xuất Phiên đầu tiên**: sau bước 1 (Kiểm tra xanh với quyền ghi), trong ≤ 30 phút có chuông "Gen đề xuất ghi Kho · Phiên v0.1.50" → đọc bảng "Trường | Sẽ ghi" (thẻ sửa bản ghi có thêm cột "Hiện tại") → **Xác nhận** + mã PIN →
-   mở Kho kiểm bản ghi. Việc Sếp cần làm › dòng 9 "Gen ghi Kho" tự chuyển Đạt.
-3. **Thử Gen nhớ**: nói "nhớ giúp em: …" → thẻ Ghi nhớ → Xác nhận; xem/sửa/xoá ở Cài đặt › Bộ não AI › Gen nhớ.
-
-### Boss còn treo từ bản trước (trạng thái thật: Hướng dẫn › Việc Sếp cần làm, dòng "Đạt" là xong)
-
-- **v0.1.49 — Gen-hub quyền đọc** (~2 phút): tick quyền ĐỌC lịch, mail, việc (Google Tasks), tìm tệp Drive (không tick quyền gửi/ghi) → Kết nối › Gen-hub › Kiểm tra →
-  sáng sau Bản tin 07:30 có 3 mục mới. Không bắt buộc.
-- **v0.1.47 — Facebook trả lời** (dòng 8, không bắt buộc): thẻ "Gửi trả lời & tin nhắn" ở Tài khoản mạng xã hội — nếu ghi "Khoá" thì đọc cảnh báo và tự quyết "Tôi hiểu rủi ro và đồng ý";
-  nghiệm thu thật một lần bằng bình luận trên bài của chính Sếp. Phiên Facebook hết hạn ⇒ chuông + Telegram ⇒ Đăng nhập lại.
-- **v0.1.46 — Truy cập từ xa** (dòng 7, tuỳ chọn từ v0.1.55): chọn cách truy cập (khuyên Tailscale: `genh remote tailscale`), bấm "Kiểm tra NGAY TRÊN ĐIỆN THOẠI", mời thử một nhân viên.
-  Chuông "Cổng đang mở cho cả mạng" chỉ tắt khi đã chọn cách truy cập.
-- **v0.1.44 — Telegram** (dòng 6, tuỳ chọn từ v0.1.55): tạo bot qua @BotFather → Kết nối › Telegram: dán mã, **Tìm chat_id**, **Lưu** (PIN), **Gửi thử** (điện thoại nhận 2 tin).
-  Linux: nếu Console nhắc, chạy một lần `sudo loginctl enable-linger $USER` để trực canh chạy cả khi không đăng nhập.
-- **v0.1.39 — nghiệm thu kết nối thật** (dòng 1–4): Gen-hub, Facebook, Google/agy (đăng nhập + gọi thử), Claude Code CLI; canary `--live` của agy chỉ làm sau khi Boss đăng nhập agy.
-- **Tuỳ chọn**: cài Renovate App (1 phút, [v0.1.48.md](../releases/v0.1.48.md)); Jev tuỳ chọn ("Bật Jev 1 chạm", xem [v0.1.55.md](../releases/v0.1.55.md)).
-- **Chờ Boss cho phép** (một câu mỗi việc): "cho xoá nhánh" (F-70, ROADMAP › Nợ); dặn Gen đề xuất Phiên bù cho v0.1.28 → v0.1.49 nếu muốn.
+- **Gen-hub** ([v0.1.49](../releases/v0.1.49.md), [v0.1.50](../releases/v0.1.50.md)): tick quyền ĐỌC (lịch, mail, việc, Drive) và GHI Kho (`kho_create`, `kho_update`, không tick gì khác) → Kết nối › Gen-hub › **Kiểm tra** (mã PIN);
+  rồi duyệt đề xuất "Phiên" đầu tiên (Xác nhận + mã PIN) và thử Gen nhớ ("nhớ giúp em: …"). Chưa tick thì thẻ Ghi vào Kho dữ liệu bị khoá nút Xác nhận; phần còn lại vẫn chạy. Tên Kho: ô "Tên Kho" (≤ 40 ký tự, [v0.1.57](../releases/v0.1.57.md)).
+- **Telegram** ([v0.1.44](../releases/v0.1.44.md)): tạo bot qua @BotFather → Kết nối › Telegram: dán mã, **Tìm chat_id**, **Lưu** (PIN), **Gửi thử**. Linux: nếu Console nhắc, chạy một lần `sudo loginctl enable-linger $USER`.
+- **Truy cập từ xa** ([v0.1.46](../releases/v0.1.46.md)): chọn cách truy cập (khuyên Tailscale: `genh remote tailscale`), bấm "Kiểm tra NGAY TRÊN ĐIỆN THOẠI", mời thử một nhân viên.
+- **Facebook trả lời** ([v0.1.47](../releases/v0.1.47.md)): thẻ "Gửi trả lời & tin nhắn" — nếu ghi "Khoá" thì đọc cảnh báo và tự quyết; nghiệm thu thật một lần bằng bình luận trên bài của chính Sếp.
+- **WhatsApp quét QR thật** ([v0.1.59](../releases/v0.1.59.md), Nợ #35): Kết nối › WhatsApp › Tạo mã QR → tích "Tôi hiểu rủi ro…" → quét (điện thoại cách màn hình 20–30 cm). Vẫn lỗi ⇒ chụp thẻ WhatsApp (có "Chi tiết kỹ thuật") gửi Claude.
+- **Gen hướng dẫn** ([v0.1.54](../releases/v0.1.54.md)): nút Gen (chấm đỏ) → thẻ Hôm nay của Sếp → **Chỉ cho em**; việc không dùng thì **Không dùng việc này**; dùng thử một tuần rồi báo Claude thẻ có đúng việc, chuông có phiền không.
+- **Tự cập nhật đêm** ([v0.1.53](../releases/v0.1.53.md)): `genh auto-update status` phải ghi **BẬT** (có dòng CẢNH BÁO ⇒ chạy đúng lệnh nó in); muốn tắt hẳn: `genh auto-update disable`. Cập nhật không có nút "Cập nhật ngay" ⇒ đọc lý do trên thẻ.
+- **Mặt tiền** ([v0.1.55](../releases/v0.1.55.md), [v0.1.60](../releases/v0.1.60.md)): mở `/owner` (Tình báo, Thông tin, Quan hệ); thẻ "Áp model chuẩn theo vai?" ⇒ **Mở** → **Áp model chuẩn theo vai** → Xác nhận. Đổi nguồn AI sau thiết lập: Cài đặt › Nguồn AI › Đổi nguồn AI.
+- **Jev** ([v0.1.55](../releases/v0.1.55.md)): Cài đặt › Bộ não AI › thẻ Jev → "Dùng khóa OpenRouter đang có" → PIN → **Thử 12 câu mẫu** → gửi kết quả cho Claude để chốt ngưỡng lọc. Không bật thì vẫn lọc bằng quy tắc.
+- **Repo / CI** ([v0.1.48](../releases/v0.1.48.md), [v0.1.56](../releases/v0.1.56.md), [v0.1.57](../releases/v0.1.57.md)): thêm secret `GH_PERSONAL_PATTERNS` (chưa thêm thì CI chỉ cảnh báo); duyệt PR #137 ở repo Brain; cài Renovate App; xem `docs/design/seed-data.json` có tên khách thật không. Repo giữ công khai (đã quyết 10/10).
+- **Chờ Sếp cho phép (một câu mỗi việc)**: "cho xoá nhánh" (F-70, ROADMAP › Nợ); dặn Gen đề xuất Phiên bù (Nợ #7 — cần Sếp mở lại quy trình Kho, đang tạm ngưng từ 16/10).
 
 ### Claude / điều phối viên còn dở
 
