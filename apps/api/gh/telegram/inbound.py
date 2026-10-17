@@ -16,7 +16,6 @@ Ghép: Console `POST /notify/telegram/pair/start` (PIN) ⇒ mã 6 số (chỉ l�
 Sai mã 5 lần ⇒ huỷ mã.
 """
 
-import hashlib
 import hmac
 import logging
 import re
@@ -29,7 +28,7 @@ from typing import Any, TypeGuard
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gh import notifications
+from gh import crypto, notifications
 from gh.chassis import actionlog
 from gh.errors import ApiError
 
@@ -325,7 +324,9 @@ async def rate_ok(redis: Any, org_id: uuid.UUID, now: datetime | None = None) ->
 
 
 def _hash(org_id: uuid.UUID, code: str) -> bytes:
-    return hashlib.sha256(f"gh-telegram-pair:{org_id}:{code}".encode()).digest()
+    """HMAC khoá master (không phải sha256 trơn: mã chỉ có 10^6 khả năng, lộ DB là dò hết). Mã đang chờ ghép lúc nâng
+    cấp từ băm cũ sẽ không khớp nữa — chấp nhận được vì mã chỉ sống 10 phút, Sếp bấm Ghép lại."""
+    return crypto.keyed_digest(b"telegram-pair", f"{org_id}:{code}".encode())
 
 
 async def start_pairing(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> tuple[str, datetime]:

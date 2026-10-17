@@ -6,7 +6,9 @@ Telegram giả
 bằng `httpx.MockTransport` — không gọi Telegram thật.
 """
 
+import hashlib
 import json
+import os
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -19,6 +21,7 @@ import psycopg
 import pytest
 from sqlalchemy import text
 
+from gh import crypto
 from gh.db import admin_sessionmaker, sessionmaker
 from gh.telegram import inbound, poller
 from tests.conftest import PG, Api, verify_pin
@@ -211,6 +214,27 @@ async def test_pair_code_is_returned_once_and_stored_only_hashed(owner_api: Api,
             .all()
         )
     assert len(logs) == 1 and code not in logs[0]
+
+
+async def test_pair_code_hash_is_keyed_by_server_master_key(
+    owner_api: Api, bot: FakeBot, redis: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P3 review v0.1.64: sha256 trơn của mã 6 số dò hết 10^6 khả năng khi lộ DB ⇒ phải là HMAC khoá máy chủ."""
+    await _configure(owner_api)
+    code = (await owner_api.send("POST", "/notify/telegram/pair/start", {})).json()["pair"]["code"]
+    org = await _org()
+    stored = bytes((await _row()).pair_code_hash)
+    assert stored != hashlib.sha256(f"gh-telegram-pair:{org}:{code}".encode()).digest()  # không còn băm trơn
+    assert stored != hashlib.sha256(f"{org}:{code}".encode()).digest()
+    # băm phụ thuộc khoá master của máy chủ: đổi khoá ⇒ cùng mã ra băm khác (lộ DB mà thiếu khoá thì không dò được mã)
+    assert inbound._hash(org, code) == stored
+    real_key, other = crypto.master_key, os.urandom(32)
+    monkeypatch.setattr(crypto, "master_key", lambda: other)
+    assert inbound._hash(org, code) != stored
+    monkeypatch.setattr(crypto, "master_key", real_key)
+    bot.updates = [msg(2, f"/start {code}", date=datetime.now(UTC))]
+    out = await poller.poll_org(sessionmaker(), redis, None, org, transport=httpx.MockTransport(bot.handle))
+    assert out["results"] == ["paired"], out  # đúng khoá ⇒ ghép được
 
 
 async def test_pair_start_without_pin_is_423(owner_api: Api, bot: FakeBot) -> None:
