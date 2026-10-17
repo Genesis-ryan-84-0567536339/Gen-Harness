@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { confidenceBand, type ExplainQuote, type ExplainUnit } from '@gen-harness/contracts';
+import { confidenceBand, eventTypeLabel, type ExplainQuote, type ExplainUnit } from '@gen-harness/contracts';
 import { Button, Dialog, EmptyState, Icon } from '@gen-harness/ui';
 import { fmtDMClock, fmtDec } from '../../lib/format';
 import { CardError, SkeletonLines, StateChip } from '../common';
@@ -148,7 +148,7 @@ function UnitBlock({ u }: { u: ExplainUnit }) {
   return (
     <div className="dlg-item">
       <div className="dlg-item__meta">
-        <span>{u.event_type}</span>
+        <span>{eventTypeLabel(u.event_type)}</span>
         <span>·</span>
         <span>{fmtDMClock(u.observed_at)}</span>
         {u.group ? (

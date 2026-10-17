@@ -172,7 +172,7 @@ describe('Hồ sơ sống', () => {
     expect(await screen.findByText('Nguyễn Văn Bảo')).toBeInTheDocument();
     expect(screen.getByText('87')).toBeInTheDocument();
     expect(screen.getByText(/mua ba lần trong 18 tháng/)).toBeInTheDocument();
-    expect(screen.getByText('Complained')).toBeInTheDocument();
+    expect(screen.getByText('Phàn nàn')).toBeInTheDocument();
     expect(screen.getByText(/Thích nói chuyện thẳng/)).toBeInTheDocument();
   });
 

@@ -97,11 +97,11 @@ async def test_item_shape_titles_and_clipping(owner: Api, db: Any) -> None:
     ask = items["AskedPrice"]
     assert set(ask) == {"id", "item_type", "title", "summary", "importance", "event_type", "created_at", "person",
                         "group", "suggested_action"}
-    assert ask["title"] == "Hỏi giá" and len(ask["summary"]) <= 240 and ask["summary"].endswith("…")
+    assert ask["title"] == "Hỏi giá / nhu cầu mua" and len(ask["summary"]) <= 240 and ask["summary"].endswith("…")
     assert ask["person"]["name"] == "Chị Lan" and ask["group"] == {"id": str(g), "name": "Nhóm Gỗ Việt",
                                                                      "channel": "zalo"}
     assert ask["suggested_action"] is None
-    assert items["Complained"]["title"] == "Than phiền" and items["Complained"]["group"] is None
+    assert items["Complained"]["title"] == "Phàn nàn" and items["Complained"]["group"] is None
     assert items["KhongBiet"]["title"] == "Tin khác" and items["KhongBiet"]["importance"] == "Thường"
     al = items["alert"]
     assert al["title"] == "Khách đang nguội" and al["event_type"] is None and al["importance"] == "Khẩn"

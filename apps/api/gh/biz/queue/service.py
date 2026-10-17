@@ -24,11 +24,15 @@ def when(value: Any) -> datetime | None:
         return value
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
-# Nhãn tiếng Việt cho event_type (spec G3) — dùng làm tiêu đề thẻ ở Hộp thư / Tổng quan.
+# Nhãn tiếng Việt cho event_type (spec G3) — tiêu đề thẻ ở Hộp thư / Tổng quan / Mặt tiền. v0.1.69 (F062): ĐỦ 15 loại và
+# MỘT bảng duy nhất — bằng `core.lookup` (kind = 'event_type', db/sql/0003_phase2.sql) và bằng `packages/contracts/src/
+# eventTypes.ts` của web (tests/test_event_labels_v016x.py giữ ba nơi khớp nhau, cùng thứ tự `sort_order`).
 EVENT_LABELS = {
-    "AskedPrice": "Hỏi giá", "OfferedSupply": "Chào bán", "RequestedPartnership": "Đề nghị hợp tác",
-    "Complained": "Than phiền", "PromisedDelivery": "Cam kết giao hàng", "ScheduledMeeting": "Hẹn gặp",
-    "SentQuotation": "Đã gửi báo giá", "MentionsCompetitor": "Nhắc đối thủ", "WentSilent": "Im lặng bất thường",
+    "AskedPrice": "Hỏi giá / nhu cầu mua", "OfferedSupply": "Chào nguồn cung",
+    "RequestedPartnership": "Đề nghị hợp tác", "Complained": "Phàn nàn", "PromisedDelivery": "Hứa giao hàng",
+    "ScheduledMeeting": "Hẹn gặp", "SentQuotation": "Gửi báo giá", "SentDocument": "Gửi tài liệu",
+    "MentionsCompetitor": "Nhắc đối thủ", "ComparedVendor": "So sánh nhà cung cấp", "RequestedSample": "Xin mẫu",
+    "AskedStatus": "Hỏi tiến độ", "JobSignal": "Tín hiệu tìm việc", "DealWon": "Chốt đơn", "WentSilent": "Im lặng",
 }
 ALERT_TYPE_LABELS = {
     "customer_cooling": "Khách đang lạnh / sắp mất", "slow_response": "Phản hồi chậm bất thường",
