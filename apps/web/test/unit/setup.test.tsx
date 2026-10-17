@@ -307,12 +307,13 @@ describe('<SetupPage> — Thiết lập một màn, 3 bước', () => {
     renderLegacy();
     await screen.findByRole('heading', { name: 'Bước 10' });
     await user.click(screen.getByRole('button', { name: 'Mời ngay' }));
-    // Form mời thật (giai đoạn 4.6): bỏ trống danh sách vẫn Tiếp tục được.
+    // Form mời thật (giai đoạn 4.6). v0.1.68 (F038): danh sách rỗng KHÔNG phải "đã mời" — Tiếp tục tắt tới khi có người đủ tên + email.
     expect(screen.getByText('Chưa mời ai')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Tiếp tục/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Tiếp tục/ })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: 'Thêm người' }));
     await user.type(screen.getByLabelText('Tên hiển thị'), 'Chị Hồng Quản');
     await user.type(screen.getByLabelText('Email'), 'hong@genesis.vn');
+    expect(screen.getByRole('button', { name: /Tiếp tục/ })).toBeEnabled();
     await user.click(screen.getByRole('button', { name: /Tiếp tục/ }));
 
     expect(await screen.findByText('tmp-abc123')).toBeInTheDocument();
@@ -320,29 +321,6 @@ describe('<SetupPage> — Thiết lập một màn, 3 bước', () => {
 
     await user.click(screen.getByRole('button', { name: /Đã lưu, sang bước sau/ }));
     expect(await screen.findByRole('heading', { name: 'Bước 11' })).toBeInTheDocument();
-  });
-
-  it('step 12: explains the missing required steps and shows the 409 STEP_INCOMPLETE message inline', async () => {
-    const user = userEvent.setup();
-    const state = stateAt(12, [1, 2, 3], [5, 6, 7, 8, 9, 10, 11]);
-    state.steps[3].status = 'todo';
-    const put = vi.fn();
-    mockFetch((url, init) => {
-      if (url.endsWith('/setup/steps/12') && init.method === 'PUT') {
-        put();
-        return json(409, { status: 409, code: 'STEP_INCOMPLETE', title: 'Còn bước bắt buộc chưa xong: 4' });
-      }
-      if (url.includes('/setup/first-run')) return json(200, { raw_collected: 1244, classifying: 250, clean: 812, lowconf: 31, discarded: 120, run: null });
-      if (url.includes('/setup/')) return json(200, state);
-      return json(200, []);
-    });
-    renderLegacy();
-    expect(await screen.findByText('Còn bước bắt buộc chưa xong: 4')).toBeInTheDocument();
-    expect(await screen.findByText('1.244')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /Vào Console/ }));
-    await waitFor(() => expect(put).toHaveBeenCalled());
-    const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('Còn bước bắt buộc chưa xong: 4');
   });
 
   it('step 5: 409 STEP_INCOMPLETE shows the server message, not a generic conflict', async () => {

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Icon } from '@gen-harness/ui';
+import { EmptyState, Icon } from '@gen-harness/ui';
 import { api } from '../lib/api';
 import { qk } from '../lib/queries';
 import { queryClient } from '../lib/queryClient';
@@ -40,7 +40,12 @@ export function GuideStepPage() {
   const n = Number(useParams().n);
   const navigate = useNavigate();
   const formRef = useRef<HTMLFormElement>(null);
-  const state = useQuery({ queryKey: qk.setupState, queryFn: ({ signal }) => api.setup.state(signal) });
+  // v0.1.68 (F145): việc thiết lập chỉ Owner làm — vai khác thấy khung "Việc này do Owner làm" (như trang /guide), không phải
+  // "Không tải được dữ liệu — Vai trò của bạn không có quyền" + Thử lại, và không gọi các API chỉ Owner dùng (403 ở console).
+  // Chỉ ĐỌC bộ nhớ đệm của /auth/me (khung ứng dụng đã tải sẵn) — không gọi thêm, không ghi đè khi test dựng sẵn vai.
+  const role = useQuery({ queryKey: qk.me, queryFn: ({ signal }) => api.auth.me(signal), enabled: false }).data?.role?.code;
+  const nonOwner = !!role && role !== 'owner';
+  const state = useQuery({ queryKey: qk.setupState, queryFn: ({ signal }) => api.setup.state(signal), enabled: !nonOwner });
   const guide = GUIDE_BY_N[n];
 
   useEffect(() => {
@@ -51,6 +56,22 @@ export function GuideStepPage() {
   // v0.1.39: việc không có form trình thiết lập (13 Facebook, 14 Gen-hub) → mở thẳng màn làm việc đó.
   if (guide?.doTo) return <Navigate to={guide.doTo} replace />;
   if (!Step || !guide) return <Navigate to="/guide" replace />;
+  if (nonOwner) {
+    return (
+      <div className="screen guide-step">
+        <Link to="/guide" className="guide-back">
+          <Icon name="ph ph-arrow-left" size={13} /> Hướng dẫn thiết lập
+        </Link>
+        <div className="gh-card">
+          <EmptyState
+            icon="ph ph-lock-simple"
+            title="Việc này do Owner làm"
+            description="Kết nối kênh, chọn nhóm, sao lưu… chỉ Owner cài đặt được. Cần thêm gì, hãy nhắn Owner."
+          />
+        </div>
+      </div>
+    );
+  }
 
   // Bước 4 (chọn model): v0.1.59 — nút "Chọn model" mới đi thẳng /setup?buoc=nguon-ai; trang này (form đầy đủ, cho người muốn
   // chỉnh kỹ) quay về Mặt tiền, không còn về /overview.

@@ -318,7 +318,8 @@ describe('bước 10 — thẻ gợi ý có nút "Để sau"', () => {
     renderAt10();
     await user.click(await screen.findByRole('button', { name: 'Mời ngay' }));
     expect(await screen.findByRole('button', { name: 'Thêm người' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Tiếp tục/ })).toBeEnabled();
+    // v0.1.68 (F038): chưa có người nào thì "Tiếp tục" tắt (danh sách rỗng không phải "đã mời"); "Để sau" vẫn là lối ra.
+    expect(screen.getByRole('button', { name: /Tiếp tục/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Để sau' })).toBeInTheDocument();
     expect(screen.queryByTestId('step10-suggestion')).toBeNull();
   });

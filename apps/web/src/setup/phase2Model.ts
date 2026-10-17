@@ -10,6 +10,8 @@ export function providerReady(
   tested: Record<string, ProviderTestResult>,
   cliActive: boolean | Partial<Record<CliKind, boolean>>,
 ): boolean {
+  // v0.1.68 (F003): nguồn Sếp đã TẮT không bao giờ "sẵn sàng" — nếu không "Tiếp tục" gửi cả nguồn đã tắt lên và (máy chủ cũ) bật lại.
+  if (!p.enabled) return false;
   if (tested[p.id]) return tested[p.id].ok;
   if (p.kind === 'antigravity_cli' || p.kind === 'claude_code_cli')
     return typeof cliActive === 'boolean' ? (p.kind === 'antigravity_cli' ? cliActive : false) : !!cliActive[p.kind];
@@ -123,29 +125,4 @@ export function testedModels(p: Provider, tested: Record<string, ProviderTestRes
  */
 export function providerHasModel(p: Provider, tested: Record<string, ProviderTestResult>): boolean {
   return p.models.length > 0 || testedModels(p, tested).length > 0;
-}
-
-// ── Bước 12 (v0.1.28, UX C1/V10) ──────────────────────────────────────────
-export interface SetupGap {
-  key: 'model' | 'channel' | 'groups' | 'rules' | 'backup';
-  text: string;
-  step: number;
-}
-
-/** What still keeps the system from running on its own — Bước 12 lists these instead of "Mọi thứ đã sẵn sàng". */
-export function setupGaps(i: {
-  providers?: Provider[];
-  activeChannels?: number;
-  groupsListening?: number;
-  enabledRules?: number;
-  backupDone?: boolean;
-}): SetupGap[] {
-  const out: SetupGap[] = [];
-  if (i.providers && !i.providers.some((p) => p.enabled && p.kind !== 'system_one' && p.models.length > 0))
-    out.push({ key: 'model', text: 'Chưa có model AI nào để trợ lý trả lời và sàng lọc tin', step: 4 });
-  if (i.activeChannels === 0) out.push({ key: 'channel', text: 'Chưa kết nối kênh chat nào (Zalo, WhatsApp…)', step: 5 });
-  if (i.groupsListening === 0) out.push({ key: 'groups', text: 'Chưa bật nhóm nào để lắng nghe', step: 6 });
-  if (i.enabledRules === 0) out.push({ key: 'rules', text: 'Chưa có quy tắc sàng lọc nào', step: 7 });
-  if (i.backupDone === false) out.push({ key: 'backup', text: 'Chưa có lịch sao lưu tự động', step: 11 });
-  return out;
 }
