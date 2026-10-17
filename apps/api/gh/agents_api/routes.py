@@ -168,17 +168,21 @@ REASON_SOURCE_OFF = "Nguồn đã tắt — agent đang dùng Chuẩn"
 REASON_MODEL_OFF = "Model đã tắt — agent đang dùng Chuẩn"
 
 
-def _inactive_reason(r: Any) -> str | None:
+def _inactive_reason(r: Any, agy: agy_policy.AgyVerdict | None = None) -> str | None:
     """v0.1.67 (F016): dòng gán còn đó nhưng nguồn / model của nó đã bị Sếp tắt ⇒ `ModelRouter._chain` bỏ dòng gán
     âm thầm và agent chạy bằng hồ sơ Chuẩn — chuỗi này nói thẳng điều đó (null = dòng gán đang có hiệu lực)."""
     if getattr(r, "provider_enabled", True) is False:
         return REASON_SOURCE_OFF
     if getattr(r, "model_enabled", True) is False:
         return REASON_MODEL_OFF
+    # Review v0.1.67 P3: dòng gán Antigravity CLI của khoá bị `agy_policy` chặn (agent ngoại giao, core.reply…) —
+    # `ModelRouter._chain` gỡ dòng này, khoá chạy bằng Chuẩn; thẻ không được ghi "· Antigravity" như đang dùng thật.
+    if agy is not None and not agy.allowed and agy.reason and getattr(r, "provider_kind", None) == agy_policy.KIND_AGY:
+        return f"{agy.reason} — đang dùng Chuẩn"
     return None
 
 
-def _binding_out(r: Any) -> dict[str, Any]:
+def _binding_out(r: Any, agy: agy_policy.AgyVerdict | None = None) -> dict[str, Any]:
     # v0.1.62: Antigravity CLI gán được cho MỌI khoá (luật F-22 owner-only đã gỡ, Owner chọn mở 16/10/2026) ⇒ không
     # còn `blocked_reason` và không còn lỗi 409 AGY_OWNER_GEN_ONLY ở PUT /bindings. Gói G (16/10/2026): ngoại lệ có chủ
     # đích là lớp ngoại giao (core.reply, agent gắn kênh / nhóm / người) — xem `agy_blocked_reason` ở từng mục danh
@@ -186,7 +190,7 @@ def _binding_out(r: Any) -> dict[str, Any]:
     return {"model_id": str(r.model_id), "model_name": r.model_name, "provider_name": r.provider_name,
             "temperature": float(r.temperature), "context_tokens": r.context_tokens,
             "rule_codes": list(r.rule_codes or []), "effort": getattr(r, "effort", None),
-            "inactive_reason": _inactive_reason(r)}
+            "inactive_reason": _inactive_reason(r, agy)}
 
 
 @router.get("/bindings")
@@ -208,7 +212,7 @@ async def list_bindings(user: service.CurrentUser = Depends(READ), db: AsyncSess
     unbound = [k for k, _ in keys if k not in by_key]
     verdicts = await agy_policy.verdicts_for(db, user.org_id, [k for k, _ in keys])
     standard, reasons = await profiles.standard_with_reasons(db, user.org_id, unbound) if unbound else ({}, {})
-    items = [{"agent_key": k, "label": label, "binding": _binding_out(by_key[k]) if k in by_key else None,
+    items = [{"agent_key": k, "label": label, "binding": _binding_out(by_key[k], verdicts[k]) if k in by_key else None,
               "source": "custom" if k in by_key else "standard",
               "standard": None if k in by_key else profiles.standard_public(standard.get(k)),
               "standard_reason": None if k in by_key else reasons.get(k),
@@ -407,7 +411,11 @@ async def _binding_of(db: AsyncSession, org_id: uuid.UUID, agent_id: uuid.UUID) 
                b.context_tokens, b.rule_codes, b.effort
         FROM agent.bindings b JOIN agent.models m ON m.id = b.model_id JOIN agent.providers p ON p.id = m.provider_id
         WHERE b.org_id = :o AND b.agent_key = :k"""), {"o": org_id, "k": f"agent:{agent_id}"})).one_or_none()
-    return None if r is None else _binding_out(r)
+    if r is None:
+        return None
+    agy = (await agy_policy.verdict_for(db, org_id, f"agent:{agent_id}")
+           if r.provider_kind == agy_policy.KIND_AGY else None)
+    return _binding_out(r, agy)
 
 
 def _agent_out(r: Any) -> dict[str, Any]:
