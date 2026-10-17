@@ -230,7 +230,7 @@ Bàn làm việc: Duyệt và gửi · Sửa rồi gửi · Huỷ → `approved 
 **Mặc định mở hết, trừ quyền nguy hiểm nghiêm trọng.** Mọi giới hạn khác là cài đặt Owner tự bật/tắt (PIN + log).
 
 Khoá cứng, không tắt được bằng cài đặt:
-1. Chỉ lắng nghe nhóm Owner đã bật (`listen_authorized_only`).
+1. Chỉ lưu tin của nhóm Sếp đã chọn nghe (`listen_authorized_only`).
 2. Hệ thống không tự ra quyết định nhân sự.
 3. Gửi ra ngoài, vượt ngưỡng tiền, liên quan nhân sự → chờ duyệt (ngưỡng tiền Owner đặt).
 4. MCP: tool ghi qua duyệt; agent chỉ gọi tool Owner đã mở.

@@ -72,7 +72,8 @@ async def pipeline(user: service.CurrentUser = Depends(READ), db: AsyncSession =
         SELECT
           (SELECT count(DISTINCT c.id) FROM core.channels c JOIN core.channel_sessions s ON s.channel_id = c.id
              WHERE c.org_id = :o AND s.state = 'active' AND s.ended_at IS NULL) AS channels_live,
-          (SELECT count(*) FROM core.groups WHERE org_id = :o AND listen_mode = ANY(:modes)) AS groups_listening,
+          (SELECT count(*) FROM core.groups
+            WHERE org_id = :o AND left_at IS NULL AND listen_mode = ANY(:modes)) AS groups_listening,
           (SELECT count(*) FROM raw.events WHERE org_id = :o) AS raw_total,
           (SELECT count(*) FROM refinery.event_state WHERE org_id = :o AND state = 'pending') AS raw_pending,
           (SELECT count(*) FROM clean.meaning_units WHERE org_id = :o AND superseded_by IS NULL) AS clean_total"""),

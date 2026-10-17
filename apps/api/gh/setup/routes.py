@@ -23,6 +23,7 @@ from gh.biz.people.routes import try_chat
 from gh.chassis import actionlog, policy
 from gh.crypto import hash_secret, token_digest
 from gh.crypto import temp_password as new_temp_password
+from gh.data.common import LISTENING_MODES
 from gh.data_api.routes import RuleIn, ScheduleIn, create_rule, save_schedule, save_weights
 from gh.db import DB
 from gh.errors import ApiError, conflict, field_errors, forbidden, pin_required, unauthenticated
@@ -57,7 +58,7 @@ CURRENT_PHASE = 4
 # Khoá cứng — ARCHITECTURE §7.4, không tắt được bằng cài đặt. Chỉ hiển thị lại ở bước 9 để Owner xác nhận đã đọc
 # (`ack_boundaries`) — trang Quyền hạn đầy đủ để BẬT/TẮT các giới hạn *tuỳ chọn* khác thuộc giai đoạn 4.
 HARD_BOUNDARIES = (
-    "Chỉ lắng nghe nhóm Owner đã bật",
+    "Chỉ lưu tin của nhóm Sếp đã chọn nghe",
     "Hệ thống không tự ra quyết định nhân sự",
     "Gửi ra ngoài, vượt ngưỡng tiền, liên quan nhân sự → luôn chờ duyệt ở Bàn làm việc",
     "MCP: tool ghi qua duyệt; agent chỉ gọi tool Owner đã mở",
@@ -568,9 +569,10 @@ async def step6(body: Step6In, request: Request, db: AsyncSession = DB,
     for g in body.groups:
         await update_group(db, request.app.state.redis, owner, g.id,
                            GroupPatch.model_validate(g.model_dump(exclude={"id"})))
+    # v0.1.65 (F066): "đang nghe" = LISTENING_MODES (không tính off, paused, pending) và chưa rời nhóm.
     listening = int((await db.execute(text("""SELECT count(*) FROM core.groups
-                                              WHERE org_id = :o AND listen_mode NOT IN ('off', 'paused')"""),
-                                      {"o": row.org_id})).scalar_one())
+                                              WHERE org_id = :o AND left_at IS NULL AND listen_mode = ANY(:m)"""),
+                                      {"o": row.org_id, "m": list(LISTENING_MODES)})).scalar_one())
     if listening == 0:
         raise incomplete("Cần bật lắng nghe ít nhất một nhóm")
     return await _mark_done(db, request, row, owner, 6, {"listening": listening})
@@ -871,7 +873,8 @@ FOLLOW_UP_SQL: dict[int, str] = {
                            AND m.is_enabled AND m.model_name NOT ILIKE '%embed%')""",
     5: """SELECT EXISTS (SELECT 1 FROM core.channel_sessions s JOIN core.channels c ON c.id = s.channel_id
                          WHERE c.org_id = :o AND s.state = 'active' AND s.ended_at IS NULL)""",
-    6: "SELECT EXISTS (SELECT 1 FROM core.groups WHERE org_id = :o AND listen_mode NOT IN ('off', 'paused'))",
+    6: ("SELECT EXISTS (SELECT 1 FROM core.groups WHERE org_id = :o AND left_at IS NULL "
+        f"AND listen_mode IN ({', '.join(repr(m) for m in LISTENING_MODES)}))"),   # một nguồn: gh.data.common
     7: "SELECT EXISTS (SELECT 1 FROM refinery.rules WHERE org_id = :o AND is_enabled)",
     8: "SELECT EXISTS (SELECT 1 FROM agent.identities WHERE org_id = :o)",
     # Mức tự trị đặt ngay trong form tạo/sửa agent ở Console → có agent là đã có mức tự trị.

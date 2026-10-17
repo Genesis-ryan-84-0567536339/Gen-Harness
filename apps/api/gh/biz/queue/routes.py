@@ -21,7 +21,7 @@ from gh.biz.core import drafts, explain
 from gh.biz.core.scope import Scope, ensure_group, ensure_person, not_found, scope_for
 from gh.biz.queue import service as qsvc
 from gh.chassis import actionlog
-from gh.data.common import iso, mask_text
+from gh.data.common import LISTENING_MODES, iso, mask_text
 from gh.db import DB
 from gh.errors import ApiError
 from gh.refinery import triage
@@ -466,7 +466,8 @@ async def overview(user: service.CurrentUser = Depends(require("overview.read"))
         JOIN core.channel_sessions s ON s.channel_id = c.id
         WHERE c.org_id = :o AND s.state = 'active' AND s.ended_at IS NULL"""), {"o": org})).scalar_one()
     groups_listening = (await db.execute(text("""SELECT count(*) FROM core.groups
-        WHERE org_id = :o AND listen_mode NOT IN ('off', 'paused')"""), {"o": org})).scalar_one()
+        WHERE org_id = :o AND left_at IS NULL AND listen_mode = ANY(:m)"""),
+                                         {"o": org, "m": list(LISTENING_MODES)})).scalar_one()
     # Giai đoạn 5.5 (benchmark 10 triệu raw.events, p95 < 150ms): lọc trực tiếp e.org_id (cột đã có sẵn, ghi ở
     # gh/data/ingest.py lúc chèn) thay vì JOIN core.channels — org_id của event LUÔN bằng org_id của kênh, nên
     # kết quả giống hệt, nhưng dùng được chỉ mục (org_id, occurred_at DESC) (migration 0013) mà không cần JOIN.
