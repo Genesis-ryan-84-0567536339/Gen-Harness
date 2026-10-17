@@ -7,7 +7,7 @@ export function validateRequired(v: string, message: string): string | null {
 }
 
 export function validateToken(v: string): string | null {
-  return v.trim() ? null : 'Nhập mã thiết lập hiện trong trình cài (TUI).';
+  return v.trim() ? null : 'Nhập mã thiết lập hiện trong màn hình dòng lệnh của trình cài.';
 }
 
 export function validateEmail(v: string): string | null {
@@ -27,7 +27,7 @@ export function validatePin(v: string): string | null {
 
 export function validatePinConfirm(pin: string, confirm: string): string | null {
   if (!/^\d{6}$/.test(confirm)) return 'Nhập lại đủ 6 chữ số.';
-  return pin === confirm ? null : 'Hai lần nhập PIN chưa khớp.';
+  return pin === confirm ? null : 'Hai lần nhập mã PIN chưa khớp.';
 }
 
 export interface Strength {

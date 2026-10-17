@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -39,16 +41,17 @@ import (
 const WatchdogStateFile = "watchdog-state.json"
 
 const (
-	watchdogStateSchema   = 1
-	watchdogRunTimeout    = 4 * time.Minute
-	watchdogBootGap       = 30 * time.Minute
-	watchdogLogMaxBytes   = 5 << 20
-	watchdogMaxPending    = 50
-	watchdogMsgAlert      = "Gen-Harness · CẢNH BÁO"
-	watchdogMsgResolved   = "Gen-Harness · ĐÃ ỔN"
-	watchdogMsgTest       = "Gen-Harness · Tin thử từ trực canh máy chủ"
-	watchdogMsgFooterNote = "(Tin tự động từ trực canh máy chủ — mọi thao tác Sếp xác nhận trong Console.)"
-	watchdogConsolePath   = "/connections#telegram" // khối Trực canh máy chủ + sự cố đang mở
+	watchdogStateSchema      = 1
+	watchdogRunTimeout       = 4 * time.Minute
+	watchdogBootGap          = 30 * time.Minute
+	watchdogLogMaxBytes      = 5 << 20
+	watchdogMaxPending       = 50
+	watchdogMsgAlert         = "Gen-Harness · CẢNH BÁO"
+	watchdogMsgResolved      = "Gen-Harness · ĐÃ ỔN"
+	watchdogMsgTest          = "Gen-Harness · Tin thử từ trực canh máy chủ"
+	watchdogMsgFooterNote    = "(Tin tự động từ trực canh máy chủ — mọi thao tác Sếp xác nhận trong Console.)"
+	watchdogLocalConsoleLine = "Mở Console từ máy chủ Gen-Harness (chưa bật Truy cập từ xa nên điện thoại chưa mở được link)."
+	watchdogConsolePath      = "/connections#telegram" // khối Trực canh máy chủ + sự cố đang mở
 )
 
 // WatchdogScheduler bật/tắt/hỏi lịch trực canh (mặc định: internal/autoupdate
@@ -604,16 +607,44 @@ func watchdogMessage(header, host string, items []string, consoleURL string) str
 	for _, it := range items {
 		b.WriteString(it + "\n")
 	}
-	b.WriteString("\nMở Console: " + consoleURL + watchdogConsolePath + "\n")
+	if consoleURL == "" {
+		b.WriteString("\n" + watchdogLocalConsoleLine + "\n")
+	} else {
+		b.WriteString("\nMở Console: " + consoleURL + watchdogConsolePath + "\n")
+	}
 	b.WriteString(watchdogMsgFooterNote)
 	return b.String()
 }
 
-func watchdogConsoleURL(env *Env, publicURL string) string {
-	if publicURL != "" {
-		return strings.TrimRight(publicURL, "/")
+// watchdogConsoleURL trả địa chỉ Console để chèn vào tin Telegram, hoặc "" khi chưa có địa chỉ mở được từ ngoài máy chủ
+// (rỗng, localhost, *.localhost, 127.0.0.0/8, ::1, 0.0.0.0, hỏng) — cùng luật với console_line của API (F092).
+func watchdogConsoleURL(_ *Env, publicURL string) string {
+	raw := strings.TrimSpace(publicURL)
+	if isLocalConsoleURL(raw) {
+		return ""
 	}
-	return fmt.Sprintf("https://%s:%d", ProxyHost, ResolvePort(env.Port))
+	return strings.TrimRight(raw, "/")
+}
+
+func isLocalConsoleURL(raw string) bool {
+	if raw == "" {
+		return true
+	}
+	if !strings.Contains(raw, "//") {
+		raw = "//" + raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return true
+	}
+	host := strings.TrimRight(strings.ToLower(u.Hostname()), ".")
+	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback() || ip.IsUnspecified()
+	}
+	return false
 }
 
 func watchdogHostname(deps WatchdogDeps) string {

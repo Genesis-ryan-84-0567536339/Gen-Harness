@@ -296,12 +296,12 @@ test.describe('Kết nối › kênh & đăng nhập', () => {
     await expect(cli.getByTestId('cli-current')).toContainText('b@example.test');
   });
 
-  test('mã PIN chỉ ở Tài khoản của tôi: form Đổi mã PIN + Lịch sử nhập PIN', async ({ page }) => {
+  test('mã PIN chỉ ở Tài khoản của tôi: form Đổi mã PIN + Lịch sử nhập mã PIN', async ({ page }) => {
     await page.goto('/account');
     const form = page.getByRole('form', { name: 'Đổi mã PIN' });
     await expect(form).toBeVisible();
-    await form.getByRole('button', { name: /Lịch sử nhập PIN/ }).click();
-    await expect(page.getByRole('dialog', { name: /Lịch sử nhập PIN/ })).toBeVisible();
+    await form.getByRole('button', { name: /Lịch sử nhập mã PIN/ }).click();
+    await expect(page.getByRole('dialog', { name: /Lịch sử nhập mã PIN/ })).toBeVisible();
     await page.goto('/connections');
     await expect(page.getByRole('article', { name: 'Kênh Zalo' })).toBeVisible();
     await expect(page.getByRole('button', { name: /Đổi mã PIN/ })).toHaveCount(0);

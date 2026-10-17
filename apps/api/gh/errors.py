@@ -78,7 +78,7 @@ def pin_required() -> ApiError:
     return ApiError(423, "PIN_REQUIRED", "Thao tác này cần nhập mã PIN")
 
 
-MODEL_UNAVAILABLE_HINT = "Chưa có model AI nào hoạt động — vào Agent & Model (Hướng dẫn bước 4) để chọn hoặc sửa model."
+MODEL_UNAVAILABLE_HINT = "Chưa có model AI nào hoạt động — vào API & Model (Hướng dẫn bước 4) để chọn hoặc sửa model."
 MODEL_DOWN_TITLE = "Nguồn AI đang lỗi hoặc hết hạn mức — thử lại sau ít phút"
 MODEL_DOWN_HINT = ("Model đã chọn vẫn còn, chỉ là lượt gọi vừa rồi bị lỗi (mạng hoặc hết hạn mức của khoá). "
                    "Thử lại sau ít phút; xem tình trạng từng nguồn ở API & Model — không cần chọn lại model.")

@@ -21,7 +21,7 @@ import { WorkbenchScreen } from '../../src/screens/queue/WorkbenchScreen';
 
 // Chuỗi THẬT của máy chủ v0.1.62 (gh/errors.py::model_unavailable): title theo việc + MODEL_UNAVAILABLE_HINT chung.
 const TITLE = 'Chưa có model nào chạy được để dịch';
-const HINT = 'Chưa có model AI nào hoạt động — vào Agent & Model (Hướng dẫn bước 4) để chọn hoặc sửa model.';
+const HINT = 'Chưa có model AI nào hoạt động — vào API & Model (Hướng dẫn bước 4) để chọn hoặc sửa model.';
 const REASON = 'Antigravity CLI: lỗi tạm';
 const AI_SOURCE_HREF = '/setup?buoc=nguon-ai';
 

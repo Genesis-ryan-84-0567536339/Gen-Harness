@@ -394,7 +394,7 @@ export function createMock(opts: Opts) {
         },
         {
           key: 'background_key_missing',
-          title: 'Việc nền chưa có khoá để chạy',
+          title: 'Cần 1 khoá API để chạy lọc tin và bản tin',
           body: 'Lọc tin và bản tin cần một khoá riêng để chạy ngầm. Sếp thêm khoá ở Bộ não AI nhé.',
           to: '/system?tab=brain',
         },

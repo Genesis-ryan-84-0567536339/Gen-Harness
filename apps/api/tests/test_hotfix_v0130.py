@@ -31,7 +31,7 @@ async def test_translate_503_detail_is_text_and_reasons_top_level(owner_api: Api
         assert r.status_code == 503
         body = r.json()
         assert body["code"] == "MODEL_UNAVAILABLE"
-        assert isinstance(body["detail"], str) and "Agent & Model" in body["detail"]
+        assert isinstance(body["detail"], str) and "API & Model" in body["detail"]
         assert body["reasons"] == ["gemini: 429", "deepseek: đang ngắt mạch"]
 
 

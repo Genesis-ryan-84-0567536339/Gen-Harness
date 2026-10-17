@@ -1,6 +1,6 @@
 /**
  * v0.1.42: header gọn (F-67 — tự trị, khiên, Góc nhìn đã lưu chỉ ở Nâng cao), logo hiện phiên bản thật (F-67),
- * bỏ phụ đề tiếng Anh (F-63), Đội ngũ hiện lối vào Đánh giá/Chăm sóc theo /navigation, Tài khoản có Lịch sử nhập PIN.
+ * bỏ phụ đề tiếng Anh (F-63), Đội ngũ hiện lối vào Đánh giá/Chăm sóc theo /navigation, Tài khoản có Lịch sử nhập mã PIN.
  */
 import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -170,7 +170,7 @@ describe('Tài khoản của tôi — thẻ mã PIN (F-61)', () => {
     display_name: 'Anh Nguyễn Văn A (Chủ)', email: 'owner@genesis.local', role: { code: 'owner', name: 'Owner' },
     created_at: '2026-05-04T02:15:00Z', must_change_password: false, has_pin: true, sessions: [],
   };
-  it('audit.read → nút "Lịch sử nhập PIN" mở hộp lịch sử; không có audit.read → không có nút', async () => {
+  it('audit.read → nút "Lịch sử nhập mã PIN" mở hộp lịch sử; không có audit.read → không có nút', async () => {
     const user = userEvent.setup();
     const seed = (qc: QueryClient) => qc.setQueryData(['account'], ACCOUNT);
     vi.stubGlobal(
@@ -182,11 +182,11 @@ describe('Tài khoản của tôi — thẻ mã PIN (F-61)', () => {
       }),
     );
     const view = renderWith(<AccountPage />, 'owner', seed);
-    await user.click(await screen.findByRole('button', { name: 'Lịch sử nhập PIN (cả tổ chức)' }));
-    expect(await screen.findByRole('dialog', { name: /Lịch sử nhập PIN/ })).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: 'Lịch sử nhập mã PIN (cả tổ chức)' }));
+    expect(await screen.findByRole('dialog', { name: /Lịch sử nhập mã PIN/ })).toBeInTheDocument();
     view.unmount();
     renderWith(<AccountPage />, 'operator', seed);
     await screen.findByRole('form', { name: 'Đổi mã PIN' });
-    expect(screen.queryByRole('button', { name: /Lịch sử nhập PIN/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Lịch sử nhập mã PIN/ })).toBeNull();
   });
 });

@@ -67,7 +67,7 @@ export function Step1Welcome({ meta, description, status, token, setToken, onSav
             }}
             onBlur={() => f.blur('token')}
             error={f.errorOf('token')}
-            hint="Hiện trong trình cài (TUI) — tự điền khi mở từ đường dẫn của trình cài."
+            hint="Hiện trong màn hình dòng lệnh của trình cài — tự điền khi mở từ đường dẫn của trình cài."
           />
         </div>
       )}

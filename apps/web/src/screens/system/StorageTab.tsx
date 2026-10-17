@@ -134,7 +134,10 @@ function RetentionPanel() {
                 <tr key={r.dataset} data-testid={`retention-${r.dataset}`}>
                   <td>
                     <div className="retention-table__name">{label}</div>
-                    <div className="mono retention-table__code">{r.dataset}</div>
+                    <details className="retention-table__tech">
+                      <summary>Chi tiết kỹ thuật</summary>
+                      <div className="mono retention-table__code">{r.dataset}</div>
+                    </details>
                     {view.note ? <div className="retention-table__note">{view.note}</div> : null}
                     {view.pending ? <div className="retention-table__pending">{view.pending}</div> : null}
                     {view.lockedReason ? <div className="retention-table__note" data-testid={`retention-locked-${r.dataset}`}>{view.lockedReason}</div> : null}

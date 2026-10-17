@@ -391,7 +391,7 @@ export function createMock(opts: P4SystemOptions) {
       const scope = String(b.scope ?? '');
       if (!EDITABLE_PERMISSIONS.has(permission)) return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { permission: 'Quyền này không nằm trong ma trận sửa được ở Quyền hạn' } });
       if (role === 'owner' && scope !== 'all') return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { scope: 'Owner luôn toàn quyền ở mọi cột — khoá cứng, không sửa được' } });
-      if (role === 'auditor' && WRITE_PERMISSIONS.has(permission) && scope !== 'none') return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { scope: 'Auditor không bao giờ có quyền ghi — khoá cứng, không sửa được' } });
+      if (role === 'auditor' && WRITE_PERMISSIONS.has(permission) && scope !== 'none') return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { scope: 'Vai Kiểm soát không bao giờ có quyền ghi — khoá cứng, không sửa được' } });
       const idx = opts.roleOrder.indexOf(role);
       if (idx < 0 || !opts.matrix[permission]) return problem(404, 'NOT_FOUND', 'Ô ma trận');
       opts.matrix[permission][idx] = scope;

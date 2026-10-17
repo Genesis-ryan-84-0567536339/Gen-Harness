@@ -5,8 +5,8 @@
 - J2 (`gh.refinery.prefilter` + runner): trùng hẳn / quy tắc + Jev cùng rác / quy tắc khi chưa có Jev ⇒ bỏ qua (không
   xoá, đọc lại qua `GET /refinery/triage/skipped`); Jev một mình chấm rác ⇒ vẫn trích xuất; Jev lỗi ⇒ luồng cũ;
   `triage.prefilter = false` ⇒ không bỏ tin nào;
-- `POST /jev/benchmark|enable`, `GET /jev/value-summary` (chỉ Owner; /enable cần PIN, không trả khóa, Action Log không
-  chứa khóa).
+- `POST /jev/benchmark|enable`, `GET /jev/value-summary` (chỉ Owner; /enable cần PIN, không trả khoá, Action Log không
+  chứa khoá).
 Chỉ dùng Jev/router giả."""
 
 import asyncio
@@ -575,7 +575,7 @@ async def test_benchmark_without_key_is_409_friendly(app: Any, db: Any, owner_ap
     r = await api.send("POST", "/jev/benchmark")
     assert r.status_code == 409, r.text
     body = r.json()
-    assert body["code"] == "JEV_KEY_MISSING" and body["title"] == "Chưa có khóa OpenRouter cho Jev"
+    assert body["code"] == "JEV_KEY_MISSING" and body["title"] == "Chưa có khoá OpenRouter cho Jev"
     assert body["detail"] is None                                                   # chuỗi thân thiện nằm ở title
     assert isinstance(body["reasons"], list) and all(isinstance(r, str) and r for r in body["reasons"])  # kỹ thuật
     assert r.headers["content-type"].startswith("application/problem+json")
@@ -668,21 +668,21 @@ async def test_enable_with_existing_openrouter_key_never_returns_key(app: Any, d
     (k,) = await jev_keys(db)
     src = (await db.execute(text("""SELECT k.secret_enc FROM agent.provider_keys k JOIN agent.providers p
                                     ON p.id = k.provider_id WHERE p.kind = 'openai_compat'"""))).scalar_one()
-    assert bytes(k.secret_enc) == bytes(src)                 # chép khóa ĐÃ MÃ HÓA, phía máy chủ
+    assert bytes(k.secret_enc) == bytes(src)                 # chép khoá ĐÃ MÃ HÓA, phía máy chủ
     assert crypto.decrypt(bytes(k.secret_enc), KEY_AAD).decode() == OR_KEY
     p = (await db.execute(text("SELECT endpoint, is_enabled FROM agent.providers WHERE kind = 'system_one'"))).one()
     assert (p.endpoint, p.is_enabled) == (jev.PRESET["endpoint"], True)
     model = (await db.execute(text("""SELECT m.model_name FROM agent.models m JOIN agent.providers p
                                       ON p.id = m.provider_id WHERE p.kind = 'system_one'"""))).scalar_one()
     assert model == jev.PRESET["model"]
-    # Action Log: có 'jev.enable', KHÔNG chứa khóa (kể cả 4 ký tự cuối) ở bất cứ đâu
+    # Action Log: có 'jev.enable', KHÔNG chứa khoá (kể cả 4 ký tự cuối) ở bất cứ đâu
     detail = (await db.execute(text("SELECT detail::text FROM ops.action_log WHERE action='jev.enable'"))).scalar_one()
     assert "existing_openrouter" in detail and OR_KEY not in detail and OR_KEY[-4:] not in detail
     everything = (await db.execute(text("SELECT string_agg(detail::text || coalesce(target_label, ''), ' ') "
                                         "FROM ops.action_log"))).scalar_one()
     assert OR_KEY not in everything and OR_KEY not in caplog.text
     assert OR_KEY not in (await api.get("/providers")).text
-    # bấm lại: idempotent, không nhân đôi khóa / nguồn
+    # bấm lại: idempotent, không nhân đôi khoá / nguồn
     again = await api.send("POST", "/jev/enable", {"use_existing_openrouter": True})
     assert again.status_code == 200 and again.json()["created"] is False
     assert again.json()["provider_id"] == out["provider_id"]
@@ -702,20 +702,20 @@ async def test_enable_with_pasted_key_and_reenable(app: Any, db: Any, owner_api:
     assert crypto.decrypt(bytes(k.secret_enc), KEY_AAD).decode() == PASTED and k.last4 == PASTED[-4:]
     logs = (await db.execute(text("SELECT string_agg(detail::text, ' ') FROM ops.action_log"))).scalar_one()
     assert PASTED not in logs
-    # tắt nguồn rồi bật lại không cần dán khóa nữa (khóa cũ còn)
+    # tắt nguồn rồi bật lại không cần dán khoá nữa (khoá cũ còn)
     await db.execute(text("UPDATE agent.providers SET is_enabled = false WHERE kind = 'system_one'"))
     await db.commit()
     r2 = await api.send("POST", "/jev/enable", {})
     assert r2.status_code == 200 and r2.json()["key_source"] == "kept" and r2.json()["created"] is False
     assert (await db.execute(text("SELECT is_enabled FROM agent.providers WHERE kind = 'system_one'"))).scalar() is True
     assert (await api.send("POST", "/jev/enable", {"key": PASTED})).status_code == 200
-    assert len(await jev_keys(db)) == 1                               # cùng khóa dán lại: không nhân đôi
-    # khóa dán KHÁC được thêm (xoay vòng)
+    assert len(await jev_keys(db)) == 1                               # cùng khoá dán lại: không nhân đôi
+    # khoá dán KHÁC được thêm (xoay vòng)
     assert (await api.send("POST", "/jev/enable", {"key": PASTED + "-b"})).status_code == 200
     assert len(await jev_keys(db)) == 2
 
 
 def test_key_missing_error_shape() -> None:
     e = jev_routes.key_missing()
-    assert (e.status, e.code, e.title) == (409, "JEV_KEY_MISSING", "Chưa có khóa OpenRouter cho Jev")
+    assert (e.status, e.code, e.title) == (409, "JEV_KEY_MISSING", "Chưa có khoá OpenRouter cho Jev")
     assert e.detail is None and "system_one" in e.extra["reasons"][0]
