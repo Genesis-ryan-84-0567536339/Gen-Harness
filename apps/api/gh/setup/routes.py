@@ -16,6 +16,7 @@ from pydantic_core import PydanticCustomError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gh.agents_api.routes import _check_name_free
 from gh.auth import rbac, service
 from gh.auth.deps import client_ip, optional_user
 from gh.auth.routes import set_session_cookies
@@ -653,11 +654,13 @@ class Step8In(BaseModel):
 
 
 async def _setup_agent_id(db: AsyncSession, row: Any) -> uuid.UUID | None:
-    """Agent đã tạo ở bước 8 (`completed.setup_agent_id`) nếu còn tồn tại — làm lại bước 8 thì cập nhật nó (F044)."""
+    """Agent đã tạo ở bước 8 (`completed.setup_agent_id`) nếu còn tồn tại — làm lại bước 8 thì cập nhật nó (F044).
+    Agent đã Lưu trữ (v0.1.67) coi như không còn: làm lại bước 8 tạo agent mới, không "sửa" agent đã cất đi."""
     aid = (row.completed or {}).get("setup_agent_id")
     if not aid:
         return None
-    return (await db.execute(text("SELECT id FROM agent.identities WHERE org_id = :o AND id = CAST(:i AS uuid)"),
+    return (await db.execute(text("SELECT id FROM agent.identities WHERE org_id = :o AND id = CAST(:i AS uuid) "
+                                  "AND archived_at IS NULL"),
                              {"o": row.org_id, "i": aid})).scalar_one_or_none()
 
 
@@ -678,6 +681,8 @@ async def step8(body: Step8In, request: Request, db: AsyncSession = DB,
     # v0.1.68 (F044): làm lại bước 8 ⇒ CẬP NHẬT agent của bước 8 (`completed.setup_agent_id`), không tạo thêm agent
     # trùng.
     agent_id = await _setup_agent_id(db, row)
+    # v0.1.67 (F085) × v0.1.68: bước 8 cũng không tạo / đổi sang tên trùng agent đang dùng (Lưu trữ không tính).
+    await _check_name_free(db, row.org_id, name, except_id=agent_id)
     if agent_id is not None:
         await db.execute(text("""UPDATE agent.identities SET name = :n, role_desc = :rd, voice = :v, speak_when = :sw,
                                  template = COALESCE(:tpl, template), updated_at = now() WHERE id = :i"""),
@@ -739,12 +744,13 @@ async def _setup_agent(db: AsyncSession, row: Any) -> Any:
     aid = (row.completed or {}).get("setup_agent_id")
     if aid:
         agent = (await db.execute(text("SELECT id, name, autonomy_level FROM agent.identities "
-                                       "WHERE org_id = :o AND id = CAST(:i AS uuid)"),
+                                       "WHERE org_id = :o AND id = CAST(:i AS uuid) AND archived_at IS NULL"),
                                   {"o": row.org_id, "i": aid})).one_or_none()
         if agent is not None:
             return agent
     return (await db.execute(text("SELECT id, name, autonomy_level FROM agent.identities WHERE org_id = :o "
-                                  "ORDER BY created_at ASC LIMIT 1"), {"o": row.org_id})).one_or_none()
+                                  "AND archived_at IS NULL ORDER BY created_at ASC LIMIT 1"),
+                             {"o": row.org_id})).one_or_none()
 
 
 @router.get("/steps/9")
@@ -916,9 +922,9 @@ FOLLOW_UP_SQL: dict[int, str] = {
     6: ("SELECT EXISTS (SELECT 1 FROM core.groups WHERE org_id = :o AND left_at IS NULL "
         f"AND listen_mode IN ({', '.join(repr(m) for m in LISTENING_MODES)}))"),   # một nguồn: gh.data.common
     7: "SELECT EXISTS (SELECT 1 FROM refinery.rules WHERE org_id = :o AND is_enabled)",
-    8: "SELECT EXISTS (SELECT 1 FROM agent.identities WHERE org_id = :o)",
+    8: "SELECT EXISTS (SELECT 1 FROM agent.identities WHERE org_id = :o AND archived_at IS NULL)",
     # Mức tự trị đặt ngay trong form tạo/sửa agent ở Console → có agent là đã có mức tự trị.
-    9: "SELECT EXISTS (SELECT 1 FROM agent.identities WHERE org_id = :o)",
+    9: "SELECT EXISTS (SELECT 1 FROM agent.identities WHERE org_id = :o AND archived_at IS NULL)",
     # v0.1.68 (F038): có người dùng KHÁC Owner đang hoạt động (không tính tài khoản đã khoá / xoá) — giống
     # `staff.active` của Gen.
     10: STAFF_ACTIVE_SQL,
