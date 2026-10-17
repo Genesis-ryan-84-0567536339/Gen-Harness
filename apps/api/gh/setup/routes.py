@@ -862,13 +862,11 @@ async def step11(body: Step11In, request: Request, db: AsyncSession = DB,
 
 # Bước tuỳ chọn → màn Console làm tiếp (khớp FOLLOW_UP ở web). "done" suy từ DỮ LIỆU THẬT, không chỉ từ trạng thái
 # trình thiết lập: Owner để sau bước 5 rồi quét QR ở màn Kênh thì mục tự biến mất khỏi "Việc thiết lập tiếp".
+# v0.1.63 (B2, F010): bước 4 KHÔNG có SQL ở đây — "xong" = `readiness.ai_ready` (có nguồn AI DÙNG ĐƯỢC:
+# đang bật, có khoá
+# bật / phiên CLI chưa hết hạn, có model bật), không chỉ có dòng model. Xem `follow_up_status`.
+AI_STEP = 4
 FOLLOW_UP_SQL: dict[int, str] = {
-    # v0.1.29: bước 4 "Để sau" được → "Chưa có model". v0.1.55 (G2): bước 4 không còn ghi agent.bindings (hồ sơ tiêu
-    # chuẩn tự phủ) nên "xong" = có ít nhất một nhà cung cấp BẬT (không tính embedding / Jev) có model bật (không
-    # phải embedding).
-    4: """SELECT EXISTS (SELECT 1 FROM agent.providers p JOIN agent.models m ON m.provider_id = p.id
-                         WHERE p.org_id = :o AND p.is_enabled AND p.kind NOT IN ('embedding', 'system_one')
-                           AND m.is_enabled AND m.model_name NOT ILIKE '%embed%')""",
     5: """SELECT EXISTS (SELECT 1 FROM core.channel_sessions s JOIN core.channels c ON c.id = s.channel_id
                          WHERE c.org_id = :o AND s.state = 'active' AND s.ended_at IS NULL)""",
     6: "SELECT EXISTS (SELECT 1 FROM core.groups WHERE org_id = :o AND listen_mode NOT IN ('off', 'paused'))",
@@ -906,10 +904,15 @@ async def follow_up_status(db: AsyncSession, row: Any) -> list[dict[str, Any]]:
     status = (row.completed or {}).get("steps", {})
     out = []
     for n, key, title, required, _phase in STEPS:
-        if required or n not in FOLLOW_UP_SQL:
+        if required or (n not in FOLLOW_UP_SQL and n != AI_STEP):
             continue
-        real = bool((await db.execute(text(FOLLOW_UP_SQL[n]), {"o": row.org_id})).scalar())
-        # Bước 4 chỉ theo dữ liệu thật: xoá nguồn (gỡ gán model) sau khi đã xong bước 4 thì lại "Chưa có model".
+        if n == AI_STEP:
+            from gh.providers import readiness
+
+            real = bool((await readiness.ai_ready(db, row.org_id))["ok"])
+        else:
+            real = bool((await db.execute(text(FOLLOW_UP_SQL[n]), {"o": row.org_id})).scalar())
+        # Bước 4 chỉ theo dữ liệu thật: tắt / gỡ khoá / hết phiên nguồn sau khi đã xong bước 4 thì lại "Chưa có model".
         done = real if n == 4 else status.get(str(n)) == "done" or real
         out.append({"n": n, "key": key, "title": title, "status": status.get(str(n), "todo"), "done": done})
     for n, key, title, sql in FOLLOW_UP_EXTRA:

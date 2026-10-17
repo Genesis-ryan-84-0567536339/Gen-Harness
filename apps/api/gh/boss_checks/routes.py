@@ -25,6 +25,7 @@
 import contextlib
 import uuid
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
@@ -41,6 +42,8 @@ from gh.errors import ApiError, field_errors, not_found, pin_required
 from gh.gen.coach import cache as coach_cache
 from gh.hub_link import service as hub
 from gh.providers import cli as climod
+from gh.providers import readiness
+from gh.providers import router as mrouter
 from gh.social import service as social_service
 
 router = APIRouter(prefix="/boss-checks", tags=["boss-checks"])
@@ -225,10 +228,22 @@ async def _probe(request: Request, db: AsyncSession, user: service.CurrentUser, 
                            target_type="provider", target_id=str(p.id), target_label=p.name,
                            result="ok" if result["ok"] else "failed",
                            detail={"error": result["error"], "via": "boss_checks"}, ip=user.ip)
+    if kind in climod.CLI_KINDS:
+        # v0.1.63 (F002): nguồn CLI gọi thử THẬT xanh mà chưa có dòng model nào ⇒ lưu cặp (model, mức) vừa chạy được —
+        # cùng việc với POST /providers/{id}/test (nếu không, Kiểm tra xanh mà Gen vẫn "chưa có model").
+        await mrouter.adopt_probed_model(db, user.org_id, p.id, p.name, result, actor_type="user",
+                                         actor_id=user.actor_id, ip=user.ip)
     return result
 
 
-def _call_detail(result: dict[str, Any]) -> dict[str, Any]:
+def _call_detail(result: dict[str, Any], provider_id: Any = None) -> dict[str, Any]:
+    out = _call_detail_base(result)
+    if provider_id is not None:
+        out["provider_id"] = str(provider_id)     # để `overview` biết bằng chứng này của nguồn nào (F014)
+    return out
+
+
+def _call_detail_base(result: dict[str, Any]) -> dict[str, Any]:
     return {"latency_ms": result.get("latency_ms"), "probe_model": result.get("probe_model"),
             "models_count": len(result.get("models") or []), "models_source": result.get("models_source"),
             "account_masked": boss.mask_email(result.get("account"))}
@@ -255,44 +270,48 @@ async def _run_call(request: Request, db: AsyncSession, user: service.CurrentUse
     return out
 
 
-AI_NO_SOURCE_MSG = ("Chưa có nguồn AI nào — thêm khoá API hoặc đăng nhập Google / Claude Code ở Kết nối › Bộ não AI "
-                    "rồi bấm Kiểm tra")
-AI_NO_KEY_MSG = "Nguồn AI đầu chuỗi chưa có khoá API — thêm khoá ở Cài đặt › Bộ não AI rồi bấm Kiểm tra"
+#: Số nguồn tối đa được gọi thử trong MỘT lần bấm Kiểm tra (mỗi lượt CLI dùng hạn mức thật của gói).
+AI_MAX_PROBES = 3
 
 
 async def _run_ai_source(request: Request, db: AsyncSession, user: service.CurrentUser) -> dict[str, Any]:
-    """v0.1.55: gọi thử nguồn AI đầu chuỗi (nguồn bật, có khoá API / phiên CLI) — như `POST /providers/{id}/test`.
-    Không có nguồn nào sẵn sàng thì ghi 'fail' kèm câu chỉ đường (nguồn đầu chuỗi chưa có khoá / chưa đăng nhập)."""
-    rows = (await db.execute(text("""
-        SELECT p.id, p.name, p.kind,
-               EXISTS (SELECT 1 FROM agent.provider_keys k WHERE k.provider_id = p.id AND k.is_enabled) AS has_key,
-               EXISTS (SELECT 1 FROM agent.cli_profiles c WHERE c.provider_id = p.id AND c.is_active
-                       AND c.token_enc IS NOT NULL) AS has_session
-        FROM agent.providers p
-        WHERE p.org_id = :o AND p.is_enabled AND p.kind NOT IN ('embedding', 'system_one')
-        ORDER BY p.failover_rank NULLS LAST, p.created_at"""), {"o": user.org_id})).all()
-    if not rows:
-        return await boss.record(db, user.org_id, "ai_source", "fail", error_code="AI_NO_SOURCE",
-                                 message=AI_NO_SOURCE_MSG, user_id=user.id)
-    ready = [r for r in rows if (r.has_session if r.kind in climod.CLI_KINDS else r.has_key)]
-    if not ready:
-        first = rows[0]
-        if first.kind == climod.AGY:
-            code, msg = NOT_READY["agy_call"]
-        elif first.kind == climod.CLAUDE:
-            code, msg = NOT_READY["claude_call"]
-        else:
-            code, msg = "AI_KEY_MISSING", AI_NO_KEY_MSG
-        return await boss.record(db, user.org_id, "ai_source", "fail", error_code=code, message=msg, user_id=user.id)
-    p = ready[0]
-    result = await _probe(request, db, user, p, p.kind)
-    ok = bool(result["ok"])
-    if not ok and result.get("error_code") in TRANSIENT_CODES:
-        return transient("ai_source", str(result["error_code"]), result.get("error"))
-    return await boss.record(db, user.org_id, "ai_source", "pass" if ok else "fail",
-                             error_code=None if ok else (result.get("error_code") or "PROVIDER_ERROR"),
-                             message=None if ok else result.get("error"), detail=_call_detail(result),
-                             user_id=user.id)
+    """Gọi thử nguồn AI như `POST /providers/{id}/test` (v0.1.55), chọn nguồn theo `readiness` (v0.1.63, F035).
+
+    Ứng viên = nguồn `ready_to_probe` theo thứ tự chuỗi của Gen Owner (`core.gen`): đang bật, đã có khoá /
+    phiên chưa hết
+    hạn, không bị luật vai hay hộp riêng chặn; nguồn CLI chưa có model vẫn được thử để tự lưu model (F002).
+    Nguồn đầu hỏng
+    thì thử nguồn kế (tối đa `AI_MAX_PROBES`) — Gen dùng chuỗi, nên một nguồn chạy được là đủ; mọi nguồn
+    hỏng thì báo lỗi
+    của nguồn ĐẦU. Không ứng viên nào ⇒ ghi 'fail' kèm đúng lý do của `readiness` (không có nguồn, khoá,
+    phiên, model…)."""
+    states = await readiness.source_states(db, user.org_id, readiness.READY_ROLE)
+    cands = [st for st in states if st["ready_to_probe"]]
+    if not cands:
+        verdict = readiness.explain(states)
+        return await boss.record(db, user.org_id, "ai_source", "fail", error_code=boss.ai_error_code(verdict),
+                                 message=verdict["reason_vi"], user_id=user.id)
+    first_fail: tuple[dict[str, Any], dict[str, Any]] | None = None
+    for st in cands[:AI_MAX_PROBES]:
+        p = SimpleNamespace(id=uuid.UUID(st["provider_id"]), name=st["name"])
+        try:
+            result = await _probe(request, db, user, p, st["kind"])
+        except ApiError:
+            if first_fail is None:
+                raise                       # hạn mức gọi thử ngay từ nguồn đầu: như trước (429 → báo "tạm")
+            break                           # đã có lỗi thật của nguồn trước: giữ nó, đừng che bằng lỗi hạn mức
+        if result["ok"]:
+            detail = _call_detail(result, st["provider_id"])
+            return await boss.record(db, user.org_id, "ai_source", "pass", detail=detail, user_id=user.id)
+        if result.get("error_code") in TRANSIENT_CODES:
+            return transient("ai_source", str(result["error_code"]), result.get("error"))
+        if first_fail is None:
+            first_fail = (st, result)
+    assert first_fail is not None
+    st, result = first_fail
+    code = result.get("error_code") or "PROVIDER_ERROR"
+    return await boss.record(db, user.org_id, "ai_source", "fail", error_code=code, message=result.get("error"),
+                             detail=_call_detail(result, st["provider_id"]), user_id=user.id)
 
 
 async def _adopt_existing_claude_login(db: AsyncSession, user: service.CurrentUser, result: dict[str, Any]) -> None:
