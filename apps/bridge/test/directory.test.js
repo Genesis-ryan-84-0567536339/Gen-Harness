@@ -123,7 +123,7 @@ test('directory.sync (nút "Cập nhật danh sách nhóm") và chu kỳ chạm 
   let scans = 0;
   const real = api.getAllGroups;
   api.getAllGroups = async () => { scans += 1; await tick(20); return real(); };
-  const { bus, mgr } = await loginZalo(api);
+  const { bus, mgr } = await loginZalo(api, { manualMinGapMs: 0 });
   await waitFor(() => bus.of(STREAMS.directory, 'groups')[0]);
   const before = scans;
   await Promise.all([
@@ -197,7 +197,7 @@ test('lượt quét lỗi ⇒ lùi lịch gấp đôi chu kỳ mỗi lần (tố
   const real = api.getAllGroups;
   let fail = true;
   api.getAllGroups = async () => { if (fail) throw new Error('429'); return real(); };
-  const env = await loginZalo(api, { directoryMs: 2 * 60 * 60 * 1000 });
+  const env = await loginZalo(api, { directoryMs: 2 * 60 * 60 * 1000, manualMinGapMs: 0, discoverMinGapMs: 0 });
   const s = env.mgr.sessions.get('zalo:s1');
   await waitFor(() => s.syncFailures === 1);
   assert.equal(s.nextSyncDelayMs, 4 * 60 * 60 * 1000);
@@ -210,5 +210,81 @@ test('lượt quét lỗi ⇒ lùi lịch gấp đôi chu kỳ mỗi lần (tố
   await env.mgr.syncDirectory(s, 'manual');
   assert.equal(s.syncFailures, 0);
   assert.equal(s.nextSyncDelayMs, 2 * 60 * 60 * 1000);
+  env.mgr.shutdown();
+});
+
+// ── P3 (review v0.1.65): giãn cách thật giữa các lượt quét, tính từ lúc BẮT ĐẦU ──
+
+const countingApi = () => {
+  const api = makeZaloApi({ groups: GROUPS });
+  const real = api.getAllGroups;
+  const box = { scans: 0, fail: false };
+  api.getAllGroups = async () => { box.scans += 1; if (box.fail) throw new Error('429'); return real(); };
+  return { api, box };
+};
+
+test('nối lại sau mất mạng (adapter báo active lần nữa) KHÔNG quét ngay: phải đủ giãn cách', async () => {
+  const { api, box } = countingApi();
+  const env = await loginZalo(api);
+  await waitFor(() => env.bus.of(STREAMS.directory, 'groups')[0]);
+  assert.equal(box.scans, 1);
+  const s = env.mgr.sessions.get('zalo:s1');
+  s.adapter.emit('active', { account: { id: '900', name: 'A' }, credential: { imei: 'i', cookie: [], userAgent: 'u' } });
+  await tick(40);
+  assert.equal(box.scans, 1);
+  env.mgr.shutdown();
+});
+
+test('lastSyncAt đặt lúc BẮT ĐẦU: lượt lỗi vẫn tính giãn cách (không quét lại ngay khi lỗi)', async () => {
+  const { api, box } = countingApi();
+  box.fail = true;
+  let t = 1_000_000;
+  const env = await loginZalo(api, { now: () => t });
+  const s = env.mgr.sessions.get('zalo:s1');
+  await waitFor(() => s.syncFailures === 1);
+  assert.equal(s.lastSyncAt, 1_000_000);
+  await env.mgr.syncDirectory(s, 'discover');
+  await env.mgr.syncDirectory(s, 'login');
+  assert.equal(box.scans, 1); // trong giãn cách 10 phút
+  t += 10 * 60 * 1000;
+  await env.mgr.syncDirectory(s, 'discover');
+  assert.equal(box.scans, 1); // đang lùi lịch vì lỗi (4 giờ): nhóm mới / nối lại cũng chờ hết chu kỳ lùi
+  t += 4 * 60 * 60 * 1000;
+  box.fail = false;
+  await env.mgr.syncDirectory(s, 'discover');
+  assert.equal(box.scans, 2);
+  assert.equal(s.syncFailures, 0);
+  env.mgr.shutdown();
+});
+
+test('nút «Cập nhật danh sách nhóm»: giãn 5 phút từ lần quét trước, hết giãn thì quét', async () => {
+  const { api, box } = countingApi();
+  let t = 5_000_000;
+  const env = await loginZalo(api, { now: () => t });
+  await waitFor(() => env.bus.of(STREAMS.directory, 'groups')[0]);
+  const ctrl = () => env.mgr.handleControl(ctl('directory.sync', { channel: 'zalo', session_id: 's1' }));
+  await ctrl();
+  await ctrl();
+  assert.equal(box.scans, 1); // bấm dồn ngay sau lượt đăng nhập: bỏ qua
+  t += 5 * 60 * 1000 - 1;
+  await ctrl();
+  assert.equal(box.scans, 1);
+  t += 1;
+  await ctrl();
+  assert.equal(box.scans, 2);
+  env.mgr.shutdown();
+});
+
+test('hẹn quét lại sau phát hiện nhóm mới tính lại lúc tới hạn: lượt quét khác chạy xen giữa thì không quét thừa', async () => {
+  const { api, box } = countingApi();
+  const env = await loginZalo(api, { discoverDelayMs: 5, discoverMinGapMs: 300, manualMinGapMs: 0 });
+  await waitFor(() => env.bus.of(STREAMS.directory, 'groups')[0]);
+  api.listener.emit('message', zaloMessage({ threadId: 'G8', msgId: '81' }));
+  await waitFor(() => env.bus.of(STREAMS.directory, 'group.discovered').length === 1);
+  await tick(60);
+  await env.mgr.handleControl(ctl('directory.sync', { channel: 'zalo', session_id: 's1' })); // quét tay xen giữa
+  assert.equal(box.scans, 2);
+  await tick(450); // quá hạn hẹn cũ: lượt quét tay đã thấy nhóm mới ⇒ không quét thừa
+  assert.equal(box.scans, 2);
   env.mgr.shutdown();
 });

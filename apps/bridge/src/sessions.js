@@ -13,6 +13,10 @@ export const CREDENTIAL_COALESCE_MS = 5000;
 export const DIRECTORY_MS = 2 * 60 * 60 * 1000;
 export const DISCOVER_DELAY_MS = 5000;
 export const DISCOVER_MIN_GAP_MS = 10 * 60 * 1000;
+// Mọi lượt quét (chu kỳ, nhóm mới, nối lại sau mất mạng) cách lần BẮT ĐẦU trước ít nhất DISCOVER_MIN_GAP_MS — trừ lần đầu
+// sau đăng nhập. Nút «Cập nhật danh sách nhóm» do Sếp bấm nên giãn ngắn hơn (5 phút) nhưng vẫn có: bấm dồn không
+// được biến thành dồn yêu cầu lên nền tảng.
+export const DIRECTORY_MANUAL_GAP_MS = 5 * 60 * 1000;
 // Lượt quét lỗi/thiếu (nền tảng từ chối, có thể là hãm tốc) ⇒ lùi lịch gấp đôi chu kỳ mỗi lần liên tiếp, tối đa 8 giờ.
 export const DIRECTORY_MAX_BACKOFF_MS = 8 * 60 * 60 * 1000;
 
@@ -30,10 +34,11 @@ export class SessionManager {
     heartbeatMs = 15000, directoryMs = DIRECTORY_MS, qrMax = QR_MAX,
     credentialCoalesceMs = CREDENTIAL_COALESCE_MS, now = Date.now,
     discoverDelayMs = DISCOVER_DELAY_MS, discoverMinGapMs = DISCOVER_MIN_GAP_MS,
+    manualMinGapMs = DIRECTORY_MANUAL_GAP_MS,
   }) {
     Object.assign(this, {
       bus, keyring, createAdapter, channels, log: logger, orgId, heartbeatMs, directoryMs, qrMax, credentialCoalesceMs, now,
-      discoverDelayMs, discoverMinGapMs,
+      discoverDelayMs, discoverMinGapMs, manualMinGapMs,
     });
     this.sessions = new Map();
     this.controlChains = new Map();
@@ -99,7 +104,7 @@ export class SessionManager {
         case 'session.close': return this.#close(channel, sessionId);
         case 'directory.sync': {
           const s = this.sessions.get(keyOf(channel, sessionId));
-          if (s?.state === 'active') await this.syncDirectory(s);
+          if (s?.state === 'active') await this.syncDirectory(s, 'manual');
           else this.log.warn('directory.sync cho phiên chưa hoạt động', { channel, session_id: sessionId });
           return undefined;
         }
@@ -143,7 +148,7 @@ export class SessionManager {
     const s = {
       key, channel, sessionId, adapter, state: 'starting', orgId: ctx.orgId, correlationId: ctx.correlationId,
       queued: 0, lastCredAt: 0, credTimer: null, dirTimer: null, inbound: 0, dropped: 0,
-      knownGroups: new Set(), discoverTimer: null, syncing: null, lastSyncAt: 0,
+      knownGroups: new Set(), discoverTimer: null, pendingDiscover: false, syncing: null, lastSyncAt: 0,
       syncFailures: 0, nextSyncDelayMs: this.directoryMs,
     };
     this.sessions.set(key, s);
@@ -189,7 +194,7 @@ export class SessionManager {
       clearTimeout(s.dirTimer); // nối lại sau mất mạng: không để lại bộ đếm cũ
       this.log.info('phiên hoạt động', base);
       this.#publish(STREAMS.status, 'session.active', { ...base, account, credential: blob }, s);
-      this.syncDirectory(s); // xong lượt này (kể cả lỗi) sẽ tự hẹn lượt kế tiếp
+      this.syncDirectory(s, 'login'); // lần đầu sau đăng nhập quét ngay; nối lại sau mất mạng thì phải đủ giãn cách
     });
     // Mất mạng/máy chủ nền tảng chưa tới: phiên vẫn còn (credential giữ nguyên), adapter tự thử lại. Báo lõi để thẻ kênh
     // nói đúng "đang nối lại" thay vì giữ "Đang kết nối"; ngừng heartbeat cho tới khi nối lại (session.active).
@@ -262,11 +267,22 @@ export class SessionManager {
       channel: s.channel, session_id: s.sessionId, group_id: gid, name: payload.group_name || '', member_count: null,
     }, s);
     this.log.info('phát hiện nhóm mới', { channel: s.channel, session_id: s.sessionId });
+    s.pendingDiscover = true;
+    this.#armDiscover(s);
+  }
+
+  /**
+   * Hẹn quét lại để lấy thành viên nhóm mới. Thời gian chờ tính lại LÚC TỚI HẠN (lượt quét khác có thể đã chạy xen
+   * giữa): còn trong giãn cách thì hẹn tiếp phần còn lại; lượt quét khác đã chạy sau lúc phát hiện thì không quét thừa.
+   */
+  #armDiscover(s) {
     if (s.state !== 'active' || s.discoverTimer) return;
-    const wait = Math.max(this.discoverDelayMs, s.lastSyncAt + this.discoverMinGapMs - this.now());
+    const wait = Math.max(this.discoverDelayMs, this.#syncWaitMs(s, 'discover'));
     s.discoverTimer = setTimeout(() => {
       s.discoverTimer = null;
-      this.syncDirectory(s);
+      if (s.state !== 'active' || !s.pendingDiscover) return;
+      if (this.#syncWaitMs(s, 'discover') > 0) { this.#armDiscover(s); return; }
+      this.syncDirectory(s, 'discover');
     }, wait);
     s.discoverTimer.unref?.();
   }
@@ -295,10 +311,41 @@ export class SessionManager {
     }
   }
 
+  /**
+   * Chu kỳ quét hiện tại: chu kỳ gốc, gấp đôi mỗi lần lỗi liên tiếp, tối đa 8 giờ (không bao giờ ngắn hơn chu kỳ gốc).
+   */
+  #intervalMs(s) {
+    return Math.min(this.directoryMs * 2 ** s.syncFailures, Math.max(DIRECTORY_MAX_BACKOFF_MS, this.directoryMs));
+  }
+
+  /**
+   * Còn phải chờ bao lâu (ms) mới được quét tiếp. 0 = quét được ngay. Giãn cách tính từ lúc BẮT ĐẦU lượt quét trước
+   * (kể cả lượt lỗi); lần đầu sau đăng nhập (chưa quét lần nào) không phải chờ.
+   * Nguồn `manual` (nút của Sếp) giãn ngắn; các nguồn còn lại giãn dài hơn, và đang lùi lịch vì lỗi thì nhóm mới /
+   * nối lại cũng chờ hết chu kỳ lùi — không hỏi dồn nền tảng đang từ chối.
+   */
+  #syncWaitMs(s, source) {
+    if (!s.lastSyncAt) return 0;
+    let gap = this.discoverMinGapMs;
+    if (source === 'manual') gap = this.manualMinGapMs;
+    else if (source !== 'timer' && s.syncFailures > 0) gap = Math.max(gap, this.#intervalMs(s));
+    return Math.max(0, s.lastSyncAt + gap - this.now());
+  }
+
   /** Quét danh bạ đầy đủ. Hai lệnh gần nhau (chu kỳ + nút làm mới) dùng chung MỘT lượt quét. */
-  syncDirectory(s) {
+  syncDirectory(s, source = 'timer') {
     if (s.state !== 'active') return Promise.resolve();
     if (s.syncing) return s.syncing;
+    const wait = this.#syncWaitMs(s, source);
+    if (wait > 0) {
+      this.log.info('chưa đủ giãn cách giữa hai lượt quét danh bạ — bỏ qua', {
+        channel: s.channel, session_id: s.sessionId, source, wait_ms: wait,
+      });
+      if (source !== 'manual') this.#scheduleSync(s);
+      return Promise.resolve();
+    }
+    s.lastSyncAt = this.now(); // lúc BẮT ĐẦU (kể cả lượt lỗi) — giãn cách thật, không thể "quét lại ngay" khi lỗi
+    s.pendingDiscover = false; // lượt này sẽ thấy mọi nhóm đã phát hiện trước đó
     s.syncing = this.#syncDirectory(s).finally(() => {
       s.syncing = null;
       this.#scheduleSync(s);
@@ -306,13 +353,17 @@ export class SessionManager {
     return s.syncing;
   }
 
-  /** Hẹn lượt quét định kỳ kế tiếp: chu kỳ gốc khi lượt trước đủ, lùi gấp đôi mỗi lần lỗi liên tiếp (tối đa 8 giờ). */
+  /**
+   * Hẹn lượt quét định kỳ kế tiếp: cách lần BẮT ĐẦU trước đúng một chu kỳ (chu kỳ gốc khi lượt trước đủ, lùi gấp đôi mỗi
+   * lần lỗi liên tiếp — tối đa 8 giờ), và không sớm hơn giãn cách tối thiểu.
+   */
   #scheduleSync(s) {
     clearTimeout(s.dirTimer);
     s.dirTimer = null;
     if (s.state !== 'active') return;
-    s.nextSyncDelayMs = Math.min(this.directoryMs * 2 ** s.syncFailures, Math.max(DIRECTORY_MAX_BACKOFF_MS, this.directoryMs));
-    s.dirTimer = setTimeout(() => { s.dirTimer = null; this.syncDirectory(s); }, s.nextSyncDelayMs);
+    s.nextSyncDelayMs = this.#intervalMs(s);
+    const wait = Math.max(this.#syncWaitMs(s, 'timer'), s.lastSyncAt + s.nextSyncDelayMs - this.now());
+    s.dirTimer = setTimeout(() => { s.dirTimer = null; this.syncDirectory(s, 'timer'); }, wait);
     s.dirTimer.unref?.();
   }
 
@@ -321,7 +372,6 @@ export class SessionManager {
     try {
       const groups = await s.adapter.syncGroups();
       if (s.state !== 'active') return;
-      s.lastSyncAt = this.now();
       s.knownGroups = new Set(groups.map((g) => String(g.external_id)));
       // `groups_complete`: lượt quét không lỗi và có nhóm ⇒ lõi mới được coi nhóm vắng là "đã rời".
       ok = s.adapter.lastSyncComplete !== false;

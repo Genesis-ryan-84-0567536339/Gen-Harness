@@ -168,7 +168,7 @@ test('logout giữa lúc chờ quét QR → huỷ QR, không phát expired', asy
 
 test('đồng bộ danh bạ: nhóm, số thành viên, tên thành viên; directory.sync theo lệnh', async () => {
   const api = makeZaloApi({ groups: { G1: { name: 'Nhóm bán hàng', totalMember: 2, memVerList: ['111_0', '222_3'] } } });
-  const { bus, mgr, keyring } = await setup({ zalo: makeZaloLib({ api }) });
+  const { bus, mgr, keyring } = await setup({ zalo: makeZaloLib({ api }), manualMinGapMs: 0 });
   const blob = keyring.encryptTransport(JSON.stringify({ imei: 'i', cookie: [], userAgent: 'u' }), 'zalo:s1');
   await mgr.handleControl(ctl('session.login', { channel: 'zalo', session_id: 's1', credential: blob }));
   const g = await waitFor(() => bus.of(STREAMS.directory, 'groups')[0]);
