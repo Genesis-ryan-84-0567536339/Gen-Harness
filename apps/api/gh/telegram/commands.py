@@ -437,6 +437,14 @@ async def handle(cmd: inbound.TelegramCommand, ctx: Context) -> Reply:
     """Trả (chữ trả lời, nút link). Nút chỉ có khi vừa soạn đề xuất: "Mở Console để Xác nhận". Không ném."""
     await _log(ctx, cmd, inbound.ACTION_COMMAND)
     try:
+        # Mọi lệnh (kể cả chỉ đọc) cần Owner Console đã ghép CÒN hiệu lực (đang hoạt động, còn vai Owner); chủ bị khoá/
+        # gỡ vai/chưa có owner_user_id ⇒ chỉ đường ghép lại, không đọc dữ liệu nào.
+        async with ctx.sm() as db:
+            await _set_org(db, ctx.org_id)
+            owner = await owner_user(db, ctx.org_id, ctx.owner_user_id)
+            await db.rollback()
+        if owner is None:
+            return NO_OWNER, []
         if cmd.kind in ("start", "tro_giup", "help"):
             return HELP, []
         if cmd.kind == "hom_nay":

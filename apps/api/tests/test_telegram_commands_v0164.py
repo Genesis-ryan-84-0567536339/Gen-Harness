@@ -238,6 +238,34 @@ async def test_owner_not_found(owner_api: Api, bot: FakeBot, redis: Any) -> None
     assert (await commands.handle(cmd("hoi", "chào"), ctx)) == (commands.NO_OWNER, [])
 
 
+@pytest.mark.parametrize("kind", ["start", "hom_nay", "viec", "suc_khoe", "hoi", "nhap", "xoa_het"])
+async def test_every_command_is_blocked_when_owner_is_gone(
+    owner_api: Api, bot: FakeBot, redis: Any, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    """P3 review v0.1.64: /hom_nay /viec /suc_khoe không kiểm owner_user còn hiệu lực ⇒ chủ bị khoá vẫn đọc được."""
+    router = Router("không được gọi")
+    ctx = await ctx_for(owner_api, bot, redis, router)
+    called: list[str] = []
+
+    async def spy(*a: Any, **k: Any) -> list[Any]:
+        called.append("data")
+        return []
+
+    monkeypatch.setattr(briefing, "collect", spy)
+    monkeypatch.setattr(health, "active_issues", spy)
+    # (1) chưa có owner_user_id (bản ghép cũ / đã gỡ)
+    owner_id = ctx.owner_user_id
+    ctx.owner_user_id = None
+    assert (await commands.handle(cmd(kind, "chào"), ctx)) == (commands.NO_OWNER, [])
+    # (2) owner_user_id còn nhưng tài khoản đã bị khoá
+    ctx.owner_user_id = owner_id
+    async with admin_sessionmaker()() as s:
+        await s.execute(text("UPDATE core.users SET is_active = false WHERE id = :u"), {"u": owner_id})
+        await s.commit()
+    assert (await commands.handle(cmd(kind, "chào"), ctx)) == (commands.NO_OWNER, [])
+    assert called == [] and router.calls == []
+
+
 # ─── /nhap — chỉ ĐỀ XUẤT ─────────────────────────────────────────────────────
 
 REMINDER = {
