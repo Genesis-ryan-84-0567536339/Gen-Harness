@@ -547,6 +547,22 @@ describe('<ApiScreen> bảng gán model ở chế độ tiêu chuẩn', () => {
     expect(within(done).getByTestId('binding-effort-core.refinery')).toHaveTextContent('—');
   });
 
+  it('v0.1.67 (F016): dòng gán có inactive_reason ⇒ chip nói thẳng "đang dùng Chuẩn"; dòng bình thường không có chip', async () => {
+    const page: BindingsPage = {
+      ...BINDINGS,
+      items: BINDINGS.items.map((it) =>
+        it.agent_key === 'core.refinery' && it.binding
+          ? { ...it, binding: { ...it.binding, inactive_reason: 'Nguồn đã tắt — agent đang dùng Chuẩn' } }
+          : it,
+      ),
+    };
+    mockFetch((c) => (c.url.includes('/agents/bindings') && c.method === 'GET' ? json(200, page) : apiHandler(c)));
+    renderUi(<ApiScreen />);
+    const done = (await screen.findByText('Sàng lọc & suy luận chính', { selector: '.apm-table__agent' })).closest('tr') as HTMLElement;
+    expect(within(done).getByTestId('binding-inactive-core.refinery')).toHaveTextContent('Nguồn đã tắt — agent đang dùng Chuẩn');
+    expect(screen.queryByTestId('binding-inactive-core.gen')).toBeNull();
+  });
+
   it('nhiệt độ / ngữ cảnh và hạn mức model nằm trong khối "Nâng cao" (đóng sẵn), không còn cột ở bảng chính', async () => {
     mockFetch((c) => apiHandler(c));
     renderUi(<ApiScreen />);

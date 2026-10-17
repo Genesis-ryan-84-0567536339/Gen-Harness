@@ -435,6 +435,14 @@ function BindingsPanel({ canManage }: { canManage: boolean }) {
                       {agyBlockedReason(slot)} — dòng này đang chạy bằng model khác, hãy chọn lại model.
                     </div>
                   ) : null}
+                  {/* v0.1.67 (F016): dòng gán còn đó nhưng nguồn / model đã tắt ⇒ máy chủ chạy bằng Chuẩn — nói thẳng. Lý do
+                      agy bị chặn đã có ghi chú ngay trên (tránh hai câu cho một chuyện). */}
+                  {slot.binding?.inactive_reason &&
+                  !(agyBlockedReason(slot) && isAgyModel(bindings.data.models.find((m) => m.id === slot.binding?.model_id) ?? {})) ? (
+                    <div className="muted-note" role="note" data-testid={`binding-inactive-${slot.agent_key}`}>
+                      {slot.binding.inactive_reason}
+                    </div>
+                  ) : null}
                   {/* v0.1.55: chưa gán ⇒ "Mặc định" (hồ sơ tiêu chuẩn theo vai); Sếp đã gán ⇒ "Đã đổi". Máy chủ cũ: không chip. */}
                   {slot.source ? (
                     <span style={{ marginLeft: 6 }}>
