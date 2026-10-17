@@ -1154,13 +1154,19 @@ async def _eval_budget(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
     from gh import ai_cost
 
     budget = await ai_cost.get_budget(db, org_id)
-    if budget is None:
-        await clear(db, org_id, "ai.budget")
-        return
     day = ai_cost.today_vn(now)
+    # Đóng sự cố do Sếp nâng/bỏ trần ngay trong ngày vượt ⇒ "Đã xử lý"; sự cố của NGÀY CŨ hết vì sang ngày mới (tổng chi về 0)
+    # là tự hết, không ai xử lý ⇒ chỉ đánh dấu đã đọc (fingerprint của sự cố = ngày VN lúc mở).
+    opened_day = (await db.execute(text("""SELECT fingerprint FROM ops.health_alerts
+                                           WHERE org_id = :o AND key = 'ai.budget' AND cleared_at IS NULL"""),
+                                   {"o": org_id})).scalar_one_or_none()
+    handled = opened_day == day.isoformat()
+    if budget is None:
+        await clear(db, org_id, "ai.budget", label=handled)
+        return
     total = (await ai_cost.day_cost(db, org_id, day))["total_vnd"]
     if total <= budget:
-        await clear(db, org_id, "ai.budget")
+        await clear(db, org_id, "ai.budget", label=handled)
         return
     await raise_once(db, org_id, key="ai.budget", kind="ai.budget_exceeded", severity="warn",
                      fingerprint=day.isoformat(), title=f"Chi phí AI hôm nay vượt trần {ai_cost.fmt_vnd(budget)}",
