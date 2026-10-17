@@ -187,7 +187,7 @@ describe('applyEvent', () => {
     qc.setQueryData(qk2.raw({}), pages([row({ id: 'old' })]));
     qc.setQueryData(qk2.raw({ channel: 'whatsapp' }), pages([]));
     qc.setQueryData<Pipeline>(qk2.pipeline, {
-      channels_live: 4, groups_listening: 42, raw_total: 18412, raw_pending: 4204, interval_seconds: 900, count_threshold: 500, clean_total: 14208,
+      channels_live: 4, groups_listening: 42, raw_total: 18412, raw_pending: 4204, interval_seconds: 900, count_threshold: 500, clean_total: 14208, raw_error: 0,
     });
     applyEvent(qc, ev('raw.new', row({ id: 'new' })));
     applyEvent(qc, ev('raw.new', row({ id: 'new' })));
@@ -201,7 +201,7 @@ describe('applyEvent', () => {
   it('raw.state patches the row and decrements pending once', () => {
     qc.setQueryData(qk2.raw({}), pages([row()]));
     qc.setQueryData<Pipeline>(qk2.pipeline, {
-      channels_live: 4, groups_listening: 42, raw_total: 10, raw_pending: 5, interval_seconds: 900, count_threshold: 500, clean_total: 1,
+      channels_live: 4, groups_listening: 42, raw_total: 10, raw_pending: 5, interval_seconds: 900, count_threshold: 500, clean_total: 1, raw_error: 0,
     });
     applyEvent(qc, ev('raw.state', { id: 'r1', state: 'clean', label: 'AskedPrice', confidence: 0.94 }));
     const r = qc.getQueryData<Pages>(qk2.raw({}))!.pages[0].items[0];

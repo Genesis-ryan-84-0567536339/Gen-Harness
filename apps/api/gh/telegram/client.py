@@ -1,4 +1,8 @@
-"""HTTP tới Telegram Bot API chính thức (v0.1.44, F-8c) — chỉ ba lệnh: getMe, sendMessage, getUpdates.
+"""HTTP tới Telegram Bot API chính thức (v0.1.44, F-8c) — getMe, sendMessage, getUpdates.
+
+v0.1.64 (T1/T2, Telegram 2 chiều): thêm `poll_updates` (getUpdates có offset + long-poll, trả update thô để
+`gh.telegram.inbound` xác thực) và nút LINK cho `send_message` (`buttons` — chỉ nút mở link, KHÔNG BAO GIỜ nút gọi
+lại (callback): trên Telegram không có nút bấm làm gì ngoài mở Console).
 
 - Transport tiêm được (`app.state.telegram_transport` hoặc tham số) như `mcp_transport`; None = httpx thật.
 - URL chứa token bot (`/bot<token>/…`) ⇒ KHÔNG BAO GIỜ log/ném chuỗi có URL: mọi ngoại lệ httpx bị bắt và đổi thành
@@ -25,6 +29,10 @@ RATE_LIMITED = "TELEGRAM_RATE_LIMITED"
 UNREACHABLE = "TELEGRAM_UNREACHABLE"
 #: 400 không phải lỗi chat (vd văn bản rỗng) — chỉ hỏng đúng tin đó, không phải cấu hình.
 BAD_REQUEST = "TELEGRAM_BAD_REQUEST"
+#: 409 từ getUpdates — bot đang có webhook hoặc nơi khác đang nhận tin của cùng bot (v0.1.64).
+POLL_CONFLICT = "TELEGRAM_POLL_CONFLICT"
+#: Thời gian chờ HTTP của getUpdates = `timeout` long-poll + khoảng này.
+POLL_SLACK_S = 10.0
 
 
 def quiet_http_logs() -> None:
@@ -63,6 +71,8 @@ def _classify(status: int, body: Any) -> TelegramError:
         retry = params.get("retry_after") if isinstance(params, dict) else None
         ok = isinstance(retry, int) and not isinstance(retry, bool) and retry > 0
         return TelegramError(RATE_LIMITED, retry if ok else 30)
+    if status == 409:
+        return TelegramError(POLL_CONFLICT)
     if status == 400:
         return TelegramError(CHAT_NOT_FOUND if "chat not found" in desc else BAD_REQUEST)
     return TelegramError(UNREACHABLE)
@@ -73,9 +83,10 @@ class TelegramClient:
         self.transport = transport
         self.base = base.rstrip("/")
 
-    async def _call(self, token: str, method: str, payload: dict[str, Any] | None = None) -> Any:
+    async def _call(self, token: str, method: str, payload: dict[str, Any] | None = None, *,
+                    http_timeout: float = TIMEOUT_S) -> Any:
         try:
-            async with httpx.AsyncClient(transport=self.transport, timeout=TIMEOUT_S) as c:
+            async with httpx.AsyncClient(transport=self.transport, timeout=http_timeout) as c:
                 url = f"{self.base}/bot{token}/{method}"
                 r = await (c.post(url, json=payload) if payload is not None else c.get(url))
                 try:
@@ -92,9 +103,26 @@ class TelegramClient:
         result = await self._call(token, "getMe")
         return result if isinstance(result, dict) else {}
 
-    async def send_message(self, token: str, chat_id: str, text: str) -> None:
-        await self._call(token, "sendMessage", {"chat_id": chat_id, "text": text[:TEXT_MAX],
-                                                "disable_web_page_preview": True})
+    async def send_message(self, token: str, chat_id: str, text: str,
+                           buttons: list[tuple[str, str]] | None = None) -> None:
+        """`buttons` = [(chữ nút, URL)] — mỗi nút một hàng, CHỈ nút link (mở Console), không có nút gọi lại."""
+        payload: dict[str, Any] = {"chat_id": chat_id, "text": text[:TEXT_MAX], "disable_web_page_preview": True}
+        if buttons:
+            payload["reply_markup"] = {
+                "inline_keyboard": [[{"text": label[:64], "url": url}] for label, url in buttons]
+            }
+        await self._call(token, "sendMessage", payload)
+
+    async def poll_updates(
+        self, token: str, offset: int, *, timeout_s: int = 0, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """getUpdates có `offset` (xác nhận mọi update_id < offset) — update THÔ, chỉ loại `message`. `timeout_s` > 0 =
+        long-poll (Telegram giữ kết nối tới khi có tin hoặc hết giờ). Việc xác thực là của `gh.telegram.inbound`."""
+        result = await self._call(
+            token, "getUpdates",
+            {"offset": offset, "timeout": timeout_s, "limit": limit, "allowed_updates": ["message"]},
+            http_timeout=timeout_s + POLL_SLACK_S)
+        return [u for u in (result if isinstance(result, list) else []) if isinstance(u, dict)]
 
     async def get_updates(self, token: str) -> list[dict[str, Any]]:
         """Các chat RIÊNG (private) đã nhắn bot, mới nhất trước: [{chat_id, name, username}]. Không gửi `offset`

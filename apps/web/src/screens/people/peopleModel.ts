@@ -1,5 +1,5 @@
 /** Presentation helpers dùng chung cho 2 màn của cụm Con người & Chất lượng. */
-import type { CareScenarioStatus, PeopleReviewFull, ReviewBoard, Trend } from '@gen-harness/contracts';
+import type { CareScenarioStatus, DirRelation, PeopleReviewFull, PersonType, ProfilePatchBody, ReviewBoard, Trend } from '@gen-harness/contracts';
 // F-38 (v0.1.43): định nghĩa duy nhất ở lib/format.ts — re-export để các màn không phải đổi import.
 export { initialsOf, fmtVnd } from '../../lib/format';
 
@@ -46,12 +46,44 @@ export const ISSUE_KIND_LABEL: Record<string, string> = {
   abandoned_customer: 'Khách bị bỏ rơi',
 };
 
+/** v0.1.64 (F045): nhãn tiếng Việt của loại người (`core.persons.person_type`). */
+export const PERSON_TYPE_LABEL: Record<PersonType, string> = {
+  customer: 'Khách hàng',
+  partner: 'Đối tác',
+  staff: 'Nhân viên',
+  candidate: 'Ứng viên',
+  learner: 'Học viên',
+  supplier: 'Nhà cung cấp',
+  unknown: 'Chưa phân loại',
+};
+export const PERSON_TYPE_LIST = Object.keys(PERSON_TYPE_LABEL) as PersonType[];
+export function personTypeLabel(t: string | null | undefined): string {
+  return PERSON_TYPE_LABEL[(t ?? 'unknown') as PersonType] ?? PERSON_TYPE_LABEL.unknown;
+}
+
+/** Nút "Đánh dấu là nhân viên" ở hồ sơ: đặt loại = nhân viên và quan hệ = nhân sự của Sếp. */
+export function staffPatch(): ProfilePatchBody {
+  return { person_type: 'staff', relation_to_owner: 'staff' };
+}
+
+/** Hộp "Sửa loại người": chỉ gửi trường Sếp thật sự đổi (`null` = chưa chạm). */
+export function personTypePatch(
+  current: { type: string | null; relation: string | null },
+  pickedType: PersonType | null,
+  pickedRelation: DirRelation | null,
+): ProfilePatchBody {
+  const patch: ProfilePatchBody = {};
+  if (pickedType !== null && pickedType !== (current.type ?? 'unknown')) patch.person_type = pickedType;
+  if (pickedRelation !== null && pickedRelation !== current.relation) patch.relation_to_owner = pickedRelation;
+  return patch;
+}
+
 /**
- * v0.1.42: cách một người thành "nhân viên" (core.persons.person_type = 'staff') — chưa có ô sửa ở hồ sơ, chỉ qua
- * Quy tắc sàng lọc. Dùng ở Đội ngũ và ở trạng thái trống của Đánh giá con người / Chất lượng chăm sóc.
+ * v0.1.64 (F141): cách một người thành "nhân viên" — bấm "Đánh dấu là nhân viên" ở hồ sơ người. Dùng ở Đội ngũ và ở
+ * trạng thái trống của Đánh giá con người / Chất lượng chăm sóc.
  */
 export const STAFF_HOWTO =
-  'Một người thành nhân viên khi có loại "staff": tạo quy tắc ở Nâng cao › Tầng dữ liệu › Quy tắc sàng lọc với kết quả "person_type = staff" cho tin của nhân viên.';
+  'Để có nhân viên, mở hồ sơ của người đó (Khách & Nhóm › bấm vào tên) rồi bấm "Đánh dấu là nhân viên".';
 
 /**
  * v0.1.45 (F-60): nhãn cờ 'Đáng ngờ' của một dòng điểm — null khi không gắn cờ. `title` là lý do ngắn từ máy chủ

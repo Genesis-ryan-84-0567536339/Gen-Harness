@@ -13,9 +13,13 @@
  *   {testError:'TELEGRAM_BOT_BLOCKED'}` (hoặc chat_id 111) → lỗi theo mã; TELEGRAM_RATE_LIMITED là lỗi tạm (không ghi).
  * - Trực canh máy chủ: `seed {host:'key_mismatch'|'unsupported'|'failed'|'ok'}`.
  *
+ * v0.1.64 (2 chiều): `inbound` — `POST /notify/telegram/pair/start` (PIN) cấp mã 123456 (sống 10 phút), `seed {pairDone:true}`
+ *   giả lập Sếp đã gửi `/start 123456` cho bot (⇒ đã ghép + bật nhận tin); `PUT …/inbound {enabled}` (PIN; bật khi chưa ghép ⇒
+ *   409 TELEGRAM_NOT_PAIRED); `DELETE …/pair` (PIN) gỡ ghép. `seed {inboundError:'TELEGRAM_POLL_CONFLICT'}` giả lỗi vòng nhận tin.
+ *
  * Hook e2e: `POST /api/v1/__mock/p3/telegram/seed {…}`.
  */
-import type { BossCheck, TelegramConfig, TelegramHostStatus } from '@gen-harness/contracts';
+import type { BossCheck, TelegramConfig, TelegramHostStatus, TelegramInbound } from '@gen-harness/contracts';
 import type { P2Ctx } from './mock-phase2';
 
 export const TELEGRAM_TOKEN_RE = /^\d{5,12}:[A-Za-z0-9_-]{30,64}$/;
@@ -37,6 +41,11 @@ interface Seed {
   testError?: string | null;
   findChats?: 'some' | 'none';
   host?: 'ok' | 'key_mismatch' | 'unsupported' | 'failed';
+  /** v0.1.64: giả lập Sếp đã gửi `/start <mã>` cho bot (cần đang có mã ghép sống). */
+  pairDone?: boolean;
+  /** v0.1.64: đã ghép sẵn (+ bật nhận tin). */
+  paired?: boolean;
+  inboundError?: string | null;
 }
 
 const MESSAGES: Record<string, string> = {
@@ -46,6 +55,7 @@ const MESSAGES: Record<string, string> = {
   TELEGRAM_BOT_BLOCKED: 'Forbidden: bot was blocked by the user',
   TELEGRAM_RATE_LIMITED: 'Too Many Requests: retry after 30',
   TELEGRAM_UNREACHABLE: 'Không kết nối được api.telegram.org',
+  TELEGRAM_POLL_CONFLICT: 'Conflict: terminated by other getUpdates request',
 };
 
 /** Token giả CHỈ cho test (vector cố định của hợp đồng) — không phải bot thật. */
@@ -68,6 +78,25 @@ export function createMock(opts: Opts) {
     findChats: 'some' as 'some' | 'none',
     host: 'ok' as NonNullable<Seed['host']>,
     hostTest: null as TelegramHostStatus['test'],
+    // v0.1.64 — Telegram 2 chiều
+    paired: null as { masked: string; at: string } | null,
+    inboundEnabled: false,
+    pairExpires: null as number | null,
+    inboundError: null as string | null,
+  };
+
+  const inboundView = (): TelegramInbound => {
+    const pending = s.pairExpires !== null && s.pairExpires > Date.now();
+    return {
+      enabled: !!s.paired && s.inboundEnabled,
+      paired: !!s.paired,
+      owner_masked: s.paired?.masked ?? null,
+      paired_at: s.paired?.at ?? null,
+      pair_pending: pending,
+      pair_expires_at: pending ? new Date(s.pairExpires as number).toISOString() : null,
+      error_code: s.inboundError,
+      message: s.inboundError ? (MESSAGES[s.inboundError] ?? s.inboundError) : null,
+    };
   };
 
   const hostView = (): TelegramHostStatus => {
@@ -99,6 +128,7 @@ export function createMock(opts: Opts) {
     updated_at: s.updatedAt,
     last_test: s.configured ? s.lastTest : null,
     host: hostView(),
+    inbound: inboundView(),
   });
 
   /** Một lượt Gửi thử (dùng chung cho `/notify/telegram/test` và `/boss-checks/telegram/run`). */
@@ -141,6 +171,8 @@ export function createMock(opts: Opts) {
       // Như api: token/chat_id THẬT SỰ đổi (hoặc nối lần đầu) ⇒ kết quả Gửi thử cũ bị xoá (cả dòng 6); chỉ bật/tắt
       // bản tin/nhắc việc hoặc "Lưu lại" cùng cấu hình ⇒ giữ.
       const changed = !s.configured || (!!token && token !== s.token) || nextChat !== s.chatId;
+      // Như api: đổi sang BOT khác ⇒ gỡ ghép + tắt nhận tin (bot mới là ranh giới tin cậy mới).
+      if (token && s.token && token !== s.token) Object.assign(s, { paired: null, inboundEnabled: false, pairExpires: null });
       if (token) s.token = token;
       s.chatId = nextChat;
       if (changed) {
@@ -157,7 +189,7 @@ export function createMock(opts: Opts) {
     }
     if (p === '/notify/telegram' && m === 'DELETE') {
       if (needPin(ctx)) return true;
-      Object.assign(s, { configured: false, token: null, chatId: null, enabled: false, updatedAt: now(), lastTest: null, hostTest: null });
+      Object.assign(s, { configured: false, token: null, chatId: null, enabled: false, updatedAt: now(), lastTest: null, hostTest: null, paired: null, inboundEnabled: false, pairExpires: null });
       opts.forget?.();
       return reply(200, view());
     }
@@ -167,6 +199,24 @@ export function createMock(opts: Opts) {
       if (token.includes('REJECT')) return reply(200, { chats: [], error_code: 'TELEGRAM_TOKEN_REJECTED', message: MESSAGES.TELEGRAM_TOKEN_REJECTED });
       const chats = s.findChats === 'none' ? [] : [{ chat_id: '987654321', name: 'Nguyễn Văn A', username: 'nva_test' }];
       return reply(200, { chats, error_code: null, message: null });
+    }
+    if (p === '/notify/telegram/pair/start' && m === 'POST') {
+      if (needPin(ctx)) return true;
+      if (!s.configured) return problem(409, 'TELEGRAM_NOT_CONFIGURED', 'Chưa nối Telegram — lưu token bot trước rồi mới ghép');
+      s.pairExpires = Date.now() + 10 * 60_000;
+      return reply(200, { ...view(), pair: { code: '123456', expires_at: new Date(s.pairExpires).toISOString(), bot_username: BOT } });
+    }
+    if (p === '/notify/telegram/inbound' && m === 'PUT') {
+      if (needPin(ctx)) return true;
+      const enabled = body.enabled === true;
+      if (enabled && !s.paired) return problem(409, 'TELEGRAM_NOT_PAIRED', 'Chưa ghép tài khoản Telegram của Sếp — bấm Ghép Telegram trước');
+      s.inboundEnabled = enabled;
+      return reply(200, view());
+    }
+    if (p === '/notify/telegram/pair' && m === 'DELETE') {
+      if (needPin(ctx)) return true;
+      Object.assign(s, { paired: null, inboundEnabled: false, pairExpires: null });
+      return reply(200, view());
     }
     if (p === '/notify/telegram/test' && m === 'POST') {
       const o = runTest();
@@ -183,6 +233,11 @@ export function createMock(opts: Opts) {
     if (b.testError !== undefined) s.testError = b.testError;
     if (b.findChats) s.findChats = b.findChats;
     if (b.host) s.host = b.host;
+    if (b.paired === true) Object.assign(s, { paired: { masked: '•••4321', at: now() }, inboundEnabled: true, pairExpires: null });
+    if (b.pairDone === true && s.pairExpires !== null && s.pairExpires > Date.now()) {
+      Object.assign(s, { paired: { masked: '•••4321', at: now() }, inboundEnabled: true, pairExpires: null });
+    }
+    if (b.inboundError !== undefined) s.inboundError = b.inboundError;
     return view();
   };
 
