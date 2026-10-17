@@ -255,8 +255,8 @@ def _quiet_note(r: Any, decisions: list[dict[str, Any]], can_see_decisions: bool
     if r.group_id is None and r.listen_mode == "silent":
         return "Tin riêng ở chế độ lưu im lặng — không đưa cho agent trực"
     if r.group_id is not None and (r.listen_mode or r.group_mode_now) == "silent":
-        # QD 17/10: nhóm Lắng nghe im lặng chỉ lưu — không bao giờ trả lời, kể cả khi được tag.
-        return "Nhóm ở chế độ Lắng nghe im lặng — chỉ lưu, không bao giờ trả lời (kể cả khi được tag)"
+        # QD 17/10: nhóm Lắng nghe im lặng chỉ lưu + sàng lọc; không vào ứng viên agent trực (không có quyết định nào).
+        return "Nhóm Lắng nghe im lặng — chỉ lưu và sàng lọc, không đưa cho agent trực"
     return "Chưa có agent nào quyết định cho tin này"
 
 
