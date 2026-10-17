@@ -239,22 +239,16 @@ async def test_lower_levels_downgrade(w, db, redis) -> None:  # type: ignore[no-
     assert await agent_drafts(db) == []
 
 
-async def test_silent_listening_group_never_drafts_even_when_tagged(w, db, redis) -> None:  # type: ignore[no-untyped-def]
-    """QD 17/10: nhóm «Lắng nghe im lặng» không bao giờ trả lời, tin tag cũng vậy (xem test_qd_17_10_nghe_im_lang)."""
+async def test_silent_listening_group_is_not_given_to_the_agent_even_when_tagged(w, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """QD 17/10 + mặc định #22: nhóm «Lắng nghe im lặng» không bao giờ trả lời, tin tag cũng vậy — và không vào ứng viên
+    agent trực nên không tốn lượt LLM (xem test_qd_17_10_nghe_im_lang)."""
     a = await make_agent(db, w)
     await db.execute(text("UPDATE core.groups SET listen_mode = 'silent' WHERE id = :g"), {"g": w["g1"]})
     await db.commit()
     plain, tagged = await refine(w, redis, msg(BUY), msg(BUY, sender="u2", mentions=True))
     router = decide("draft")
     await hook(w, redis, router, [plain, tagged])
-    got = {d.trigger_unit_id: d for d in await decisions(db, a)}
-    for u in (plain, tagged):
-        d = got[u]
-        assert (d.decision, d.requested, d.outcome, d.draft_id) == ("silent", "draft", "blocked", None)
-        assert "không bao giờ trả lời" in d.rationale
-    assert await agent_drafts(db) == []
-    # Tin tag vẫn được xử lý trước, nhưng model không bị giục trả lời.
-    assert all("được TAG" not in c[-1].content for c in router.calls)
+    assert router.calls == [] and await decisions(db, a) == [] and await agent_drafts(db) == []
 
 
 async def test_one_pending_draft_per_place(w, db, redis) -> None:  # type: ignore[no-untyped-def]

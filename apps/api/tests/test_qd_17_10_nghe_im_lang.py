@@ -4,10 +4,12 @@ lắng nghe trong im lặng, KHÔNG trả lời cho dù được tag.»
 
 - Nhóm mới (mọi bản cài, kể cả cũ): mặc định `silent` — lưu hết tin, không trả lời. `new_group_mode` thiếu ⇒ silent;
   `ask` (pending + hộp hỏi) / `off` vẫn chọn được. Nhóm đã có không bị đổi (nhóm cũ đang `off` giữ nguyên).
-- `silent` KHÔNG BAO GIỜ trả lời, kể cả được tag: agent trực chỉ được `silent`/`note`, không `suggest`/`draft`/`send`.
+- `silent` KHÔNG BAO GIỜ trả lời, kể cả được tag. Mặc định (sổ câu hỏi #22): nhóm `silent` không vào ứng viên agent trực
+  (không tốn LLM, sàng lọc vẫn chạy); phòng thủ còn lại: `apply` đọc lại chế độ nhóm và chặn `suggest`/`draft`/`send`.
   `tagged_only` («Nghe hết, chỉ trả lời khi được tag») giữ nguyên hành vi trả lời khi được tag.
 - Thẻ kênh báo «N nhóm mới đã vào Lắng nghe im lặng» (`new_groups_silent`) cho tới khi Sếp bấm «Đã biết».
-(Khi gộp lên nhánh có `test_quyet_dinh_sep.py` (lưới L6), các khẳng định này là QD 17/10 của lưới đó.)"""
+(Khi gộp lên nhánh có `test_quyet_dinh_sep.py` (lưới L6), lưới đó phải theo đúng mặc định #22: nhóm `silent` không có
+quyết định agent nào — không còn hàng `blocked` / `noted`.)"""
 
 from typing import Any
 
@@ -122,40 +124,40 @@ def test_qd1710_allowed_decisions_in_silent_group_are_silent_and_note_at_every_l
 
 @pytest.mark.parametrize("tagged", [False, True])
 @pytest.mark.parametrize("choice", ["suggest", "draft", "send"])
-async def test_qd1710_silent_group_never_replies_even_when_tagged(w, db, redis, choice: str, tagged: bool) -> None:  # type: ignore[no-untyped-def]
+async def test_qd1710_silent_group_is_not_given_to_the_duty_agent(w, db, redis, choice: str, tagged: bool) -> None:  # type: ignore[no-untyped-def]
+    """Mặc định sổ câu hỏi #22 (review v0.1.65): nhóm «Lắng nghe im lặng» KHÔNG vào ứng viên agent trực — không tốn một
+    lượt LLM chỉ để ra silent/note, kể cả khi được tag; sàng lọc vẫn chạy (đơn vị ý nghĩa vẫn được tạo)."""
     a = await make_agent(db, w, level=6)
     await db.execute(text("UPDATE core.groups SET listen_mode = 'silent' WHERE id = :g"), {"g": w["g1"]})
     await db.commit()
     [u] = await refine(w, redis, msg(BUY, mentions=tagged))
-    await hook(w, redis, decide(choice), [u])
-    [d] = await decisions(db, a)
-    assert (d.decision, d.requested, d.outcome, d.draft_id) == ("silent", choice, "blocked", None)
-    assert "không bao giờ" in d.rationale and "kể cả khi được tag" in d.rationale
-    assert await agent_drafts(db) == [] and await redis.xlen("gh.bridge.outbound") == 0
-
-
-async def test_qd1710_silent_group_can_still_note_even_when_tagged(w, db, redis) -> None:  # type: ignore[no-untyped-def]
-    a = await make_agent(db, w, level=6)
-    await db.execute(text("UPDATE core.groups SET listen_mode = 'silent' WHERE id = :g"), {"g": w["g1"]})
-    await db.commit()
-    [u] = await refine(w, redis, msg(BUY, mentions=True))
-    await hook(w, redis, decide("note"), [u])
-    [d] = await decisions(db, a)
-    assert (d.decision, d.outcome) == ("note", "noted") and await agent_drafts(db) == []
-
-
-async def test_qd1710_prompt_says_never_reply_even_if_tagged_and_offers_only_silent_note(w, db, redis) -> None:  # type: ignore[no-untyped-def]
-    await make_agent(db, w, level=6)
-    await db.execute(text("UPDATE core.groups SET listen_mode = 'silent' WHERE id = :g"), {"g": w["g1"]})
-    await db.commit()
-    [u] = await refine(w, redis, msg(BUY, mentions=True))
-    router = decide("silent", refs=())
+    n_units = (await db.execute(text("SELECT count(*) FROM clean.meaning_units WHERE id = :u"), {"u": u})).scalar_one()
+    assert n_units == 1
+    router = decide(choice)
     await hook(w, redis, router, [u])
-    system, user = router.calls[0][0].content, router.calls[0][-1].content
-    assert "Được chọn: silent, note." in system
-    assert "không bao giờ soạn tin trả lời, kể cả khi được tag" in user
-    assert "người gửi đang chờ bạn phản hồi" not in user                               # không giục trả lời nhóm im lặng
-    assert "trừ khi được tag" not in user
+    assert router.calls == []                                                          # không gọi model
+    assert await decisions(db, a) == [] and await agent_drafts(db) == []
+    assert await redis.xlen("gh.bridge.outbound") == 0
+
+
+async def test_qd1710_candidates_skip_silent_groups_in_every_path(w, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """Cả đường theo đơn vị (hook) lẫn quét nền (since_hours), phạm vi gán nhóm và phạm vi cả kênh; đổi nhóm sang
+    `tagged_only` / `proactive` thì lại thành ứng viên (nhóm khác không bị ảnh hưởng)."""
+    from gh.biz.duty.context import candidates
+
+    await make_agent(db, w, [None], level=4, name="Cả kênh")
+    await make_agent(db, w, [], level=4, name="Được gán", assigned=w["g1"])
+    await db.execute(text("UPDATE core.groups SET listen_mode = 'silent' WHERE id = :g"), {"g": w["g1"]})
+    await db.commit()
+    [u1, u2] = await refine(w, redis, msg(BUY, group="g1", mentions=True), msg(BUY, group="g2", sender="u2"))
+    async with w["sm"]() as s:
+        assert {c.unit_id for c in await candidates(s, w["org"], unit_ids=[u1, u2])} == {u2}
+        assert {c.unit_id for c in await candidates(s, w["org"], since_hours=1)} == {u2}
+    await db.execute(text("UPDATE core.groups SET listen_mode = 'tagged_only' WHERE id = :g"), {"g": w["g1"]})
+    await db.commit()
+    async with w["sm"]() as s:
+        got = await candidates(s, w["org"], unit_ids=[u1, u2])
+        assert {c.unit_id for c in got} == {u1, u2} and {c.listen_mode for c in got} == {"tagged_only", "proactive"}
 
 
 async def test_qd1710_tagged_only_group_still_replies_when_tagged(w, db, redis) -> None:  # type: ignore[no-untyped-def]
@@ -173,6 +175,29 @@ async def test_qd1710_tagged_only_group_still_replies_when_tagged(w, db, redis) 
     assert "người gửi đang chờ bạn phản hồi" in router.calls[0][-1].content
 
 
+async def test_qd1710_group_switched_to_silent_while_model_is_thinking_gets_no_draft(w, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """Review v0.1.65 P3: chế độ nhóm có thể đổi giữa lúc hỏi model và lúc `apply` (Sếp bấm «Lắng nghe im lặng») —
+    `apply` đọc lại `listen_mode` hiện tại của nhóm trước khi tạo bản nháp thay vì tin ảnh chụp lúc chọn ứng viên."""
+    a = await make_agent(db, w, level=6)
+    await db.execute(text("UPDATE core.groups SET listen_mode = 'tagged_only' WHERE id = :g"), {"g": w["g1"]})
+    await db.commit()
+    [u] = await refine(w, redis, msg(BUY, mentions=True))
+    router = decide("draft")
+    real = router.generate
+
+    async def flip_then_answer(*args: Any, **kwargs: Any) -> Any:
+        async with w["sm"]() as other:
+            await other.execute(text("UPDATE core.groups SET listen_mode = 'silent' WHERE id = :g"), {"g": w["g1"]})
+            await other.commit()
+        return await real(*args, **kwargs)
+
+    router.generate = flip_then_answer  # type: ignore[method-assign]
+    await hook(w, redis, router, [u])
+    [d] = await decisions(db, a)
+    assert (d.decision, d.requested, d.outcome, d.draft_id) == ("silent", "draft", "blocked", None)
+    assert await agent_drafts(db) == [] and await redis.xlen("gh.bridge.outbound") == 0
+
+
 async def test_qd1710_bot_assigned_to_a_member_does_not_make_the_silent_group_reply(w, db, redis) -> None:  # type: ignore[no-untyped-def]
     """B8: gán BOT cho một người chỉ áp cho tin 1-1 của họ; tin của họ trong nhóm im lặng vẫn không được trả lời."""
     from gh.biz.relations import service as rsvc
@@ -187,12 +212,12 @@ async def test_qd1710_bot_assigned_to_a_member_does_not_make_the_silent_group_re
     await db.commit()
     await hook(w, redis, decide("draft"), [ug])
     assert await decisions(db) == [] and await agent_drafts(db) == []                   # tin nhóm không thuộc Lan
-    # đã được gán BOT + nhóm do chính BOT đó phụ trách nhưng nhóm im lặng ⇒ vẫn không trả lời
+    # đã được gán BOT + nhóm do chính BOT đó phụ trách nhưng nhóm im lặng ⇒ không vào ứng viên, không trả lời
     await db.execute(text("UPDATE core.groups SET assigned_agent_id = :a WHERE id = :g"), {"a": lan, "g": w["g1"]})
     await db.commit()
-    await hook(w, redis, decide("draft"), [ug])
-    [d] = await decisions(db, lan)
-    assert (d.decision, d.requested, d.outcome) == ("silent", "draft", "blocked") and await agent_drafts(db) == []
+    router = decide("draft")
+    await hook(w, redis, router, [ug])
+    assert router.calls == [] and await decisions(db, lan) == [] and await agent_drafts(db) == []
     # tin 1-1 của người được gán BOT vẫn theo B8 (không đổi)
     [ud] = await refine(w, redis, msg(BUY, group=None, sender="khachA", name="Khách A"))
     await hook(w, redis, decide("draft"), [ud])

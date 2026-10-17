@@ -149,7 +149,7 @@ export class SessionManager {
       key, channel, sessionId, adapter, state: 'starting', orgId: ctx.orgId, correlationId: ctx.correlationId,
       queued: 0, lastCredAt: 0, credTimer: null, dirTimer: null, inbound: 0, dropped: 0,
       knownGroups: new Set(), discoverTimer: null, pendingDiscover: false, syncing: null, lastSyncAt: 0,
-      syncFailures: 0, nextSyncDelayMs: this.directoryMs,
+      syncFailures: 0, nextSyncDelayMs: this.directoryMs, dirComplete: false,
     };
     this.sessions.set(key, s);
     this.#wire(s);
@@ -249,7 +249,7 @@ export class SessionManager {
         : await this.bus.listenDirect(s.channel);
       if (!allowed) {
         s.dropped += 1;
-        if (payload.external_group_id) this.#discovered(s, payload);
+        if (payload.external_group_id) await this.#discovered(s, payload);
         return;
       }
       s.inbound += 1;
@@ -263,15 +263,23 @@ export class SessionManager {
    * Nhóm chưa có trong danh bạ của phiên: báo lõi một lần, rồi hẹn quét lại để lấy thành viên. Tin ĐẦU TIÊN đi kèm
    * (`first_message`, cùng dạng tin inbound) để không mất khi lõi cho nhóm vào chế độ nghe; các tin sau chờ tập nghe
    * được đồng bộ như thường. Không ghi nội dung tin vào log.
+   * Nội dung tin nằm lại trong stream (AOF, có thể sang .dlq) nên CHỈ gắn khi chắc chắn lõi sẽ lưu nó: (1) danh bạ
+   * của phiên đã quét xong (chưa quét ⇒ nhóm "Không nghe" cũ cũng trông như nhóm lạ), và (2) cờ
+   * `gh:bridge:new_group_mode:<kênh>` là `silent` (chưa có cờ = lõi cũ ⇒ coi như mặc định `silent`; `ask`/`off` ⇒ không gắn).
    */
-  #discovered(s, payload) {
+  async #discovered(s, payload) {
     const gid = String(payload.external_group_id);
     if (s.knownGroups.has(gid)) return;
     s.knownGroups.add(gid);
-    this.#publish(STREAMS.directory, 'group.discovered', {
+    const body = {
       channel: s.channel, session_id: s.sessionId, group_id: gid, name: payload.group_name || '', member_count: null,
-      first_message: payload,
-    }, s);
+    };
+    if (s.dirComplete) {
+      try {
+        if (((await this.bus.newGroupMode(s.channel)) ?? 'silent') === 'silent') body.first_message = payload;
+      } catch { /* không đọc được cờ ⇒ không gắn nội dung tin */ }
+    }
+    this.#publish(STREAMS.directory, 'group.discovered', body, s);
     this.log.info('phát hiện nhóm mới', { channel: s.channel, session_id: s.sessionId });
     s.pendingDiscover = true;
     this.#armDiscover(s);
@@ -381,6 +389,7 @@ export class SessionManager {
       s.knownGroups = new Set(groups.map((g) => String(g.external_id)));
       // `groups_complete`: lượt quét không lỗi và có nhóm ⇒ lõi mới được coi nhóm vắng là "đã rời".
       ok = s.adapter.lastSyncComplete !== false;
+      s.dirComplete = ok; // lượt quét lỗi/thiếu ⇒ danh bạ không đủ để khẳng định "nhóm lạ"
       const groupsComplete = groups.length > 0 && ok;
       await this.#publish(STREAMS.directory, 'groups',
         { channel: s.channel, session_id: s.sessionId, groups, groups_complete: groupsComplete }, s);

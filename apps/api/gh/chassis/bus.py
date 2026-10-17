@@ -40,6 +40,34 @@ PLUGIN_CONTROL = "gh.plugin.control"
 PLUGIN_HEALTH = "gh.plugin.health"
 
 
+#: Khoá payload mang NỘI DUNG tin theo stream: bản ghi gốc không được nằm lại sau khi đã xử lý (consumer tự XDEL khi
+#: xong) và bản sao vào `.dlq` không được mang theo (review v0.1.65 P2-1: `directory` ←
+#: `group.discovered.first_message`).
+CONTENT_PAYLOAD_KEYS: dict[str, tuple[str, ...]] = {BRIDGE_DIRECTORY: ("first_message",)}
+
+
+def scrub_content(stream: str, fields: dict[Any, Any]) -> tuple[dict[Any, Any], bool]:
+    """Bản sao `fields` đã bỏ các khoá nội dung của `stream` khỏi payload JSON; trả (fields mới, có bỏ gì không)."""
+    keys = CONTENT_PAYLOAD_KEYS.get(stream)
+    if not keys:
+        return fields, False
+    out = dict(fields)
+    for k, v in fields.items():
+        if (k.decode() if isinstance(k, bytes) else k) != "payload":
+            continue
+        try:
+            payload = orjson.loads(v)
+        except orjson.JSONDecodeError:
+            return fields, False
+        if not isinstance(payload, dict) or not any(x in payload for x in keys):
+            return fields, False
+        for x in keys:
+            payload.pop(x, None)
+        out[k] = orjson.dumps(payload)
+        return out, True
+    return fields, False
+
+
 def uuid7() -> uuid.UUID:
     ms = int(time.time() * 1000)
     rand = int.from_bytes(os.urandom(10), "big")
@@ -125,10 +153,13 @@ class EventBus:
             fails = await self.redis.hincrby(fails_key, message_id, 1)  # type: ignore[misc]
             log.warning("handler lỗi stream=%s id=%s lần=%s: %s", stream, message_id, fails, exc)
             if fails >= max_deliveries:
-                await self.redis.xadd(f"{stream}.dlq", {**fields, "error": str(exc)[:500], "group": group},
+                safe, scrubbed = scrub_content(stream, fields)
+                await self.redis.xadd(f"{stream}.dlq", {**safe, "error": str(exc)[:500], "group": group},
                                       maxlen=self.maxlen, approximate=True)
                 await self.redis.sadd(DLQ_STREAMS_KEY, f"{stream}.dlq")  # type: ignore[misc]
                 await self.redis.xack(stream, group, message_id)
+                if scrubbed:   # bản gốc còn nội dung tin ⇒ xoá; bản sao DLQ (đã bỏ nội dung) đủ để điều tra
+                    await self.redis.xdel(stream, message_id)
                 await self.redis.hdel(fails_key, message_id)  # type: ignore[misc]
             return False
         await self.redis.xack(stream, group, message_id)
