@@ -136,3 +136,35 @@ async def test_model_can_be_disabled_and_enabled_keeping_history(owner_api: Api,
     await owner_api.send("POST", f"/providers/{pid}/models", {"model_name": "m-pro", "enabled": False})
     r = await owner_api.send("POST", f"/providers/{pid}/models", {"model_name": "m-pro", "daily_quota": 9})
     assert next(x for x in r.json()["models"] if x["model_name"] == "m-pro")["enabled"] is False
+
+
+# ─── review v0.1.66 (P3): model cuối của Jev / CLI không gỡ được; Action Log ghi vai bị gỡ gán ─────────────────────
+
+async def test_last_model_of_jev_or_cli_cannot_be_deleted(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    jev, jids = await add_source(db, org, "system_one", "Jev", 1, ["typesafe/jev-1.13"])
+    r = await owner_api.send("DELETE", f"/providers/{jev}/models/{jids['typesafe/jev-1.13']}")
+    assert r.status_code == 409 and r.json()["code"] == "LAST_MODEL", r.text
+    assert "Jev" in r.json()["title"]
+    # CLI: gỡ hết model thì bộ tự lành thêm lại ngay ở lượt gọi sau ⇒ chặn từ đầu, nói rõ đường đi khác.
+    agy, aids = await add_source(db, org, AGY, "Antigravity", 2, ["gemini-3.8-flash", "gemini-3.1-pro"])
+    assert (await owner_api.send("DELETE", f"/providers/{agy}/models/{aids['gemini-3.1-pro']}")).status_code == 204
+    r = await owner_api.send("DELETE", f"/providers/{agy}/models/{aids['gemini-3.8-flash']}")
+    assert r.status_code == 409 and r.json()["code"] == "LAST_MODEL", r.text
+    assert "Tắt model" in r.json()["title"]
+    await db.rollback()
+    assert (await db.execute(text("SELECT count(*) FROM agent.models WHERE provider_id = ANY(:p)"),
+                             {"p": [jev, agy]})).scalar_one() == 2
+
+
+async def test_delete_model_log_lists_unbound_roles(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    pid, ids = await add_source(db, org, API, "alpha", 1, ["m-flash", "m-pro"])
+    await bind(db, org, "core.gen", ids["m-pro"])
+    await bind(db, org, "core.reply", ids["m-pro"])
+    await bind(db, org, "core.refinery", ids["m-flash"])
+    assert (await owner_api.send("DELETE", f"/providers/{pid}/models/{ids['m-pro']}")).status_code == 204
+    await db.rollback()
+    detail = (await db.execute(text("""SELECT detail FROM ops.action_log
+                                       WHERE action = 'provider.model_deleted'"""))).scalar_one()
+    assert detail["model_name"] == "m-pro" and detail["unbound"] == ["core.gen", "core.reply"]

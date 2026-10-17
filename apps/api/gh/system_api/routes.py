@@ -754,6 +754,16 @@ async def delete_model(pid: uuid.UUID, mid: uuid.UUID, request: Request, user: s
     # Review v0.1.66 (P2-2): xoá model kéo theo `agent.model_prices` (ON DELETE CASCADE) mà chi phí tính lúc đọc từ
     # bảng giá ⇒ chi phí hôm nay / 7 ngày tụt về 0, trần chi phí không kêu, không đảo ngược. Model còn lượt gọi trong
     # 30 ngày ⇒ không cho gỡ (chỉ "Tắt model": ngừng dùng, giữ lịch sử).
+    left = (await db.execute(text("SELECT count(*) FROM agent.models WHERE provider_id = :p"), {"p": pid})).scalar_one()
+    if left <= 1 and p.kind == "system_one":
+        # Jev không có danh sách model để chọn lại — gỡ model cuối là mất nguồn (muốn ngừng dùng ⇒ tắt nguồn Jev).
+        raise conflict("LAST_MODEL", f"{p.name} chỉ có một model và không có danh sách để chọn lại — không gỡ được. "
+                                     "Muốn ngừng dùng Jev, hãy tắt nguồn này.")
+    if left <= 1 and p.kind in CLI_KINDS:
+        # `_heal_agy` tự thêm lại model khi nguồn CLI không còn dòng nào ⇒ gỡ hết chỉ là vô ích và gây khó hiểu.
+        raise conflict("LAST_MODEL", f"{p.name} cần ít nhất một model — gỡ hết thì hệ thống tự thêm lại. "
+                                     "Muốn ngừng dùng model này, bấm “Tắt model” hoặc chọn model khác bằng "
+                                     "“Dùng model này”.")
     used = (await db.execute(text("""SELECT EXISTS (SELECT 1 FROM agent.model_calls
                                      WHERE org_id = :o AND model_id = :m AND at >= now() - interval '30 days')"""),
                              {"o": user.org_id, "m": mid})).scalar_one()
@@ -761,12 +771,13 @@ async def delete_model(pid: uuid.UUID, mid: uuid.UUID, request: Request, user: s
         raise conflict("MODEL_HAS_CALLS",
                        f"Model “{row.model_name}” đã có lượt gọi trong 30 ngày qua — gỡ đi sẽ mất lịch sử chi phí. "
                        "Bấm “Tắt model” để ngừng dùng mà vẫn giữ lịch sử.")
-    await db.execute(text("DELETE FROM agent.bindings WHERE org_id = :o AND model_id = :m"),
-                     {"o": user.org_id, "m": mid})
+    unbound = list((await db.execute(text("""DELETE FROM agent.bindings WHERE org_id = :o AND model_id = :m
+                                             RETURNING agent_key"""), {"o": user.org_id, "m": mid})).scalars().all())
     await db.execute(text("DELETE FROM agent.models WHERE id = :m"), {"m": mid})
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="provider.model_deleted", target_type="provider", target_id=str(pid),
-                           target_label=p.name, detail={"model_name": row.model_name}, ip=user.ip)
+                           target_label=p.name, detail={"model_name": row.model_name, "unbound": sorted(unbound)},
+                           ip=user.ip)
     await coach_cache.commit_and_invalidate(db, request.app.state.redis, user.org_id)   # thẻ "Hôm nay" đọc lại ngay
     return Response(status_code=204)
 
