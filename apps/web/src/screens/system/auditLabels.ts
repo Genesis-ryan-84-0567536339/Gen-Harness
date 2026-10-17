@@ -90,6 +90,7 @@ export const ACTION_LABEL: Record<string, string> = {
   'agent.updated': 'Sửa agent',
   'agent.enabled': 'Bật agent',
   'agent.disabled': 'Tắt agent',
+  'agent.archived': 'Lưu trữ agent',
   'agent.bound': 'Gắn model cho agent',
   'agent.unbound': 'Gỡ model khỏi agent',
   'directory.bot_assigned': 'Giao bộ nhận tin cho một người',
