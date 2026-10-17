@@ -326,6 +326,7 @@ async def test_overview_rows_and_done_rules(owner_api: Api, db: Any) -> None:
     await boss.record(db, org, "claude_login", "pass")
     await db.commit()
     assert (await rows())["claude"] is False
+    await _usable(db, org, "claude_code_cli")                      # B2: nguồn Claude Code phải còn dùng được
     await boss.record(db, org, "claude_call", "pass")
     await boss.record(db, org, "hub", "pass")
     await db.commit()
@@ -333,6 +334,21 @@ async def test_overview_rows_and_done_rules(owner_api: Api, db: Any) -> None:
     # Claude gọi thử đạt ⇒ cũng đủ chứng cứ "có nguồn AI chạy được" (dòng ai bắt buộc duy nhất).
     assert got["claude"] is True and got["hub"] is True and got["facebook"] is False and got["ai"] is True
     assert got["_n"] == 1
+
+
+async def _usable(db: Any, org: Any, kind: str, name: str | None = None) -> uuid.UUID:
+    """v0.1.63 (B2): bằng chứng chỉ tính khi có nguồn AI DÙNG ĐƯỢC — thêm nguồn có khoá / phiên CLI + một model."""
+    pid = (await db.execute(text("INSERT INTO agent.providers (org_id, kind, name) VALUES (:o, :k, :n) RETURNING id"),
+                            {"o": org, "k": kind, "n": name or kind})).scalar_one()
+    if kind in ("antigravity_cli", "claude_code_cli"):
+        await db.execute(text("""INSERT INTO agent.cli_profiles (org_id, provider_id, token_enc, is_active)
+                                 VALUES (:o, :p, :t, true)"""), {"o": org, "p": pid, "t": b"\x00t"})
+    else:
+        await db.execute(text("""INSERT INTO agent.provider_keys (provider_id, label, secret_enc, last4)
+                                 VALUES (:p, 'K', :s, '1234')"""), {"p": pid, "s": b"\x00e"})
+    await db.execute(text("INSERT INTO agent.models (provider_id, model_name) VALUES (:p, 'm')"), {"p": pid})
+    await db.commit()
+    return pid  # type: ignore[no-any-return]
 
 
 async def test_ai_source_row_done_rules(owner_api: Api, db: Any) -> None:
@@ -353,6 +369,9 @@ async def test_ai_source_row_done_rules(owner_api: Api, db: Any) -> None:
     for kind, pid in kinds.items():
         models[kind] = (await db.execute(text("""INSERT INTO agent.models (provider_id, model_name) VALUES (:p, 'm')
                                                  RETURNING id"""), {"p": pid})).scalar_one()
+    await db.execute(text("""INSERT INTO agent.provider_keys (provider_id, label, secret_enc, last4)
+                             VALUES (:p, 'K', :s, '1234')"""),
+                     {"p": kinds["gemini"], "s": b"\x00e"})            # B2: nguồn dùng được
 
     async def call(kind: str, status: str, purpose: str = "reply", ago: str = "1 hour") -> None:
         await db.execute(text(f"""INSERT INTO agent.model_calls (org_id, at, model_id, agent_key, purpose, status)
@@ -374,6 +393,7 @@ async def test_ai_source_row_done_rules(owner_api: Api, db: Any) -> None:
 
 async def test_ai_source_row_done_by_cli_call_or_manual_check(owner_api: Api, db: Any) -> None:
     org = await org_id(db)
+    await _usable(db, org, "antigravity_cli")                      # B2: bằng chứng chỉ tính khi nguồn còn dùng được
     await boss.record(db, org, "agy_call", "pass")
     await db.commit()
     body = (await owner_api.get("/boss-checks")).json()
@@ -402,6 +422,9 @@ async def test_failed_ai_check_is_not_masked_by_an_older_successful_call(owner_a
                      {"i": pid, "o": org})
     mid = (await db.execute(text("INSERT INTO agent.models (provider_id, model_name) VALUES (:p, 'm') RETURNING id"),
                             {"p": pid})).scalar_one()
+    await db.execute(text("""INSERT INTO agent.provider_keys (provider_id, label, secret_enc, last4)
+                             VALUES (:p, 'K', :s, '1234')"""), {"p": pid, "s": b"\x00e"})   # B2: nguồn dùng được
+    await _usable(db, org, "claude_code_cli")           # …và Claude Code dùng được để `claude_call` đạt có giá trị
     await db.commit()
 
     async def call(ago: str) -> None:

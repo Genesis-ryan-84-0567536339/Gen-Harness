@@ -123,6 +123,9 @@ async def test_followup_step4_means_an_enabled_source_with_a_real_model(owner_ap
                                 {"o": org, "k": kind, "n": f"{kind}-{model}", "e": enabled})).scalar_one()
         await db.execute(text("""INSERT INTO agent.models (provider_id, model_name, is_enabled)
                                  VALUES (:p, :m, :e)"""), {"p": pid, "m": model, "e": model_enabled})
+        # B2 (F010): "xong" cần nguồn DÙNG ĐƯỢC — nguồn khoá API phải có khoá bật.
+        await db.execute(text("""INSERT INTO agent.provider_keys (provider_id, label, secret_enc, last4)
+                                 VALUES (:p, 'K', :s, '1234')"""), {"p": pid, "s": b"\x00e"})
         await db.commit()
         return pid
 
