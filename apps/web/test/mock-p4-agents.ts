@@ -31,7 +31,7 @@ export const TEMPLATES: AgentTemplate[] = [
     forbidden: ['Cam kết giá hoặc chiết khấu ngoài bảng giá đã duyệt', 'Tự ý huỷ đơn hàng'], default_enabled: true,
   },
   {
-    code: 'key_account', name: 'Key Account junior',
+    code: 'key_account', name: 'Chăm sóc khách lớn',
     role_desc: 'Hỗ trợ chăm sóc khách hàng lớn, theo dõi lời hứa và deal đang mở.',
     voice: 'Trang trọng, đúng hẹn, nhấn mạnh cam kết', speak_when: 'Khi khách VIP nhắn tin hoặc deal sắp tới hạn',
     forbidden: ['Đàm phán giá cuối cùng thay Account Manager', 'Hứa thời gian giao hàng chưa xác nhận với kho'], default_enabled: true,
@@ -49,7 +49,7 @@ export const TEMPLATES: AgentTemplate[] = [
     forbidden: ['Hứa hoàn tiền hoặc đền bù', 'Tiết lộ thông tin khách hàng khác'], default_enabled: true,
   },
   {
-    code: 'recruiter', name: 'Recruiter',
+    code: 'recruiter', name: 'Tuyển dụng',
     role_desc: 'Sàng lọc ứng viên, nhắc lịch phỏng vấn, tổng hợp hồ sơ.',
     voice: 'Chuyên nghiệp, tôn trọng ứng viên', speak_when: 'Khi có hồ sơ ứng viên mới hoặc lịch phỏng vấn sắp tới',
     forbidden: ['Đưa ra kết quả tuyển dụng cuối cùng', 'Nhận xét đánh giá cá nhân ứng viên'], default_enabled: true,
@@ -62,7 +62,7 @@ export const TEMPLATES: AgentTemplate[] = [
   },
   {
     code: 'mascot', name: 'Bé Heo',
-    role_desc: 'Mẫu hoài niệm từ heo-harness — trò chuyện phiếm, không đảm nhiệm việc kinh doanh.',
+    role_desc: 'Mẫu trò chuyện phiếm, vui vẻ — không đảm nhiệm việc kinh doanh. Tắt sẵn, Sếp tự bật khi cần.',
     voice: 'Dí dỏm, thân mật', speak_when: 'Chỉ khi được gọi trực tiếp',
     forbidden: ['Tự ý tham gia nghiệp vụ kinh doanh', 'Gửi tin ra ngoài khi chưa được bật'], default_enabled: false,
   },
@@ -172,6 +172,20 @@ export function createMock(opts: P4Options) {
     }));
   }
 
+  const nameTaken = (name: string) => agents.some((a) => !a.archived && a.name.trim().toLowerCase() === name.trim().toLowerCase());
+  /** Gương `_attach_model_and_spoke`: dòng model + lần lên tiếng gần nhất theo từng agent (chỉ suggest/draft/send). */
+  const withLive = (a: AgentIdentity): AgentIdentity => {
+    const last = decisions.find((d) => d.agent.id === a.id && ['suggest', 'draft', 'send'].includes(d.decision));
+    return {
+      ...a,
+      model: a.binding
+        ? { custom: true, ok: true, label: `${a.binding.model_name} · ${a.binding.provider_name}` }
+        : { custom: false, ok: true, label: 'Chuẩn: gemini-2.5-flash (tự chọn)' },
+      last_spoke_at: last?.at ?? null,
+      last_spoke_decision: (last?.decision as 'suggest' | 'draft' | 'send' | undefined) ?? null,
+    };
+  };
+
   function handle(ctx: P2Ctx): boolean {
     const { method: m, path: p, url, body, reply, problem } = ctx;
     const seg = p.split('/').filter(Boolean);
@@ -199,7 +213,7 @@ export function createMock(opts: P4Options) {
 
     if (seg.length === 1 && m === 'GET') {
       if (!has(ctx, 'system.read')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
-      return reply(200, agents);
+      return reply(200, agents.filter((a) => !a.archived).map(withLive));
     }
 
     if (seg.length === 1 && m === 'POST') {
@@ -212,6 +226,7 @@ export function createMock(opts: P4Options) {
       const speakWhen = String(b.speak_when ?? '').trim();
       const errors: Record<string, string> = {};
       if (!name) errors.name = 'Không được để trống';
+      else if (nameTaken(name)) errors.name = `Đã có agent tên “${name}” — đặt tên khác để khỏi nhầm.`;
       if (!roleDesc) errors.role_desc = 'Không được để trống';
       if (!voice) errors.voice = 'Không được để trống';
       if (!speakWhen) errors.speak_when = 'Không được để trống';
@@ -221,7 +236,7 @@ export function createMock(opts: P4Options) {
         template: b.template != null ? String(b.template) : null,
         addressing: (b.addressing as Record<string, unknown>) ?? {},
         forbidden: Array.isArray(b.forbidden) ? (b.forbidden as string[]) : [],
-        autonomy_level: typeof b.autonomy_level === 'number' ? b.autonomy_level : 2,
+        autonomy_level: typeof b.autonomy_level === 'number' ? b.autonomy_level : 4,
         is_enabled: b.is_enabled !== false,
         limits: (b.limits as Record<string, number>) ?? {},
         created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
@@ -271,10 +286,11 @@ export function createMock(opts: P4Options) {
       const b = body as { name?: string; copy_channel_scopes?: boolean };
       const name = String(b.name ?? '').trim();
       if (!name) return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { name: 'Không được để trống' } });
+      if (nameTaken(name)) return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { name: `Đã có agent tên “${name}” — đặt tên khác để khỏi nhầm.` } });
       const clone: AgentIdentity = {
         ...target, id: randomUUID(), name, is_enabled: false,
         channel_scopes: b.copy_channel_scopes === false ? [] : target.channel_scopes.map((s) => ({ ...s })),
-        binding: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+        binding: target.binding ? { ...target.binding } : null, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       };
       agents = [...agents, clone];
       return reply(201, clone);
@@ -282,11 +298,22 @@ export function createMock(opts: P4Options) {
 
     if (seg[2] === 'disable' && seg.length === 3 && m === 'PATCH') {
       if (!has(ctx, 'system.manage')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
-      if (!pin(ctx, 'agent.manage')) return true;
-      if (!target) return problem(404, 'NOT_FOUND', 'Agent không tồn tại');
       const enabled = (body as { enabled?: boolean }).enabled === true;
+      // v0.1.67 (F089): TẮT không cần PIN, BẬT lại cần PIN.
+      if (enabled && !pin(ctx, 'agent.manage')) return true;
+      if (!target) return problem(404, 'NOT_FOUND', 'Agent không tồn tại');
       target.is_enabled = enabled;
       target.updated_at = new Date().toISOString();
+      return reply(200, target);
+    }
+
+    if (seg[2] === 'archive' && seg.length === 3 && m === 'POST') {
+      if (!has(ctx, 'system.manage')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
+      if (!pin(ctx, 'agent.manage')) return true;
+      if (!target) return problem(404, 'NOT_FOUND', 'Agent không tồn tại');
+      target.archived = true;
+      target.is_enabled = false;
+      target.binding = null;
       return reply(200, target);
     }
 

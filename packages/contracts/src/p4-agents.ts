@@ -36,7 +36,21 @@ export interface AgentBinding {
   temperature: number;
   context_tokens: number;
   rule_codes: string[];
-  // v0.1.62: bỏ `blocked_reason` (luật v0.1.38 "agy chỉ cho Gen" đã gỡ) — máy chủ cũ còn trả thì web bỏ qua.
+  /**
+   * v0.1.67 (F016): dòng gán còn đó nhưng nguồn/model của nó đã bị tắt ⇒ agent đang chạy bằng hồ sơ Chuẩn
+   * ("Nguồn đã tắt — agent đang dùng Chuẩn"). `null`/thiếu = dòng gán đang có hiệu lực.
+   * (v0.1.62 đã bỏ lý do cũ "agy chỉ cho Gen".)
+   */
+  inactive_reason?: string | null;
+}
+
+/** v0.1.67 (F022): agent dùng model nào / chạy được không — một dòng chữ máy chủ dựng sẵn (không object lồng). */
+export interface AgentModelLine {
+  /** `true` = Sếp đã gán model riêng cho agent; `false` = dùng hồ sơ Chuẩn. */
+  custom: boolean;
+  /** `false` = agent chưa có model nào chạy được (vd. chỉ có Google/Claude — chưa có khoá API). */
+  ok: boolean;
+  label: string;
 }
 
 export interface AgentIdentity {
@@ -55,6 +69,13 @@ export interface AgentIdentity {
   updated_at: string;
   channel_scopes: AgentChannelScope[];
   binding: AgentBinding | null;
+  /** v0.1.67 (F022) — máy chủ cũ không trả thì thiếu. */
+  model?: AgentModelLine;
+  /** v0.1.67 (F083): lần lên tiếng (đề xuất / soạn nháp / gửi) gần nhất của RIÊNG agent này; `null` = chưa từng. */
+  last_spoke_at?: string | null;
+  last_spoke_decision?: 'suggest' | 'draft' | 'send' | null;
+  /** v0.1.67 (F085): agent đã Lưu trữ (danh sách không trả loại này). */
+  archived?: boolean;
 }
 
 export interface AgentCreateBody {
@@ -82,7 +103,7 @@ export interface AgentCloneBody {
 
 const enc = encodeURIComponent;
 
-/** `GET/POST /agents`, `/agents/{id}`, `/{id}/clone`, `/{id}/disable`, `/agents/templates`. */
+/** `GET/POST /agents`, `/agents/{id}`, `/{id}/clone`, `/{id}/disable`, `/{id}/archive`, `/agents/templates`. */
 export function agentsEndpoints(r: ApiClient['request']) {
   return {
     agents: {
@@ -94,6 +115,8 @@ export function agentsEndpoints(r: ApiClient['request']) {
       clone: (id: string, body: AgentCloneBody) => r<AgentIdentity>(`/agents/${enc(id)}/clone`, { method: 'POST', body }),
       setEnabled: (id: string, enabled: boolean) =>
         r<AgentIdentity>(`/agents/${enc(id)}/disable`, { method: 'PATCH', body: { enabled } }),
+      /** v0.1.67 (F085): Lưu trữ — tắt hẳn + ẩn khỏi danh sách, giữ lịch sử quyết định. Cần PIN `agent.manage`. */
+      archive: (id: string) => r<AgentIdentity>(`/agents/${enc(id)}/archive`, { method: 'POST', body: {} }),
     },
   };
 }

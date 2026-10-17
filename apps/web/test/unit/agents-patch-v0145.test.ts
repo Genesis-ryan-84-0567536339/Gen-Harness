@@ -52,7 +52,8 @@ describe('agentPatchBody (v0.1.45)', () => {
 
   it('đổi kênh: có channel_scopes (theo tập kênh đã tick)', () => {
     const body = agentPatchBody(AGENT, form({ scopeIds: new Set(['ch-zalo']) }));
-    expect(body.channel_scopes).toEqual([{ channel_id: 'ch-zalo' }]);
+    // v0.1.67 (F090): kênh còn tick giữ phạm vi theo nhóm của nó.
+    expect(body.channel_scopes).toEqual([{ channel_id: 'ch-zalo', group_id: 'g-1' }]);
     expect(body).not.toHaveProperty('forbidden');
   });
 
@@ -72,3 +73,20 @@ describe('agentPatchBody (v0.1.45)', () => {
     expect(normalizeForbidden([' x ', ''])).toEqual(['x']);
   });
 });
+
+describe('agentPatchBody — phạm vi theo nhóm (v0.1.67, F090)', () => {
+  it('bỏ tick một kênh khác: kênh còn tick giữ nguyên dòng phạm vi theo nhóm (không mở rộng ra cả kênh)', () => {
+    const body = agentPatchBody(AGENT, form({ scopeIds: new Set(['ch-zalo']) }));
+    expect(body.channel_scopes).toEqual([{ channel_id: 'ch-zalo', group_id: 'g-1' }]);
+  });
+
+  it('tick thêm kênh mới: kênh mới là cả kênh, kênh cũ giữ phạm vi nhóm', () => {
+    const body = agentPatchBody(AGENT, form({ scopeIds: new Set(['ch-zalo', 'ch-tg', 'ch-wa']) }));
+    expect(body.channel_scopes).toEqual([
+      { channel_id: 'ch-zalo', group_id: 'g-1' },
+      { channel_id: 'ch-tg' },
+      { channel_id: 'ch-wa' },
+    ]);
+  });
+});
+
