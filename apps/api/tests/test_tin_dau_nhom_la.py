@@ -88,3 +88,21 @@ async def test_existing_pending_or_off_group_still_drops_first_message(app, db, 
     await db.commit()
     await ing.on_directory(_discovered(msg("sau khi bridge khởi động lại", group="gP", msg_id="p-1"), "gP"))
     assert await _mode_of(db, "gP") == "pending" and await _count(db) == 0
+
+
+async def test_first_message_failure_does_not_lose_the_new_group(app, db, redis, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Review v0.1.65 P3: lưu tin đầu lỗi (lỗi DB) chạy trong savepoint ⇒ chỉ mất tin đầu; nhóm vừa tạo, tập nghe và
+    bộ đếm «N nhóm mới» vẫn được commit (trước đây cả giao dịch bị huỷ ⇒ bus giao lại 5 lần rồi vào DLQ, nhóm không có)."""
+    import gh.data.ingest as ingest_mod
+
+    async def boom(db_: Any, org_: Any, p: Any) -> None:
+        await db_.execute(text("SELECT 1/0"))
+
+    monkeypatch.setattr(ingest_mod, "ingest_discovered_message", boom)
+    org = await org_id(db)
+    await (await _ingest(redis, org)).on_directory(_discovered(msg("tin lỗi", group="gE", msg_id="e-1"), "gE"))
+    assert await _mode_of(db, "gE") == "silent"
+    assert await _count(db) == 0
+    assert await redis.smembers("gh:bridge:listen:zalo") == {b"gE"}
+    n = (await db.execute(text("SELECT settings #>> '{new_groups_silent,zalo}' FROM core.organizations"))).scalar_one()
+    assert n == "1"

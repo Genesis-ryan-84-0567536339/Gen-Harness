@@ -656,7 +656,13 @@ class Ingest:
                 found = await handle_group_discovered(db, self.redis, self.org_id, event.payload)
                 first_id = None
                 if found is not None:
-                    first_id = await ingest_discovered_message(db, self.org_id, event.payload)
+                    # Savepoint: lưu tin đầu lỗi thì chỉ mất tin đầu — nhóm vừa tạo, tập nghe và bộ đếm vẫn commit
+                    # (không có savepoint, cả giao dịch hỏng ⇒ bus giao lại 5 lần rồi DLQ, nhóm không bao giờ có).
+                    try:
+                        async with db.begin_nested():
+                            first_id = await ingest_discovered_message(db, self.org_id, event.payload)
+                    except Exception as exc:  # noqa: BLE001 — cách ly: không ghi nội dung tin vào log
+                        log.warning("không lưu được tin đầu của nhóm lạ (%s)", type(exc).__name__)
                 await db.commit()
                 first_row = await fetch_raw(db, first_id) if first_id is not None else None
             # Đã commit (tin lưu được thì đã vào Kho thô; ask/off thì bỏ): bản ghi mang NỘI DUNG tin không được ở lại
