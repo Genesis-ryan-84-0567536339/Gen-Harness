@@ -446,6 +446,23 @@ def _proposal_text(proposal: Any, owner: bool) -> str | None:
     return mask_text(t.strip()[:2000], owner) if isinstance(t, str) and t.strip() else None
 
 
+async def _readable_draft_ids(db: AsyncSession, user: service.CurrentUser, ids: list[uuid.UUID]) -> set[uuid.UUID]:
+    """Trong `ids`, những bản nháp người xem được đọc: `system.read` mức ALL (Owner, Auditor) đọc hết; còn lại theo
+    phạm vi soạn/duyệt (`_drafts_scope`); không có quyền nháp nào ⇒ không đọc được bản nào."""
+    if not ids:
+        return set()
+    if user.permissions.get("system.read", rbac.NONE) == rbac.ALL:
+        return set(ids)
+    try:
+        sc = await _drafts_scope(db, user)
+    except ApiError:
+        return set()
+    where, params = _scope_where(sc)
+    rows = (await db.execute(text(f"SELECT d.id FROM biz.action_drafts d WHERE d.org_id = :o AND d.id = ANY(:ids) "  # noqa: S608
+                                  f"AND {where}"), {"o": user.org_id, "ids": ids, **params})).all()
+    return {r.id for r in rows}
+
+
 @router.get("/agents/decisions")
 async def agent_decisions(agent_id: uuid.UUID | None = None, decision: str | None = None, cursor: str | None = None,
                           limit: int = Query(50, ge=1, le=200), user: service.CurrentUser = Depends(current_user),
@@ -468,13 +485,18 @@ async def agent_decisions(agent_id: uuid.UUID | None = None, decision: str | Non
         JOIN agent.identities a ON a.id = d.agent_id LEFT JOIN biz.action_drafts ad ON ad.id = d.draft_id
         WHERE {where} ORDER BY d.at DESC LIMIT :n"""), {**params, "n": limit + 1})).all()  # noqa: S608
     owner = user.role_code == rbac.OWNER
+    readable = await _readable_draft_ids(db, user, [r.draft_id for r in rows[:limit] if r.draft_id])
     items = [{"id": str(r.id), "at": iso(r.at), "agent": {"id": str(r.agent_id), "name": r.agent_name},
               "decision": r.decision, "rationale": mask_text(r.rationale, owner), "trigger": r.trigger_ref,
               "context_refs": r.context_refs or [],
               # v0.1.67 (F076): `outcome` (held = nháp chờ duyệt, suggested, noted, blocked, rejected, none) + trạng
               # thái nháp thật — web chỉ ghi "Đã gửi" khi nháp `sent`. (F075): nội dung gợi ý/nháp agent đã soạn
               # (che số nhạy cảm).
-              "outcome": r.outcome, "proposal_text": _proposal_text(r.proposal, owner),
+              "outcome": r.outcome,
+              # Review v0.1.67 P2-1: toàn văn nháp gắn với một bản nháp chỉ hiện khi bản nháp đó nằm trong phạm vi
+              # của người xem (cùng `_scope_where` như /drafts) — Quản lý (TEAM) không đọc nháp cả tổ chức.
+              "proposal_text": (_proposal_text(r.proposal, owner)
+                                if r.draft_id is None or r.draft_id in readable else None),
               "draft": {"id": str(r.draft_id), "code": r.draft_code, "status": r.draft_status}
               if r.draft_id else None}
              for r in rows[:limit]]

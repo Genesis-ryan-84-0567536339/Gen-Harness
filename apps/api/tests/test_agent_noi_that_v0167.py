@@ -116,3 +116,24 @@ async def test_decisions_expose_outcome_proposal_text_and_draft_status(owner_api
     masked = next(i for i in (await auditor.get("/agents/decisions")).json()["items"] if i["decision"] == "suggest")
     assert "0912345678" not in masked["proposal_text"] and masked["proposal_text"].endswith("báo giá 3 container.")
     assert "678" in masked["proposal_text"]
+
+
+async def test_decisions_hide_proposal_text_of_drafts_outside_scope(owner_api: Api, db, client) -> None:  # type: ignore[no-untyped-def]
+    """Review v0.1.67 P2-1 — Quản lý (action.approve mức TEAM) không đọc toàn văn nháp ngoài phạm vi của mình."""
+    org = await org_id(db)
+    aid = await _agent(db, org)
+    theirs = (await owner_api.send("POST", "/drafts", {**DRAFT, "title": "Nháp của Sếp"})).json()   # created_by = Owner
+    manager = await login_as(client, db, "manager")
+    mine = (await manager.send("POST", "/drafts", {**DRAFT, "title": "Nháp của Quản lý"})).json()
+    await _decision(db, org, aid, "send", "held", proposal={"text": "TOÀN VĂN NHÁP CỦA SẾP"}, draft=theirs["id"])
+    await _decision(db, org, aid, "send", "held", proposal={"text": "TOÀN VĂN NHÁP CỦA QUẢN LÝ"}, draft=mine["id"])
+    await _decision(db, org, aid, "suggest", "suggested", proposal={"text": "Gợi ý chung, không gắn nháp"})
+
+    items = (await manager.get("/agents/decisions")).json()["items"]
+    text_by = {(i["draft"] or {}).get("id"): i["proposal_text"] for i in items}
+    assert text_by[mine["id"]] == "TOÀN VĂN NHÁP CỦA QUẢN LÝ"
+    assert text_by[theirs["id"]] is None                                   # ngoài phạm vi ⇒ không lộ toàn văn
+    assert text_by[None] == "Gợi ý chung, không gắn nháp"
+    owner_items = (await owner_api.get("/agents/decisions")).json()["items"]
+    owner_by = {(i["draft"] or {}).get("id"): i["proposal_text"] for i in owner_items}
+    assert owner_by[theirs["id"]] == "TOÀN VĂN NHÁP CỦA SẾP"
