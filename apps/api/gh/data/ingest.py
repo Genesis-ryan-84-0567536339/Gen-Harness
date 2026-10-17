@@ -599,6 +599,19 @@ async def handle_group_discovered(db: AsyncSession, redis: Redis, org_id: uuid.U
     return row, not existed
 
 
+async def ingest_discovered_message(db: AsyncSession, org_id: uuid.UUID, p: dict[str, Any]) -> uuid.UUID | None:
+    """Tin ĐẦU TIÊN của nhóm lạ (`group.discovered.first_message`, QD 17/10 «thu hết tình báo»): bridge không đẩy tin
+    đó lên luồng inbound vì nhóm chưa có trong tập nghe, nên đi kèm sự kiện này. Gọi SAU `handle_group_discovered`.
+    Dùng chính `ingest_message` ⇒ chỉ lưu khi nhóm đang ở chế độ nghe (`silent` mặc định); `pending` / `off` thì bỏ,
+    không lưu nội dung, không tạo người gửi; `raw.event_keys` chặn lưu trùng (bus giao lại, tin đã vào đường thường).
+    Tin không thuộc đúng nhóm được báo (hoặc không phải tin nhóm) bị bỏ."""
+    first = p.get("first_message")
+    gid = str(p.get("group_id") or "")
+    if not isinstance(first, dict) or not gid or str(first.get("external_group_id") or "") != gid:
+        return None
+    return await ingest_message(db, org_id, {**first, "channel": p.get("channel")})
+
+
 # ─── Consumer ──────────────────────────────────────────────────────────────
 
 class Ingest:
@@ -637,7 +650,13 @@ class Ingest:
         if event.type == "group.discovered":
             async with self.sm() as db:
                 found = await handle_group_discovered(db, self.redis, self.org_id, event.payload)
+                first_id = None
+                if found is not None:
+                    first_id = await ingest_discovered_message(db, self.org_id, event.payload)
                 await db.commit()
+                first_row = await fetch_raw(db, first_id) if first_id is not None else None
+            if first_row is not None:
+                await realtime.publish(self.redis, "raw.new", raw_item(first_row), org_id=self.org_id)
             if found is not None and found[1]:   # nhóm MỚI ⇒ báo Console (nhóm `pending` mở hộp "Nhóm mới — chọn …")
                 row = found[0]
                 await realtime.publish(self.redis, "group.discovered",
@@ -676,5 +695,5 @@ async def uptime_pct(redis: Redis, type: str, since: datetime | None) -> float |
     return round(min(100.0, hits * 100 / total), 1)
 
 
-__all__ = ["Ingest", "handle_directory", "handle_group_discovered", "handle_status", "ingest_message", "iso",
-           "sync_listen_sets", "uptime_pct"]
+__all__ = ["Ingest", "handle_directory", "handle_group_discovered", "handle_status", "ingest_discovered_message",
+           "ingest_message", "iso", "sync_listen_sets", "uptime_pct"]
