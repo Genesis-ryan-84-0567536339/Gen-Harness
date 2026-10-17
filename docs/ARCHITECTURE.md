@@ -165,7 +165,7 @@ Một **Agent Identity** (`agent.identities` + `agent.channel_scopes`) được 
    - **dữ liệu sạch liên quan**: tối đa N `meaning_units` theo cửa sổ thời gian + độ tương đồng pgvector, trong phạm vi được phép;
    - **lịch sử tương quan**: tương tác trước giữa người ↔ nhóm ↔ agent ↔ nhân viên, cơ hội/việc/lời hứa đang mở;
    - **Sổ tay nhận thức** của ID người và ID nhóm (gồm mục ghim).
-2. **Quyết định** (LLM): `silent` · `note` (ghi sổ tay) · `suggest` · `draft` · `send`. Im lặng đúng lúc là năng lực (spec C3.3). Nhóm «Lắng nghe im lặng» chỉ được `silent`/`note` ở mọi mức tự trị và dù được tag (QD 17/10): `suggest`/`draft`/`send` bị chặn trong `apply`; `tagged_only` được tag thì trả lời như thường.
+2. **Quyết định** (LLM): `silent` · `note` (ghi sổ tay) · `suggest` · `draft` · `send`. Im lặng đúng lúc là năng lực (spec C3.3). Nhóm «Lắng nghe im lặng» không vào ứng viên agent trực (QD 17/10 + #22: không tốn lượt LLM; sàng lọc vẫn chạy); phòng thủ: nhóm vừa đổi sang `silent` giữa chừng thì `apply` đọc lại chế độ và chặn `suggest`/`draft`/`send` (chỉ còn `silent`/`note`); `tagged_only` được tag thì trả lời như thường.
 3. **Qua policy** (§7): `send`/`draft` thành hành động có cờ; chỉ tới bridge khi có permit.
 4. **Ghi vết**: bảng bổ sung `agent.decisions` lưu quyết định + danh sách ID ngữ cảnh đã dùng → màn "Agent đã nói gì, nhân danh gì" và khối "Dữ liệu agent đã dùng — không có chỗ nào bịa" ở Bàn làm việc đọc từ đây. Action Log ghi mọi quyết định.
 
