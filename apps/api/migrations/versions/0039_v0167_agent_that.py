@@ -1,4 +1,4 @@
-"""v0.1.67 — Agent làm và nói thật: cột agent.identities.archived_at (Lưu trữ agent, F085) + cột/chỉ mục cho tin 1-1 (C6, F050).
+"""v0.1.67 — Agent làm và nói thật: chỉ thêm cột agent.identities.archived_at (Lưu trữ agent, F085).
 IF NOT EXISTS, chạy lại an toàn.
 
 Revision ID: 0039
@@ -22,4 +22,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    pass  # chỉ thêm cột/chỉ mục; hạ cấp = khôi phục bản sao lưu
+    pass  # chỉ thêm cột; hạ cấp = khôi phục bản sao lưu

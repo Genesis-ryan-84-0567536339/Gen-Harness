@@ -299,8 +299,8 @@ async def set_people_bot_bulk(body: BulkBotIn, user: service.CurrentUser = Depen
                        errors={"agent_id": "Chọn BOT hoặc mức tự trị cần đổi"})
     sc = await scope_for(db, user, "profile.write")
     if set_agent and body.agent_id is not None:
-        ok = (await db.execute(text("SELECT 1 FROM agent.identities WHERE id = :a AND org_id = :o"),
-                               {"a": body.agent_id, "o": user.org_id})).first()
+        ok = (await db.execute(text("SELECT 1 FROM agent.identities WHERE id = :a AND org_id = :o "
+                                    "AND archived_at IS NULL"), {"a": body.agent_id, "o": user.org_id})).first()
         if ok is None:
             raise not_found("Agent")
     where, params = sc.person_sql("p")

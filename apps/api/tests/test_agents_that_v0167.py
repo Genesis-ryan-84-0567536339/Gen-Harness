@@ -175,3 +175,37 @@ async def test_templates_vietnamese_no_old_project_name(owner_api) -> None:  # t
     blob = " ".join(f"{t['name']} {t['role_desc']}" for t in items).lower()
     assert "heo-harness" not in blob and "recruiter" not in blob and "key account" not in blob
     assert next(t for t in items if t["code"] == "mascot")["default_enabled"] is False
+
+
+# ─── Review v0.1.67 P3: agent đã Lưu trữ không được dùng lại ────────────────────────────────────────────────
+
+async def test_archived_agent_cannot_be_cloned_patched_bound_or_assigned(owner_api, db) -> None:  # type: ignore[no-untyped-def]
+    org, _ch, gid = await _channel_group(db)
+    old = await _seed_agent(db, org, name="Cũ")
+    live = await _seed_agent(db, org, name="Còn dùng")
+    pid_ = (await db.execute(text("""
+        INSERT INTO core.persons (org_id, code, display_name, person_type, relation_to_owner)
+        VALUES (:o, 'PT-A1', 'Khách A', 'customer', 'direct') RETURNING id"""), {"o": org})).scalar_one()
+    await db.commit()
+    api: Api = owner_api
+    _pid, mid = await _seed_provider_model(api, db)
+    assert (await api.send("POST", f"/agents/{old}/archive", {})).status_code == 200
+
+    gone = str(old)
+    for method, path, body in (
+            ("POST", f"/agents/{old}/clone", {"name": "Bản sao"}),
+            ("PATCH", f"/agents/{old}", {"voice": "giọng mới"}),
+            ("PUT", f"/agents/bindings/agent:{old}", {"model_id": mid}),
+            ("POST", f"/directory/groups/{gid}/bot", {"agent_id": gone}),
+            ("POST", f"/directory/people/{pid_}/bot", {"agent_id": gone}),
+            ("POST", "/directory/people/bulk-bot", {"filter": {}, "agent_id": gone})):
+        r = await api.send(method, path, body)
+        assert r.status_code == 404, (method, path, r.status_code, r.text)
+    assert (await db.execute(text("SELECT voice FROM agent.identities WHERE id = :i"), {"i": old})).scalar_one() \
+        == "lễ phép"                                                      # PATCH bị chặn, không ghi
+    assert (await db.execute(text("SELECT count(*) FROM agent.bindings WHERE agent_key = :k"),
+                             {"k": f"agent:{old}"})).scalar_one() == 0
+    # agent còn dùng vẫn gán được
+    assert (await api.send("PUT", f"/agents/bindings/agent:{live}", {"model_id": mid})).status_code == 200
+    assert (await api.send("POST", f"/directory/groups/{gid}/bot", {"agent_id": str(live)})).status_code == 200
+    assert (await api.send("POST", f"/directory/people/{pid_}/bot", {"agent_id": str(live)})).status_code == 200

@@ -156,8 +156,8 @@ async def _agent_key_label(db: AsyncSession, org_id: uuid.UUID, agent_key: str) 
             aid = uuid.UUID(agent_key[len("agent:"):])
         except ValueError as e:
             raise not_found("Agent") from e
-        name = (await db.execute(text("SELECT name FROM agent.identities WHERE id = :i AND org_id = :o"),
-                                 {"i": aid, "o": org_id})).scalar_one_or_none()
+        name = (await db.execute(text("SELECT name FROM agent.identities WHERE id = :i AND org_id = :o "
+                                      "AND archived_at IS NULL"), {"i": aid, "o": org_id})).scalar_one_or_none()
         if name is None:
             raise not_found("Agent")
         return str(name)
@@ -555,7 +555,7 @@ async def patch_agent(agent_id: uuid.UUID, body: AgentPatch, user: service.Curre
     """Sửa agent. v0.1.45 (F-20): PIN policy.change chỉ khi đổi autonomy_level/forbidden/limits/channel_scopes
     (khác giá trị đang lưu) — đổi tên, mô tả, giọng, lúc lên tiếng, mẫu, xưng hô không bao giờ đòi PIN; gửi lại đúng
     giá trị cũ của trường rào chắn cũng không đòi PIN (không hạ rào). Thứ tự: 403 → 404 → 422 → 423."""
-    cur = (await db.execute(text(AGENT_SELECT + " WHERE id = :i AND org_id = :o"),
+    cur = (await db.execute(text(AGENT_SELECT + " WHERE id = :i AND org_id = :o AND archived_at IS NULL"),
                             {"i": agent_id, "o": user.org_id})).one_or_none()
     if cur is None:
         raise not_found("Agent")
@@ -631,7 +631,7 @@ async def clone_agent(agent_id: uuid.UUID, body: CloneIn, user: service.CurrentU
     """Nhân bản: sao mọi trường (kể cả phạm vi nghe nếu chọn và model riêng — v0.1.67 F091) từ agent nguồn, NHƯNG
     tạo ở trạng thái tắt (`is_enabled=false`) — tránh hai agent cùng nghe/trả lời trùng nhau trước khi Owner rà
     lại bản sao. Quyết định tự đưa ra (PLAN không nói rõ trạng thái ban đầu của bản nhân bản)."""
-    src = (await db.execute(text(AGENT_SELECT + " WHERE id = :i AND org_id = :o"),
+    src = (await db.execute(text(AGENT_SELECT + " WHERE id = :i AND org_id = :o AND archived_at IS NULL"),
                             {"i": agent_id, "o": user.org_id})).one_or_none()
     if src is None:
         raise not_found("Agent")
