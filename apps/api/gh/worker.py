@@ -60,6 +60,7 @@ from gh.hub_link import service as hub_link
 from gh.identity import service as identity
 from gh.memory import notebook
 from gh.providers import cli as climod
+from gh.providers import clients
 from gh.providers.router import ModelRouter
 from gh.refinery.runner import Refinery
 from gh.refinery.scheduler import Scheduler
@@ -224,6 +225,8 @@ async def startup(ctx: dict[str, Any]) -> None:
     # /proc/<pid>/environ. Đặt ở đây (không ở mức nhập mô-đun) để test nhập gh.worker không đổi trạng thái pytest.
     set_not_dumpable()
     configure_logging()
+    # Review lần 2 v0.1.63 (P3-5): HOME tạm agy (có token) còn sót khi tiến trình worker trước bị SIGKILL.
+    clients.sweep_stale_turn_dirs()
     async with sessionmaker()() as db:
         await bootstrap(db, mint_setup_code=False)   # P2-2: chỉ api sinh / giao mã thiết lập, worker không sinh lại
         await db.commit()

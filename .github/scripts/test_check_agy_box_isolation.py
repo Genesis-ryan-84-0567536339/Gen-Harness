@@ -45,6 +45,7 @@ GOOD = {
                 "HTTPS_PROXY": "http://agy-egress:3128",
                 "HTTP_PROXY": "http://agy-egress:3128",
                 "NO_PROXY": "127.0.0.1,localhost",
+                "GH_AGYBOX_REAP": "1",
             },
             "secrets": ["gh_agy_key"],
             "networks": ["agy-bus"],
@@ -134,6 +135,11 @@ class IsolationRules(unittest.TestCase):
         self.assertFlags(mutated(lambda d: box(d)["environment"].pop("HTTPS_PROXY")), "HTTPS_PROXY")
         self.assertFlags(mutated(lambda d: box(d)["environment"].update(HTTPS_PROXY="http://evil:3128")),
                          "HTTPS_PROXY")
+
+    def test_box_without_reap(self) -> None:
+        """Review lần 2 v0.1.63 (P2-1): thiếu GH_AGYBOX_REAP=1 ⇒ tiến trình setsid của agy sống qua các lượt."""
+        self.assertFlags(mutated(lambda d: box(d)["environment"].pop("GH_AGYBOX_REAP")), "GH_AGYBOX_REAP")
+        self.assertFlags(mutated(lambda d: box(d)["environment"].update(GH_AGYBOX_REAP="0")), "GH_AGYBOX_REAP")
 
     def test_egress_missing(self) -> None:
         self.assertFlags(mutated(lambda d: d["services"].pop("agy-egress")), "agy-egress")

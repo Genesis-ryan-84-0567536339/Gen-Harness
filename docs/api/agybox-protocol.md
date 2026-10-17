@@ -2,7 +2,8 @@
 
 Mục đích: các việc có người ngoài (soạn trả lời khách, sàng lọc tin người lạ) chạy `agy` trong container riêng, không có khoá
 master, DB hay Redis chính. Mã: `apps/api/gh/agybox/` (`protocol.py` hợp đồng + ký, `server.py` dịch vụ, `client.py` phía api/worker).
-Cấu hình: `deploy/compose.yaml` (dịch vụ `agy-box`, mạng `agy-bus` nội bộ + `agy-out`, secret `gh_agy_key`).
+Cấu hình: `deploy/compose.yaml` (dịch vụ `agy-box` chỉ ở mạng nội bộ `agy-bus`, ra Internet qua proxy `agy-egress` — mục Nợ / ghi chú vận hành;
+secret `gh_agy_key`).
 
 ## Cho H2 (router/placement) dùng
 
@@ -68,13 +69,21 @@ st = await box_status()          # cache 10 giây; không tham số = đọc GH_
   `provider_error` 502 · `timeout` 504. Thông điệp lỗi đã che bí mật.
 - Hộp KHÔNG gọi ngược api; kết quả là văn bản không tin cậy (parse như đầu ra agy trực tiếp).
 - Client ngắt kết nối trước khi lượt xong ⇒ hộp huỷ lượt (giết nhóm tiến trình agy, xoá HOME tạm), không trả lời.
+- **Dọn sau MỖI lượt** (review lần 2, P2-1; `gh.agybox.reaper`, bật bằng `GH_AGYBOX_REAP=1`): sau mọi lần chạy agy — `generate`, `models`, cả
+  `agy --version` của `/healthz`, kể cả lượt lỗi / hết giờ / client ngắt — hộp `kill(-1, SIGSTOP)` (Linux: tới mọi tiến trình cùng uid trừ chính
+  server và PID 1 — tini; tiến trình đang fork không lọt), duyệt `/proc`: tiến trình do `docker exec` đưa vào (healthcheck, `genh doctor`, e2e —
+  tổ tiên có ppid 0) được `SIGCONT` trả lại, mọi tiến trình khác (agy để lại, kể cả đã `setsid nohup … &` thoát nhóm và được tini nhận nuôi) bị
+  `SIGKILL`; rồi xoá mọi thứ trong `/tmp` và `/dev/shm` (không theo liên kết tượng trưng). `killpg` của `AgyClient` chỉ trúng nhóm của agy nên trước
+  bản sửa tiến trình `setsid` sống qua các lượt: canh `/tmp/gh-agy-home-*` của lượt sau, đọc `/proc/<agy>/fd/0` (prompt khách khác), ghi
+  `/proc/<agy>/fd/1`. Mọi lần chạy agy và lần dọn giữ một khoá: `/healthz` giữa lượt trả phiên bản gần nhất, không chạy `agy --version` chen vào.
+  Server chỉ dọn khi là tiến trình chính của container (pid 1 hoặc con của init) — chạy tay ngoài container thì `kill(-1, …)` không bao giờ được gọi.
 
 ## Cô lập (tóm tắt) và cách kiểm
 
-- Hộp chỉ có: secret `gh_agy_key`, env `GH_AGYBOX_KEY_FILE`, `GH_CLI_BINARY`, `AGY_CLI_DISABLE_AUTO_UPDATE`, `GH_AGYBOX_MAX_JOBS`
-  (cộng biến proxy lối ra khi có). **Không mount volume nào** (từ gói sửa review, P1-1 — trước đó mount `agy_state` ghi được, dùng chung với agy
+- Hộp chỉ có: secret `gh_agy_key`, env `GH_AGYBOX_KEY_FILE`, `GH_CLI_BINARY`, `AGY_CLI_DISABLE_AUTO_UPDATE`, `GH_AGYBOX_MAX_JOBS`,
+  `GH_AGYBOX_REAP` (cộng biến proxy lối ra khi có). **Không mount volume nào** (từ gói sửa review, P1-1 — trước đó mount `agy_state` ghi được, dùng chung với agy
   trong tiến trình api/worker: agy trong hộp bị lừa có thể sửa `settings.json`, `mcp/`, `customizations/`, lịch sử mà agy của Gen Sếp đọc lại).
-  Thứ duy nhất ghi được là tmpfs `/tmp` (HOME tạm mỗi lượt). `read_only`, `cap_drop: [ALL]`, `no-new-privileges`, uid `gh`, không `default`/`browser-bus`.
+  Chỗ ghi được chỉ có tmpfs `/tmp` (HOME tạm mỗi lượt) và `/dev/shm` của Docker — cả hai bị xoá sạch sau mỗi lượt (mục "Dọn sau MỖI lượt"). `read_only`, `cap_drop: [ALL]`, `no-new-privileges`, uid `gh`, không `default`/`browser-bus`.
   Tiến trình hộp tự xoá mọi biến `GH_*` ngoài danh sách và không import `gh.config`/DB/Redis/crypto.
 - Test: `apps/api/tests/test_agybox_v0163.py` (giao thức, server, client, sức khoẻ), `test_agybox_compose_v0163.py` (YAML cô lập).
 - Kiểm thật (project riêng, không đụng bản cài): dựng `docker compose -p <tên riêng> -f deploy/compose.yaml up -d --no-deps agy-box`; trong hộp `ls /run/secrets` chỉ
