@@ -97,7 +97,7 @@ Nhánh local đang làm (CHƯA push, ngoài `claude/v0162`): **v0.1.63** đã t�
 
 ### Claude / điều phối viên còn dở
 
-- **Phát hành v0.1.62–63**: v0.1.62 ở `local/v0162-rc`, v0.1.63 ở `local/v0163-int` (gốc v0.1.62 cuối; đã gộp H1 H2 H3 B2) → bộ kiểm đầy đủ → review → push theo mốc M1 cùng v0.1.64 (mặc định) → PR → CI xanh → merge squash → bản thử → E2E → promote → kiểm genh tải về khớp tag → báo Boss.
+- **Phát hành v0.1.63** (gồm cả v0.1.62 ở `local/v0162-rc`): `local/v0163-int` (gốc v0.1.62 cuối; đã gộp H1 H2 H3 B2) → bộ kiểm đầy đủ → review → push theo mốc M1 cùng v0.1.64 (mặc định) → PR → CI xanh → merge squash → bản thử → E2E → promote → kiểm genh tải về khớp tag → báo Boss.
 - **Chưa làm (mang từ v0.1.58)**: bước rẻ ở `e2e-install` (`agy --help | grep -- --effort`, `missing_reason` trong container); ô chọn model vẫn ẩn khi Kiểm tra đỏ (`offeredGroups`). **Nợ #44–#46** (egress `agy-out`, core vào hộp, định dạng token agy) · **Nợ #35** kiểm WhatsApp QR với máy chủ thật.
 - **Bản kế tiếp (đã hẹn)**: nhận kết quả "Thử 12 câu mẫu" của Jev từ Boss rồi quyết ngưỡng lọc trước; Boss dùng thử Mặt tiền v2 rồi góp ý; chuông Gen dẫn về Mặt tiền; xoá hội thoại Gen thì xoá luôn lựa chọn model đã nhớ (Nợ #29); dọn mã chết trình thiết lập cũ (Nợ #36).
 - **H-b còn mở**: timer đêm mất lịch khi `daemon-reload`/`enable` chạy từ bên trong service đêm — không tái hiện được bằng mã lẫn `e2e-nightly-real` (systemd thật: sau lần chạy timer vẫn có lần kế tiếp); tự lành bao ca này. Máy thật còn tái diễn thì ghi vào v0.1.53.md.
