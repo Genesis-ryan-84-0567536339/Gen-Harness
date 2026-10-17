@@ -117,7 +117,9 @@ WHERE (
        AND (CASE WHEN u.group_id IS NULL
                  -- v0.1.65: tin 1-1 mặc định IM LẶNG (`silent`: lưu, không đưa cho agent trực); chỉ `reply` mới có
                  THEN {direct_mode} = 'reply'
-                 ELSE u.listen_mode IN ('silent', 'proactive') OR (u.listen_mode = 'tagged_only' AND u.tagged) END)
+                 -- QD 17/10 + sổ câu hỏi #22: nhóm `silent` (Lắng nghe im lặng) KHÔNG vào ứng viên — không bao giờ trả lời nên
+                 -- không tốn một lượt LLM chỉ để ra silent/note; tin vẫn được lưu và sàng lọc như thường.
+                 ELSE u.listen_mode = 'proactive' OR (u.listen_mode = 'tagged_only' AND u.tagged) END)
   )
   AND NOT EXISTS (SELECT 1 FROM agent.decisions d WHERE d.agent_id = a.id AND d.trigger_unit_id = u.id)
 ORDER BY u.tagged DESC, u.observed_at, a.id
@@ -128,7 +130,8 @@ LIMIT :n
 async def candidates(db: AsyncSession, org_id: uuid.UUID, *, unit_ids: list[uuid.UUID] | None = None,
                      since_hours: float | None = None, min_age_s: float = 0, limit: int = 500) -> list[Candidate]:
     """Cặp (agent, đơn vị) cần quyết định: agent đang bật, đơn vị trong phạm vi kênh/nhóm (hoặc nhóm gán cho
-    agent), nhóm đang nghe (nhóm "chỉ khi được tag" → chỉ đơn vị có tin tag), chưa có quyết định. Tin tag trước."""
+    agent), nhóm chủ động (`proactive`; nhóm "chỉ khi được tag" → chỉ đơn vị có tin tag; nhóm
+    `silent` không vào — #22), chưa có quyết định. Tin tag trước."""
     params: dict[str, Any]
     if unit_ids is not None:
         if not unit_ids:

@@ -77,7 +77,7 @@ Nhánh local (CHƯA push): **`rel/v0165`** = bản gộp trên; **`rel/v0166` �
 1. Sau khi bản chính thức ra: `genh update` (hoặc đợi lịch đêm) — migration 0037/0038 tự chạy; hộp `agy-box` + proxy `agy-egress` và khoá `gh_agy_key` tự lên (Sức khoẻ: "Hộp riêng Antigravity: Đang chạy"); bridge khởi động lại.
 2. Antigravity: đăng nhập ở **Kết nối › Bộ não AI** bằng **một tài khoản Google riêng** (token đi vào hộp mỗi lượt có người ngoài). Máy chưa có khoá API nay cũng trả lời khách được bằng Antigravity qua hộp.
 3. Telegram (tuỳ chọn): thẻ Telegram › **Nhận tin từ Sếp** › Ghép Telegram (PIN) → gửi `/start <mã 6 số>` cho bot → bật công tắc. Mã PIN chỉ gõ ở Console.
-4. Biết trước: **nhóm mới tự vào Lắng nghe im lặng** (không trả lời kể cả khi tag; đổi ở thẻ kênh, PIN); tin 1-1 cài cũ đang tắt nay **lưu im lặng**; **THAY ĐỔI QUYỀN**: tin 1-1 chỉ Owner/người phụ trách, gán/bỏ BOT cho người = Owner + PIN, JID che với vai dưới Owner.
+4. Biết trước: **nhóm mới tự vào Lắng nghe im lặng** (không trả lời kể cả khi tag, không đưa cho agent trực — sàng lọc vẫn chạy; đổi ở thẻ kênh, PIN); tin 1-1 cài cũ đang tắt nay **lưu im lặng**; **THAY ĐỔI QUYỀN**: tin 1-1 chỉ Owner/người phụ trách, gán/bỏ BOT cho người = Owner + PIN, JID che với vai dưới Owner.
 5. Thẻ Zalo/WhatsApp "Mất liên lạc" ⇒ **Nối lại bằng phiên đã lưu**. Tuỳ chọn: "Câu hỏi mở — mặc định đã chọn" ở [ROADMAP](../ROADMAP.md).
 
 ### Boss phải làm — v0.1.61 (đã qua; `genh update` + người được giao quyền tự đặt mã PIN ở Tài khoản của tôi; [v0.1.61.md](../releases/v0.1.61.md))
