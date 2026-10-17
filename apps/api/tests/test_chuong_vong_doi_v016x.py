@@ -115,6 +115,38 @@ async def test_clear_one_of_many_keys_of_same_kind_only_resolves_its_own_bell(ow
     assert all(i["resolved"] for i in page["items"]) and page["unread"] == 0
 
 
+async def test_clear_same_title_other_key_does_not_resolve_the_other_bell(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    """Review P3: hai khoá cùng `kind` TRÙNG tiêu đề (hai nguồn cùng tên) ⇒ chọn chuông theo tiêu đề tắt nhầm chuông kia.
+    Chuông lưu khoá sự cố (`incident_key`) nên đóng khoá nào tắt đúng chuông của khoá đó."""
+    org = await org_id(db)
+    title = "Model hết đăng nhập: Gemini"
+    await _raise(db, org, "model.auth_expired:a", "model.auth_expired", title)
+    await _raise(db, org, "model.auth_expired:b", "model.auth_expired", title)
+    keys = [r.incident_key for r in (await db.execute(text("""SELECT incident_key FROM core.notifications
+                                                              WHERE kind = 'model.auth_expired' ORDER BY created_at"""))).all()]
+    assert keys == ["model.auth_expired:a", "model.auth_expired:b"]
+    await _clear(db, org, "model.auth_expired:a")
+    rows = (await db.execute(text("""SELECT incident_key, resolved_at IS NOT NULL AS resolved, read_at IS NOT NULL AS read
+                                     FROM core.notifications WHERE kind = 'model.auth_expired'
+                                     ORDER BY created_at"""))).all()
+    assert [(r.incident_key, r.resolved, r.read) for r in rows] == [
+        ("model.auth_expired:a", True, True), ("model.auth_expired:b", False, False)]
+
+
+async def test_clear_still_resolves_legacy_bell_without_incident_key(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    """Chuông tạo trước v0.1.69 chưa có khoá (NULL) ⇒ vẫn tắt theo kind (/ tiêu đề khi còn khoá khác cùng kind)."""
+    org = await org_id(db)
+    uid = (await notifications.owner_ids(db, org))[0]
+    await notifications.notify(db, org, [uid], kind="worker.silent", title="Bộ xử lý nền đã ngừng")  # không khoá
+    await db.execute(text("""INSERT INTO ops.health_alerts (org_id, key, kind, severity, fingerprint, title, body)
+                             VALUES (:o, 'worker.silent', 'worker.silent', 'bad', '', 'Bộ xử lý nền đã ngừng', 'x')"""),
+                     {"o": org})
+    await db.commit()
+    await _clear(db, org, "worker.silent")
+    [item] = (await owner_api.get("/notifications")).json()["items"]
+    assert item["resolved"] is True and item["read"] is True
+
+
 async def test_clear_resolves_every_old_bell_of_the_incident(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
     """Cùng sự cố mở lại nhiều lần (fingerprint đổi) để lại nhiều chuông — hết sự cố thì TẤT CẢ đều "Đã xử lý"."""
     org = await org_id(db)

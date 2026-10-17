@@ -1,4 +1,4 @@
-"""v0.1.69 — chuông có vòng đời (C4: cột core.notifications.resolved_at) và dữ liệu/mặc định đúng quyết định Sếp (D3).
+"""v0.1.69 — chuông có vòng đời (C4: cột core.notifications.resolved_at, incident_key) và dữ liệu/mặc định đúng quyết định Sếp (D3).
 Mọi câu lệnh chạy lại an toàn.
 
 Revision ID: 0040

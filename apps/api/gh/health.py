@@ -251,7 +251,7 @@ async def raise_once(db: AsyncSession, org_id: uuid.UUID, *, key: str, kind: str
             {"o": org_id, "k": key, "t": title, "b": body, "l": link})
         return False
     await notifications.notify(db, org_id, await notifications.owner_ids(db, org_id), kind=kind, title=title,
-                               body=body, link=link, redis=redis)
+                               body=body, link=link, redis=redis, incident_key=key)
     return True
 
 
@@ -273,7 +273,8 @@ async def clear(db: AsyncSession, org_id: uuid.UUID, key: str, *, label: bool = 
     others = (await db.execute(text("""SELECT EXISTS (SELECT 1 FROM ops.health_alerts
                                        WHERE org_id = :o AND kind = :kind AND key <> :k AND cleared_at IS NULL)"""),
                                {"o": org_id, "kind": row.kind, "k": key})).scalar_one()
-    await notifications.resolve_incident(db, org_id, kind=row.kind, title=row.title if others else None, label=label)
+    await notifications.resolve_incident(db, org_id, kind=row.kind, title=row.title if others else None, label=label,
+                                         key=key)
     return True
 
 

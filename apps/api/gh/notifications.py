@@ -118,17 +118,19 @@ async def owner_ids(db: AsyncSession, org_id: uuid.UUID) -> list[uuid.UUID]:
 
 
 async def notify(db: AsyncSession, org_id: uuid.UUID, user_ids: Iterable[uuid.UUID], *, kind: str, title: str,
-                 body: str = "", link: str | None = None, redis: Any = None) -> list[dict[str, Any]]:
+                 body: str = "", link: str | None = None, redis: Any = None,
+                 incident_key: str | None = None) -> list[dict[str, Any]]:
     """Ghi một thông báo cho từng người nhận; có `redis` thì đẩy `notification.new` SAU KHI `db` commit (rollback
-    → không đẩy; lỗi đẩy không làm hỏng việc chính — chuông vẫn thấy khi tải lại)."""
+    → không đẩy; lỗi đẩy không làm hỏng việc chính — chuông vẫn thấy khi tải lại). `incident_key` (sự cố sức khoẻ sinh ra
+    chuông, `health.raise_once`) để `resolve_incident` tắt đúng chuông của sự cố khi nó đóng."""
     out: list[dict[str, Any]] = []
     for uid in dict.fromkeys(user_ids):
         row = (await db.execute(text("""
-            INSERT INTO core.notifications (org_id, user_id, kind, title, body, link, created_at)
-            VALUES (:o, :u, :k, :t, :b, :l, clock_timestamp())
+            INSERT INTO core.notifications (org_id, user_id, kind, title, body, link, created_at, incident_key)
+            VALUES (:o, :u, :k, :t, :b, :l, clock_timestamp(), :ik)
             RETURNING id, kind, title, body, link, created_at, read_at, resolved_at"""),
             {"o": org_id, "u": uid, "k": kind, "t": title[:MAX_TITLE], "b": body[:MAX_BODY],
-             "l": (link or None) and link[:MAX_LINK]})).one()
+             "l": (link or None) and link[:MAX_LINK], "ik": incident_key})).one()
         item = _out(row)
         out.append(item)
         if redis is not None:
@@ -137,18 +139,20 @@ async def notify(db: AsyncSession, org_id: uuid.UUID, user_ids: Iterable[uuid.UU
 
 
 async def resolve_incident(db: AsyncSession, org_id: uuid.UUID, *, kind: str, title: str | None = None,
-                           label: bool = True) -> int:
+                           label: bool = True, key: str | None = None) -> int:
     """v0.1.69 (F098): sự cố sức khoẻ đóng ⇒ chuông của chính sự cố đó tắt — `read_at` (hết đỏ, hết đếm "chưa đọc") và,
-    khi `label`, `resolved_at` ("Đã xử lý" ở chuông). `title` khác None ⇒ chỉ chuông có đúng tiêu đề đó (nhiều khoá cùng
-    `kind`, vd. `job.timeout:<tên hàm>`: đóng một khoá không được tắt chuông của khoá còn mở). Không đụng chuông đã
-    gắn nhãn; chạy lại an toàn. Bên gọi commit. Trả số chuông đã đổi."""
+    khi `label`, `resolved_at` ("Đã xử lý" ở chuông). `key` ⇒ chuông của đúng khoá sự cố đó (`incident_key`); chuông cũ chưa
+    có khoá (tạo trước v0.1.69) rơi về cách cũ: `title` khác None ⇒ chỉ chuông có đúng tiêu đề đó (nhiều khoá cùng `kind`,
+    vd. `job.timeout:<tên hàm>`: đóng một khoá không được tắt chuông của khoá còn mở), None ⇒ mọi chuông của `kind`.
+    Không đụng chuông đã gắn nhãn; chạy lại an toàn. Bên gọi commit. Trả số chuông đã đổi."""
     res = await db.execute(text("""
         UPDATE core.notifications
            SET read_at = COALESCE(read_at, now()),
                resolved_at = CASE WHEN :lab THEN now() ELSE resolved_at END
          WHERE org_id = :o AND kind = :k AND resolved_at IS NULL AND (:lab OR read_at IS NULL)
-           AND (CAST(:t AS text) IS NULL OR title = :t)"""),
-        {"o": org_id, "k": kind, "t": title, "lab": label})
+           AND (incident_key = :key
+                OR (incident_key IS NULL OR CAST(:key AS text) IS NULL) AND (CAST(:t AS text) IS NULL OR title = :t))"""),
+        {"o": org_id, "k": kind, "t": title, "lab": label, "key": key})
     return int(getattr(res, "rowcount", 0) or 0)
 
 

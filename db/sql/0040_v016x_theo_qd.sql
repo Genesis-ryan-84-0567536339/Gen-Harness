@@ -4,6 +4,9 @@
 -- a) (C4, F098) core.notifications.resolved_at — chuông của sự cố đã đóng được gắn "Đã xử lý" (cùng read_at).
 --    Cột NULL, không cần backfill; gh_app đã có quyền cả bảng.
 ALTER TABLE core.notifications ADD COLUMN IF NOT EXISTS resolved_at timestamptz;
+--    `incident_key` = khoá sự cố (ops.health_alerts.key) sinh ra chuông — đóng sự cố nào tắt đúng chuông của sự cố đó (trước
+--    đây chọn theo tiêu đề nên hai nguồn trùng tên tắt nhầm nhau). Chuông cũ để NULL ⇒ vẫn tắt theo kind/tiêu đề như trước.
+ALTER TABLE core.notifications ADD COLUMN IF NOT EXISTS incident_key text;
 
 -- b) (D3, F121 / QD-20) giờ yên lặng của Gen hướng dẫn: 21:00–07:00 (bản v0.1.54 đặt 22 do không đối chiếu QD-20).
 --    DEFAULT của cột đổi sang 21. Hàng ĐÃ có chỉ đổi khi còn đúng cặp mặc định cũ (22, 7) VÀ Sếp chưa từng chỉnh giờ yên
