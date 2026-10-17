@@ -23,14 +23,17 @@ UPDATE agent.gen_coach_prefs p
 
 -- c) (D3, F122 / QD-22) bản v0.1.50–v0.1.55 đã lưu chữ "Kho <tên riêng cũ>" vào hội thoại Gen và chuông của Owner khác;
 --    migration 0035 chỉ sửa ghi chú máy chủ. Thay bằng tên Kho chung "Kho dữ liệu" (không phân biệt hoa thường), chỉ ở dòng
---    có chuỗi cũ. Các dòng chuỗi cũ bên dưới là NGUỒN KHỚP nên mang chú thích cho phép của kiểm CI chống lộ thông tin riêng.
+--    có chuỗi cũ. CHỈ sửa lời Gen (role = 'assistant'): lời Sếp gõ (role = 'user') là nguyên văn, không viết lại. Chỉ khớp
+--    NGUYÊN TỪ ("Kho <tên>x", "xKho <tên>" giữ nguyên); content là jsonb nên chữ xuống dòng nằm dưới dạng \n ngay trước
+--    chữ Kho — mẫu coi \n \r \t là ranh giới trái và giữ lại nó (\1). Các dòng chuỗi cũ bên dưới là NGUỒN KHỚP nên mang
+--    chú thích cho phép của kiểm CI chống lộ thông tin riêng.
 UPDATE agent.gen_messages
-   SET content = regexp_replace(content::text, 'Kho Ryan', 'Kho dữ liệu', 'gi')::jsonb -- allow-personal-info
- WHERE content::text ~* 'Kho Ryan'; -- allow-personal-info
+   SET content = regexp_replace(content::text, '(^|[^[:alnum:]_]|\\[nrt])Kho Ryan(?![[:alnum:]_])', '\1Kho dữ liệu', 'gi')::jsonb -- allow-personal-info
+ WHERE role = 'assistant' AND content::text ~* '(^|[^[:alnum:]_]|\\[nrt])Kho Ryan(?![[:alnum:]_])'; -- allow-personal-info
 UPDATE core.notifications
-   SET title = regexp_replace(title, 'Kho Ryan', 'Kho dữ liệu', 'gi'), -- allow-personal-info
-       body = regexp_replace(body, 'Kho Ryan', 'Kho dữ liệu', 'gi') -- allow-personal-info
- WHERE title ~* 'Kho Ryan' OR body ~* 'Kho Ryan'; -- allow-personal-info
+   SET title = regexp_replace(title, '\yKho Ryan\y', 'Kho dữ liệu', 'gi'), -- allow-personal-info
+       body = regexp_replace(body, '\yKho Ryan\y', 'Kho dữ liệu', 'gi') -- allow-personal-info
+ WHERE title ~* '\yKho Ryan\y' OR body ~* '\yKho Ryan\y'; -- allow-personal-info
 
 -- d) (D3, F124 / QD-18) ghi chú máy chủ Gen-hub đã lưu nói "(chỉ đọc)" dù Gen ghi được Kho khi Sếp Xác nhận + mã PIN.
 --    Khớp mọi tên Kho (mặc định hoặc Owner tự đặt) và chỉ dòng còn đúng ghi chú hệ thống cũ — ghi chú Owner tự sửa không đụng.

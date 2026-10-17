@@ -217,6 +217,38 @@ async def test_qd22_migration_0040_cleans_stored_old_kho_name_and_is_rerunnable(
         assert dump() == first
 
 
+async def test_qd22_migration_0040_only_rewrites_assistant_text_on_word_boundary(owner_api: Api, db: Any,
+                                                                                 fresh_db: str) -> None:
+    """Review P3: 0040 mục c chỉ sửa lời Gen (role='assistant') — lời Sếp gõ (role='user') nguyên văn; chỉ khớp cả từ
+    ("Kho Ryanx", "xKho Ryan" giữ nguyên) nhưng vẫn khớp sau xuống dòng (JSON lưu "\\n" ngay trước chữ Kho)."""
+    org = await org_id(db)
+    uid = (await db.execute(text("SELECT id FROM core.users WHERE org_id = :o LIMIT 1"), {"o": org})).scalar_one()
+    await db.rollback()
+    old = f"Kho {OLD_NAME.removeprefix('Kho ')}"
+    sql = SQL_0040.read_text(encoding="utf-8")
+    rows = [("user", f"Sếp gõ: ghi vào {old} nhé"),
+            ("assistant", f"Dòng một\n{old} là nơi lưu"),
+            ("assistant", f"Không đụng {old}x hay x{old} hay {old}y"),
+            ("assistant", f"Đã ghi vào {old.upper()}.")]
+    with psycopg.connect(f"{PG}/{fresh_db}", autocommit=True) as c:
+        conv = c.execute("""INSERT INTO agent.gen_conversations (org_id, user_id, title) VALUES (%s, %s, 'T')
+                            RETURNING id""", (org, uid)).fetchone()
+        assert conv is not None
+        for role, content in rows:
+            c.execute("INSERT INTO agent.gen_messages (conversation_id, org_id, role, content) "
+                      "VALUES (%s, %s, %s, %s::jsonb)", (conv[0], org, role, json.dumps({"text": content})))
+        for _ in range(2):  # chạy lại không đổi thêm
+            c.execute(sql)  # type: ignore[call-overload]
+        got = [(r[0], r[1]["text"]) for r in c.execute(
+            "SELECT role, content FROM agent.gen_messages ORDER BY created_at, content::text").fetchall()]
+    assert sorted(got) == sorted([
+        ("user", rows[0][1]),
+        ("assistant", "Dòng một\nKho dữ liệu là nơi lưu"),
+        ("assistant", rows[2][1]),
+        ("assistant", "Đã ghi vào Kho dữ liệu."),
+    ])
+
+
 def test_qd22_no_old_name_in_runtime_strings_or_registry() -> None:
     """QD-22: chuỗi chạy thật + registry sinh ra không chứa tên riêng cũ (bổ sung test_no_personal_info_v0156)."""
     for rel in ("gen/registry.json", "gen/coach/content/lessons.json", "gen/coach/content/tips.json"):
