@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -48,6 +49,8 @@ BACKUP_STALE_LIMITS: dict[str, tuple[timedelta, str]] = {
 #: Cập nhật lỗi chỉ còn là sự cố trong 24 giờ sau khi xong — khớp thẻ cập nhật ở web (updateModel.ts RECENT_MS):
 #: quá hạn thì thẻ không còn lỗi để xem/thử lại, dải "Cần Sếp xử lý" cũng thôi báo.
 UPDATE_FAILED_RECENT = timedelta(hours=24)
+#: F103: tổ chức chưa đặt lịch sao lưu quá thời gian này (kể từ lúc tạo) ⇒ sự cố backup.stale "chưa cấu hình".
+BACKUP_UNCONFIGURED_GRACE = timedelta(hours=24)
 WORKER_SILENT_MINUTES = 10
 HEARTBEAT_KEY = "gh:worker:heartbeat"
 #: Nhịp tim cầu nối tin nhắn (apps/bridge ghi mỗi 15 giây, TTL 45 giây). Khoá HẾT HẠN sau 45 giây nên "mất khoá" không
@@ -250,12 +253,27 @@ async def raise_once(db: AsyncSession, org_id: uuid.UUID, *, key: str, kind: str
     return True
 
 
-async def clear(db: AsyncSession, org_id: uuid.UUID, key: str) -> bool:
-    """Đóng sự cố `key` đang mở (hết sự cố). Trả True nếu có dòng được đóng. Bên gọi commit."""
-    res = await db.execute(text("""UPDATE ops.health_alerts SET cleared_at = now()
-                                   WHERE org_id = :o AND key = :k AND cleared_at IS NULL"""),
-                           {"o": org_id, "k": key})
-    return bool(getattr(res, "rowcount", 0))
+async def clear(db: AsyncSession, org_id: uuid.UUID, key: str, *, label: bool = True) -> bool:
+    """Đóng sự cố `key` đang mở (hết sự cố). Trả True nếu có dòng được đóng. Bên gọi commit.
+
+    v0.1.69 (F098): đóng sự cố thì chuông của nó cũng tắt — đã đọc + "Đã xử lý" (`notifications.resolve_incident`).
+    `label=False` (gộp sự cố này vào sự cố khác, vd. offsite.failed → offsite.stale) chỉ đánh dấu đã đọc, không nói
+    "Đã xử lý" vì vấn đề vẫn còn."""
+    from gh import notifications
+
+    row = (await db.execute(text("""UPDATE ops.health_alerts SET cleared_at = now()
+                                    WHERE org_id = :o AND key = :k AND cleared_at IS NULL
+                                    RETURNING kind, title"""), {"o": org_id, "k": key})).first()
+    if row is None:
+        return False
+    # Còn sự cố MỞ khác cùng `kind` (job.timeout:<tên>, model.auth_expired:<id>) ⇒ chỉ chuông cùng tiêu đề; không
+    # thì mọi
+    # chuông của kind (tiêu đề từng đổi theo số phút/ngày giữa các lần mở).
+    others = (await db.execute(text("""SELECT EXISTS (SELECT 1 FROM ops.health_alerts
+                                       WHERE org_id = :o AND kind = :kind AND key <> :k AND cleared_at IS NULL)"""),
+                               {"o": org_id, "kind": row.kind, "k": key})).scalar_one()
+    await notifications.resolve_incident(db, org_id, kind=row.kind, title=row.title if others else None, label=label)
+    return True
 
 
 async def active_issues(db: AsyncSession, org_id: uuid.UUID, *, is_owner: bool = True) -> list[dict[str, Any]]:
@@ -720,6 +738,25 @@ def _update_failed_recent(st: dict[str, Any], now: datetime) -> bool:
     return finished is not None and now - finished < UPDATE_FAILED_RECENT
 
 
+_GH_CODE = re.compile(r"GH-E[0-9A-F]{3}")
+
+
+def _update_fingerprint(st: dict[str, Any]) -> str:
+    """Dấu vân của sự cố update.failed: bản đích + mã lỗi genh (GH-Exxx cuối thông điệp) + mức độ — KHÔNG gồm giờ kết
+    thúc (F104: lịch đêm thử lại cùng một lỗi mỗi đêm từng sinh thêm một chuông đỏ mỗi sáng). Lỗi khác mã hoặc kết cục
+    nặng hơn (quay về bản cũ cũng lỗi) thì dấu vân đổi ⇒ vẫn có chuông mới."""
+    codes = _GH_CODE.findall(st.get("message") or "") if isinstance(st.get("message"), str) else []
+    if st.get("interrupted"):
+        level = f"interrupted-{st['interrupted']}"
+    elif st.get("blocked_rollback_failed") is True:
+        level = "rollback_failed"
+    elif st.get("blocked_version"):
+        level = "rolled_back"
+    else:
+        level = "failed"
+    return f"{st.get('to') or ''}|{codes[-1] if codes else 'no_code'}|{level}"
+
+
 async def _eval_update(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: datetime) -> None:
     from gh.system_api import update as upd
 
@@ -729,8 +766,8 @@ async def _eval_update(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
     state = st.get("state")
     if _update_failed_recent(st, now):
         target = st.get("to") or "bản mới"
-        fingerprint = f"{st.get('finished_at') or ''}|{st.get('to') or ''}"
         interrupted = st.get("interrupted")
+        fingerprint = _update_fingerprint(st)
         if interrupted:
             # GH-E94B (máy tắt/khởi động lại/bị dừng tay) mà không dở dang: không phải bản mới hỏng ⇒ 'warn', không
             # gióng chuông đỏ "chưa thành công" trái với thẻ cập nhật ("Đây không phải lỗi của bản mới").
@@ -761,8 +798,21 @@ async def _eval_backup(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
     from zoneinfo import ZoneInfo
 
     cfg = await _org_backup_cfg(db, org_id)
-    if cfg is None or not cfg.configured:
+    if cfg is None:
         await clear(db, org_id, "backup.stale")
+        return
+    if not cfg.configured:
+        # F103: chưa có lịch sao lưu (Sếp rời thiết lập trước bước 11) thì KHÔNG có bản sao lưu tự động nào — trước đây
+        # chỉ có dòng vàng "Chưa cấu hình" nằm sâu trong Cài đặt. Quá `BACKUP_UNCONFIGURED_GRACE` kể từ lúc tạo tổ
+        # chức ⇒ sự cố backup.stale có chuông (tổ chức mới cài chưa kịp đi tới bước 11 thì chưa báo); có lịch ⇒ tự đóng.
+        if cfg.created_at is not None and now - cfg.created_at > BACKUP_UNCONFIGURED_GRACE:
+            await raise_once(db, org_id, key="backup.stale", kind="backup.stale", severity="warn",
+                             title="Chưa đặt lịch sao lưu tự động",
+                             body="Máy chưa tự sao lưu — hỏng ổ đĩa là mất dữ liệu. Mở mục Sao lưu, chọn tần suất và "
+                                  "giờ chạy rồi bấm lưu.",
+                             link=BACKUP_LINK, fingerprint="not_configured", redis=redis)
+        else:
+            await clear(db, org_id, "backup.stale")
         return
     latest = await _latest_backup()
     limit_text = backup_stale_limit(cfg.frequency)[1]
@@ -981,6 +1031,10 @@ def _offsite_stale(st: dict[str, Any], org_created: datetime | None, now: dateti
     return org_created is not None and now - org_created > limit
 
 
+#: Mã lỗi offsite cùng nguyên nhân với offsite.stale (chưa chọn nơi lưu / chưa thấy ổ) — F104: khi bản sao đã cũ thì
+#: không mở thêm offsite.failed, cách chữa của hai sự cố là một.
+OFFSITE_SAME_CAUSE = frozenset({"GH-EB00", "GH-EB01"})
+
 #: Thân chuông offsite.failed theo mã genh — chuỗi cố định (không lấy chữ từ run/).
 OFFSITE_FAILED_BODY = {
     "GH-EB00": "Chưa chọn nơi lưu — bấm 'Chọn nơi lưu bản sao ngoài máy'",
@@ -1011,7 +1065,8 @@ async def _eval_offsite(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: da
     cfg = await _org_backup_cfg(db, org_id)
     created = cfg.created_at if cfg else None
 
-    if _offsite_stale(st, created, now):
+    stale = _offsite_stale(st, created, now)
+    if stale:
         last = _parse_ts(st["last_success_at"])
         if not st["configured"]:
             await raise_once(db, org_id, key="offsite.stale", kind="offsite.stale", severity="warn",
@@ -1039,8 +1094,12 @@ async def _eval_offsite(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: da
     success = _parse_ts(st["last_success_at"])
     failed = (st["state"] in ("failed", "not_mounted") and attempt is not None
               and (success is None or attempt > success))
-    if failed:
-        code = st["error_code"] or ("GH-EB01" if st["state"] == "not_mounted" else "")
+    code = st["error_code"] or ("GH-EB01" if st["state"] == "not_mounted" else "")
+    if failed and stale and code in OFFSITE_SAME_CAUSE:
+        # F104: ổ chưa cắm/chưa chọn nơi lưu VÀ bản sao đã cũ là MỘT nguyên nhân, MỘT cách chữa ⇒ một sự cố (stale),
+        # không hai dòng + hai chuông. Dòng failed đang mở (mở lúc bản sao chưa đủ cũ) đóng gộp vào stale.
+        await clear(db, org_id, "offsite.failed", label=False)
+    elif failed:
         await raise_once(db, org_id, key="offsite.failed", kind="offsite.failed", severity="warn",
                          title="Sao lưu ra ổ ngoài chưa thành công",
                          body=OFFSITE_FAILED_BODY.get(code, OFFSITE_FAILED_GENERIC), link=OFFSITE_LINK,

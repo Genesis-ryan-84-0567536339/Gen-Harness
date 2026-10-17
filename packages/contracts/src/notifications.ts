@@ -19,11 +19,17 @@ export interface NotificationItem {
   link: string | null;
   created_at: string;
   read: boolean;
+  /** v0.1.69 (F098): sự cố sinh ra chuông này đã đóng ⇒ chuông hiện "Đã xử lý" (đã đọc, hết đỏ). */
+  resolved?: boolean;
+  resolved_at?: string | null;
 }
 
 export interface NotificationsPage {
   items: NotificationItem[];
+  /** Số chưa đọc của TOÀN BỘ thông báo (không chỉ phần `items` đang liệt kê). */
   unread: number;
+  /** v0.1.69 (F098): tổng số thông báo — lớn hơn `items.length` thì chuông hiện "Xem thêm". */
+  total?: number;
 }
 
 export function notificationsEndpoints(r: ApiClient['request']) {

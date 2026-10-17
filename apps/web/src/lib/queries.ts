@@ -22,6 +22,15 @@ export const useHeaderStatus = () =>
     refetchInterval: 60_000,
   });
 
+/** v0.1.69 (F098): chuông "Xem thêm" — tải tối đa 100 thông báo (giới hạn của API); chỉ chạy khi `enabled`. */
+export const NOTIFICATIONS_ALL_LIMIT = 100;
+export const useAllNotifications = (enabled: boolean) =>
+  useQuery({
+    queryKey: [...qk.notifications, 'all'] as const,
+    queryFn: ({ signal }) => api.notifications.list(NOTIFICATIONS_ALL_LIMIT, signal),
+    enabled,
+  });
+
 /** B6: 20 thông báo gần nhất + số chưa đọc. WS là đường chính; hỏi lại mỗi 2 phút phòng khi socket rớt. */
 export const useNotifications = (enabled = true) =>
   useQuery({

@@ -174,7 +174,9 @@ async def test_system_health_offsite_block_and_actions(owner_api: Api, link: Pat
     assert body["overall"] in ("warn", "bad")
     actions = {i["kind"]: i["action"] for i in body["issues"]}
     assert actions["offsite.stale"] == health.ACTIONS["offsite.stale"] == "Chọn nơi lưu / sao lưu ngay"
-    assert actions["offsite.failed"] == health.ACTIONS["offsite.failed"] == "Xem bản sao ngoài máy"
+    # v0.1.69 (F104): ổ chưa cắm + bản sao đã cũ là MỘT nguyên nhân ⇒ chỉ một sự cố (offsite.stale).
+    assert "offsite.failed" not in actions
+    assert health.ACTIONS["offsite.failed"] == "Xem bản sao ngoài máy"
     assert health.ACTIONS["job.timeout"] == "Xem sức khoẻ"
 
 

@@ -6,7 +6,7 @@ import { Icon, Skeleton, Tooltip } from '@gen-harness/ui';
 import { api } from '../lib/api';
 import { errorText } from '../lib/errorText';
 import { fmtAgo } from '../lib/format';
-import { qk, useNotifications } from '../lib/queries';
+import { qk, useAllNotifications, useNotifications } from '../lib/queries';
 import { toast } from '../lib/toast';
 import { useNow } from '../lib/useNow';
 import { badgeText } from './headerModel';
@@ -148,6 +148,9 @@ function NotificationPanel({ onClose }: { onClose: (refocus: boolean) => void })
   const now = useNow(30_000);
   const panel = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
+  // v0.1.69 (F098): "Xem thêm" — danh sách đầu chỉ 20 mục, số chưa đọc thì đếm hết.
+  const [expanded, setExpanded] = useState(false);
+  const all = useAllNotifications(expanded);
 
   useEffect(() => {
     panel.current?.focus();
@@ -159,11 +162,12 @@ function NotificationPanel({ onClose }: { onClose: (refocus: boolean) => void })
       const hit = (n: NotificationItem) => !ids || ids.includes(n.id);
       const items = prev.items.map((n) => (hit(n) ? { ...n, read: true } : n));
       const cleared = prev.items.filter((n) => hit(n) && !n.read).length;
-      qc.setQueryData<NotificationsPage>(qk.notifications, { items, unread: Math.max(0, prev.unread - (ids ? cleared : prev.unread)) });
+      qc.setQueryData<NotificationsPage>(qk.notifications, { ...prev, items, unread: Math.max(0, prev.unread - (ids ? cleared : prev.unread)) });
     }
     try {
       const r = await api.notifications.markRead(ids);
       qc.setQueryData<NotificationsPage>(qk.notifications, (old) => (old ? { ...old, unread: r.unread } : old));
+      if (expanded) void qc.invalidateQueries({ queryKey: [...qk.notifications, 'all'] });
     } catch (e) {
       if (prev) qc.setQueryData(qk.notifications, prev);
       toast(errorText(e), 'bad');
@@ -194,6 +198,9 @@ function NotificationPanel({ onClose }: { onClose: (refocus: boolean) => void })
   };
 
   const unread = q.data?.unread ?? 0;
+  const shown = (expanded ? all.data?.items : undefined) ?? q.data?.items ?? [];
+  const total = q.data?.total ?? shown.length;
+  const hasMore = !expanded && total > shown.length;
   return (
     <div className="nt-panel" role="dialog" aria-label="Thông báo" tabIndex={-1} ref={panel} onKeyDown={onKeyDown}>
       <div className="nt-head">
@@ -225,16 +232,22 @@ function NotificationPanel({ onClose }: { onClose: (refocus: boolean) => void })
               Thử lại
             </button>
           </div>
-        ) : q.data.items.length === 0 ? (
+        ) : shown.length === 0 ? (
           <div className="nt-state">
             <Icon name="ph ph-bell-slash" size={18} />
             <span>Chưa có thông báo nào.</span>
           </div>
         ) : (
           <ul className="nt-items">
-            {q.data.items.map((n) => (
+            {shown.map((n) => (
               <li key={n.id}>
-                <button type="button" className="nt-item" data-unread={!n.read || undefined} onClick={() => openItem(n)}>
+                <button
+                  type="button"
+                  className="nt-item"
+                  data-unread={!n.read || undefined}
+                  data-resolved={n.resolved || undefined}
+                  onClick={() => openItem(n)}
+                >
                   <span className="nt-item__icon" aria-hidden>
                     <Icon name={KIND_ICON[n.kind] ?? 'ph ph-bell'} size={14} />
                   </span>
@@ -242,6 +255,7 @@ function NotificationPanel({ onClose }: { onClose: (refocus: boolean) => void })
                     <span className="nt-item__title">
                       {n.title}
                       {!n.read ? <span className="visually-hidden"> (chưa đọc)</span> : null}
+                      {n.resolved ? <span className="nt-item__resolved">Đã xử lý</span> : null}
                     </span>
                     {n.body ? <span className="nt-item__body">{n.body}</span> : null}
                     <span className="nt-item__time">{fmtAgo(n.created_at, now)}</span>
@@ -252,6 +266,24 @@ function NotificationPanel({ onClose }: { onClose: (refocus: boolean) => void })
             ))}
           </ul>
         )}
+        {hasMore ? (
+          <button type="button" className="nt-more" onClick={() => setExpanded(true)}>
+            Xem thêm ({total - shown.length})
+          </button>
+        ) : null}
+        {expanded && all.isPending ? (
+          <div className="nt-state" aria-busy="true" aria-label="Đang tải thêm thông báo">
+            <Skeleton width="80%" height={9} />
+          </div>
+        ) : null}
+        {expanded && all.isError ? (
+          <div className="nt-state">
+            Không tải được thêm thông báo.{' '}
+            <button type="button" className="nt-link" onClick={() => void all.refetch()}>
+              Thử lại
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -99,8 +99,12 @@ def _iso(dt: datetime | None) -> str | None:
 
 
 def _out(r: Any) -> dict[str, Any]:
+    # v0.1.69 (F098): `resolved` = sự cố sinh ra chuông này đã đóng ("Đã xử lý") — chuông vẫn nằm trong danh sách để Sếp
+    # biết đã có chuyện, nhưng không còn đỏ/chưa đọc.
+    resolved_at = getattr(r, "resolved_at", None)
     return {"id": str(r.id), "kind": r.kind, "title": r.title, "body": r.body, "link": r.link,
-            "created_at": _iso(r.created_at), "read": r.read_at is not None}
+            "created_at": _iso(r.created_at), "read": r.read_at is not None,
+            "resolved": resolved_at is not None, "resolved_at": _iso(resolved_at)}
 
 
 async def owner_ids(db: AsyncSession, org_id: uuid.UUID) -> list[uuid.UUID]:
@@ -122,7 +126,7 @@ async def notify(db: AsyncSession, org_id: uuid.UUID, user_ids: Iterable[uuid.UU
         row = (await db.execute(text("""
             INSERT INTO core.notifications (org_id, user_id, kind, title, body, link, created_at)
             VALUES (:o, :u, :k, :t, :b, :l, clock_timestamp())
-            RETURNING id, kind, title, body, link, created_at, read_at"""),
+            RETURNING id, kind, title, body, link, created_at, read_at, resolved_at"""),
             {"o": org_id, "u": uid, "k": kind, "t": title[:MAX_TITLE], "b": body[:MAX_BODY],
              "l": (link or None) and link[:MAX_LINK]})).one()
         item = _out(row)
@@ -130,6 +134,22 @@ async def notify(db: AsyncSession, org_id: uuid.UUID, user_ids: Iterable[uuid.UU
         if redis is not None:
             _queue_publish(db, redis, org_id, uid, item)
     return out
+
+
+async def resolve_incident(db: AsyncSession, org_id: uuid.UUID, *, kind: str, title: str | None = None,
+                           label: bool = True) -> int:
+    """v0.1.69 (F098): sự cố sức khoẻ đóng ⇒ chuông của chính sự cố đó tắt — `read_at` (hết đỏ, hết đếm "chưa đọc") và,
+    khi `label`, `resolved_at` ("Đã xử lý" ở chuông). `title` khác None ⇒ chỉ chuông có đúng tiêu đề đó (nhiều khoá cùng
+    `kind`, vd. `job.timeout:<tên hàm>`: đóng một khoá không được tắt chuông của khoá còn mở). Không đụng chuông đã
+    gắn nhãn; chạy lại an toàn. Bên gọi commit. Trả số chuông đã đổi."""
+    res = await db.execute(text("""
+        UPDATE core.notifications
+           SET read_at = COALESCE(read_at, now()),
+               resolved_at = CASE WHEN :lab THEN now() ELSE resolved_at END
+         WHERE org_id = :o AND kind = :k AND resolved_at IS NULL AND (:lab OR read_at IS NULL)
+           AND (CAST(:t AS text) IS NULL OR title = :t)"""),
+        {"o": org_id, "k": kind, "t": title, "lab": label})
+    return int(getattr(res, "rowcount", 0) or 0)
 
 
 # Hạn lưu (v0.1.27): đã đọc quá 30 ngày → xoá; mọi thông báo (kể cả chưa đọc) quá 90 ngày → xoá. Job worker
@@ -165,15 +185,23 @@ async def _unread(db: AsyncSession, user: service.CurrentUser) -> int:
     return n
 
 
+async def _total(db: AsyncSession, user: service.CurrentUser) -> int:
+    n: int = (await db.execute(text("SELECT count(*) FROM core.notifications WHERE org_id = :o AND user_id = :u"),
+                               {"o": user.org_id, "u": user.id})).scalar_one()
+    return n
+
+
 @router.get("")
 async def list_notifications(limit: int = Query(20, ge=1, le=100),
                              user: service.CurrentUser = Depends(current_user),
                              db: AsyncSession = DB) -> dict[str, Any]:
+    """`unread` đếm TOÀN BỘ chưa đọc, `items` chỉ `limit` mục mới nhất — `total` cho chuông biết còn bao nhiêu để hiện
+    "Xem thêm" (F098: từng ghi 35 chưa đọc mà chỉ thấy 20)."""
     rows = (await db.execute(text("""
-        SELECT id, kind, title, body, link, created_at, read_at FROM core.notifications
+        SELECT id, kind, title, body, link, created_at, read_at, resolved_at FROM core.notifications
         WHERE org_id = :o AND user_id = :u ORDER BY created_at DESC, id DESC LIMIT :l"""),
         {"o": user.org_id, "u": user.id, "l": limit})).all()
-    return {"items": [_out(r) for r in rows], "unread": await _unread(db, user)}
+    return {"items": [_out(r) for r in rows], "unread": await _unread(db, user), "total": await _total(db, user)}
 
 
 class ReadIn(BaseModel):

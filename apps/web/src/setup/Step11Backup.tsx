@@ -18,7 +18,7 @@ const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
  * vòng đời GIỮ LUÔN CỐ ĐỊNH theo GFS 7 ngày/4 tuần/12 tháng (`gh/backup.py`, v0.1.1 mục 5.6), không cấu hình
  * được ở đây (nên KHÔNG có ô "giữ bao nhiêu bản" hay đích MinIO — MinIO đã gỡ khỏi hệ thống ở v0.1.1). Vẫn gửi
  * `retention_count`/`destination` mặc định lên API để tương thích với client cũ đọc lại state này. */
-export function Step11Backup({ meta, description, onBack, onSaved, formRef, onSkip, skipping, skipError }: StepProps) {
+export function Step11Backup({ meta, status, description, onBack, onSaved, formRef, onSkip, skipping, skipError }: StepProps) {
   const [frequency, setFrequency] = useState<Frequency>('daily');
   const [timeOfDay, setTimeOfDay] = useState('02:00');
   const [busy, setBusy] = useState(false);
@@ -26,6 +26,9 @@ export function Step11Backup({ meta, description, onBack, onSaved, formRef, onSk
   const [timeTouched, setTimeTouched] = useState(false);
 
   useEffect(() => setFormError(null), [frequency, timeOfDay]);
+
+  // F103: lịch mặc định chỉ được GHI khi Sếp bấm Tiếp tục / Để sau ở bước này — chưa bấm thì chưa "đã tự bật".
+  const scheduled = status === 'done' || status === 'skipped';
 
   const timeInvalid = timeTouched && !TIME_RE.test(timeOfDay);
   const canContinue = TIME_RE.test(timeOfDay);
@@ -60,10 +63,11 @@ export function Step11Backup({ meta, description, onBack, onSaved, formRef, onSk
       formError={formError ?? skipError}
     >
       <div className="setup-section" data-testid="step11-default">
-        <div className="setup-section__title">Sao lưu đã tự bật</div>
+        <div className="setup-section__title">{scheduled ? 'Sao lưu đã tự bật' : 'Sao lưu sẽ tự bật khi Sếp đi tiếp'}</div>
         <p className="muted-note">
-          Hằng ngày lúc 02:00, giữ 7 bản gần nhất, lưu mã hoá ngay trong máy chủ. Đi tiếp hay bấm Để sau thì lịch này vẫn chạy; muốn đổi giờ hay
-          tần suất thì mở “Đổi lịch” bên dưới.
+          {scheduled
+            ? 'Hằng ngày lúc 02:00, giữ 7 bản gần nhất, lưu mã hoá ngay trong máy chủ. Đi tiếp hay bấm Để sau thì lịch này vẫn chạy; muốn đổi giờ hay tần suất thì mở “Đổi lịch” bên dưới.'
+            : 'Hằng ngày lúc 02:00, giữ 7 bản gần nhất, lưu mã hoá ngay trong máy chủ. Lịch này chỉ được ghi khi Sếp bấm Tiếp tục hoặc Để sau ở bước này; rời đi trước đó thì máy chưa tự sao lưu. Muốn đổi giờ hay tần suất thì mở “Đổi lịch” bên dưới.'}
         </p>
       </div>
       <details className="setup-section brain-advanced">

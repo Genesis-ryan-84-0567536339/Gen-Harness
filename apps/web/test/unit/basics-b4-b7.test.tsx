@@ -180,6 +180,34 @@ describe('B6 — chuông thông báo', () => {
     expect(await screen.findByText('Chưa có thông báo nào.')).toBeInTheDocument();
   });
 
+  it('F098: chuông đã xử lý hiện nhãn "Đã xử lý"; nhiều hơn 20 thì "Xem thêm" tải đủ', async () => {
+    const first: NotificationsPage = {
+      items: [N({ id: 'a', title: 'Cập nhật chưa thành công', read: true, resolved: true }), N({ id: 'b', title: 'Ổ đĩa sắp đầy' })],
+      unread: 3,
+      total: 4,
+    };
+    const full: NotificationsPage = {
+      items: [...first.items, N({ id: 'c', title: 'Việc nền c' }), N({ id: 'd', title: 'Việc nền d', read: true })],
+      unread: 3,
+      total: 4,
+    };
+    stubApi((m, url) => {
+      if (m === 'GET' && url.includes('limit=100')) return { status: 200, body: full };
+      if (m === 'GET' && url.includes('/notifications')) return { status: 200, body: first };
+      return undefined;
+    });
+    wrap(<NotificationBell />);
+    await userEvent.click(await screen.findByRole('button', { name: /Thông báo — 3 chưa đọc/ }));
+    const dlg = screen.getByRole('dialog', { name: 'Thông báo' });
+    const resolvedItem = within(dlg).getByRole('button', { name: /Cập nhật chưa thành công/ });
+    expect(within(resolvedItem).getByText('Đã xử lý')).toBeInTheDocument();
+    expect(within(dlg).queryByText('Việc nền c')).toBeNull();
+    await userEvent.click(within(dlg).getByRole('button', { name: /Xem thêm \(2\)/ }));
+    expect(await within(dlg).findByText('Việc nền c')).toBeInTheDocument();
+    expect(within(dlg).getByText('Việc nền d')).toBeInTheDocument();
+    expect(within(dlg).queryByRole('button', { name: /Xem thêm/ })).toBeNull();
+  });
+
   it('WS notification.new chèn đầu danh sách, tăng số chưa đọc, không trùng', () => {
     const qc = new QueryClient();
     qc.setQueryData<NotificationsPage>(qk.notifications, page);
