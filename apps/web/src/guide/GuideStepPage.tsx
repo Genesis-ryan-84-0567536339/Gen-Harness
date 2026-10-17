@@ -3,7 +3,7 @@ import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { EmptyState, Icon } from '@gen-harness/ui';
 import { api } from '../lib/api';
-import { qk } from '../lib/queries';
+import { qk, useMe } from '../lib/queries';
 import { queryClient } from '../lib/queryClient';
 import { toast } from '../lib/toast';
 import { OWNER_HOME } from '../owner/ownerModel';
@@ -42,10 +42,13 @@ export function GuideStepPage() {
   const formRef = useRef<HTMLFormElement>(null);
   // v0.1.68 (F145): việc thiết lập chỉ Owner làm — vai khác thấy khung "Việc này do Owner làm" (như trang /guide), không phải
   // "Không tải được dữ liệu — Vai trò của bạn không có quyền" + Thử lại, và không gọi các API chỉ Owner dùng (403 ở console).
-  // Chỉ ĐỌC bộ nhớ đệm của /auth/me (khung ứng dụng đã tải sẵn) — không gọi thêm, không ghi đè khi test dựng sẵn vai.
-  const role = useQuery({ queryKey: qk.me, queryFn: ({ signal }) => api.auth.me(signal), enabled: false }).data?.role?.code;
+  // Review v0.1.68 (P3): vai lấy từ truy vấn /auth/me THẬT (dùng chung khoá `qk.me` với khung ứng dụng nên thường đã có sẵn trong
+  // bộ nhớ đệm, không gọi thêm). Trước đây `enabled: false` chỉ đọc đệm — tải thẳng /guide/n khi đệm trống thì vai coi như
+  // Owner và gọi API chỉ Owner dùng (403). Chưa biết vai thì CHỜ, chưa tải form.
+  const me = useMe();
+  const role = me.data?.role?.code;
   const nonOwner = !!role && role !== 'owner';
-  const state = useQuery({ queryKey: qk.setupState, queryFn: ({ signal }) => api.setup.state(signal), enabled: !nonOwner });
+  const state = useQuery({ queryKey: qk.setupState, queryFn: ({ signal }) => api.setup.state(signal), enabled: !!role && !nonOwner });
   const guide = GUIDE_BY_N[n];
 
   useEffect(() => {
@@ -68,6 +71,16 @@ export function GuideStepPage() {
             title="Việc này do Owner làm"
             description="Kết nối kênh, chọn nhóm, sao lưu… chỉ Owner cài đặt được. Cần thêm gì, hãy nhắn Owner."
           />
+        </div>
+      </div>
+    );
+  }
+
+  if (!role) {
+    return (
+      <div className="screen guide-step">
+        <div className="gh-card">
+          {me.isError ? <CardError error={me.error} onRetry={() => void me.refetch()} retrying={me.isFetching} /> : <SkeletonLines rows={6} />}
         </div>
       </div>
     );

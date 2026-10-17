@@ -26,7 +26,7 @@ const finished: SetupState = {
 
 afterEach(() => vi.unstubAllGlobals());
 
-function renderStep(n: number, role: RoleCode, handler: (url: string, init?: RequestInit) => unknown) {
+function renderStep(n: number, role: RoleCode, handler: (url: string, init?: RequestInit) => unknown, seedMe = true) {
   const calls: string[] = [];
   vi.stubGlobal(
     'fetch',
@@ -38,7 +38,7 @@ function renderStep(n: number, role: RoleCode, handler: (url: string, init?: Req
     }),
   );
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  qc.setQueryData(qk.me, me(role));
+  if (seedMe) qc.setQueryData(qk.me, me(role));
   render(
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={[`/guide/${n}`]}>
@@ -74,6 +74,25 @@ describe('F145 — /guide/n cho vai không phải Owner', () => {
     expect(screen.getByRole('link', { name: /Hướng dẫn thiết lập/ })).toHaveAttribute('href', '/guide');
     await new Promise((r) => setTimeout(r, 30));
     expect(calls.filter((c) => /\/setup\/|\/channels|\/refinery|\/rules/.test(c))).toEqual([]);
+  });
+});
+
+describe('Review v0.1.68 (P3) — /guide/n không dựa vào bộ nhớ đệm /auth/me có sẵn', () => {
+  it('Operator, bộ nhớ đệm vai TRỐNG (tải thẳng /guide/5): vẫn thấy khung "do Owner làm", không gọi API chỉ Owner dùng', async () => {
+    const calls = renderStep(5, 'operator', () => ({}), false);
+    expect(await screen.findByText('Việc này do Owner làm')).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls.filter((c) => /\/setup\/|\/channels|\/refinery|\/rules/.test(c))).toEqual([]);
+    expect(screen.queryByText(/Không tải được dữ liệu/)).toBeNull();
+  });
+
+  it('Owner, bộ nhớ đệm vai trống: chờ biết vai rồi mới tải form (không gọi /setup/state trước khi biết)', async () => {
+    const calls = renderStep(10, 'owner', () => finished, false);
+    expect(await screen.findByRole('button', { name: /Tiếp tục/ })).toBeInTheDocument();
+    const firstSetup = calls.findIndex((c) => /\/setup\//.test(c));
+    const meCall = calls.findIndex((c) => /\/auth\/me/.test(c));
+    expect(meCall).toBeGreaterThanOrEqual(0);
+    expect(firstSetup).toBeGreaterThan(meCall);
   });
 });
 
