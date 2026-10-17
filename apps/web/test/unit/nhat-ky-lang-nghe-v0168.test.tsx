@@ -304,6 +304,18 @@ describe('cập nhật trực tiếp qua WebSocket', () => {
     setListenLogLive(true);
   });
 
+  it('tín hiệu WebSocket chỉ làm mới danh sách, không làm mới số liệu 24 giờ (review Opus P3)', async () => {
+    const qc = new QueryClient();
+    qc.setQueryData([...qkLog.listRoot, {}], { pages: [], pageParams: [] });
+    qc.setQueryData(qkLog.stats, STATS);
+    const spy = vi.spyOn(qc, 'invalidateQueries');
+    vi.useFakeTimers();
+    applyEvent(qc, { type: 'listen.event', data: {} } as never);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith({ queryKey: qkLog.listRoot });
+  });
+
   it('không tải lại khi màn không mở (chưa có truy vấn nhật ký trong bộ nhớ đệm)', async () => {
     const qc = new QueryClient();
     const spy = vi.spyOn(qc, 'invalidateQueries');

@@ -5,6 +5,8 @@ import { api } from './api';
 /** Khoá truy vấn của Nhật ký lắng nghe — một gốc để làm mới cả danh sách lẫn số liệu đầu màn. */
 export const qkLog = {
   root: ['listenlog'] as const,
+  /** Gốc của MỌI truy vấn danh sách (không gồm số liệu 24 giờ) — tín hiệu WebSocket chỉ làm mới phần này. */
+  listRoot: ['listenlog', 'list'] as const,
   list: (q: ListenLogQuery) => ['listenlog', 'list', q] as const,
   stats: ['listenlog', 'stats'] as const,
 };
@@ -55,7 +57,9 @@ export function scheduleListenLogRefresh(qc: QueryClient): void {
   const wait = Math.max(0, Math.min(TRAILING_MS, firstAt + MAX_WAIT_MS - now));
   timer = setTimeout(() => {
     timer = null;
-    void qc.invalidateQueries({ queryKey: qkLog.root });
+    // Chỉ danh sách: số liệu 24 giờ đầu màn tự làm mới theo chu kỳ riêng (2 phút) và nút «Làm mới» — không kéo theo
+    // mỗi nhịp WebSocket (sàng lọc bắn cả trăm tín hiệu).
+    void qc.invalidateQueries({ queryKey: qkLog.listRoot });
   }, wait);
 }
 
