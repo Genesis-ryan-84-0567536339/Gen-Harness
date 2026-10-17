@@ -173,7 +173,7 @@ async def change_pin(body: PinIn, response: Response, user: service.CurrentUser 
     if not service.valid_pin(body.new_pin):
         errors["new_pin"] = "PIN gồm đúng 6 chữ số"
     elif body.new_pin_confirm != body.new_pin:
-        errors["new_pin_confirm"] = "Hai lần nhập PIN chưa khớp"
+        errors["new_pin_confirm"] = "Hai lần nhập mã PIN chưa khớp"
     if errors:
         raise field_errors(errors)
     await _check_password(db, user, body.current_password, purpose="pin.change")

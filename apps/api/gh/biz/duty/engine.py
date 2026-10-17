@@ -100,7 +100,7 @@ Trả về DUY NHẤT một đối tượng JSON:
     if c.from_us:
         head.append("Tin này do phía mình (nhân viên/Sếp) nói ra, không phải khách.")
     if c.group_id and c.listen_mode == "silent" and not c.tagged:
-        head.append("Nhóm đang ở chế độ nghe im lặng: không soạn tin trả lời trừ khi được tag.")
+        head.append("Nhóm đang ở chế độ Lắng nghe im lặng: không soạn tin trả lời trừ khi được tag.")
     body = "\n".join(i.line() for i in ctx.items)
     user = "\n".join(head) + f"\n\nNgữ cảnh (mỗi dòng: mã rồi JSON):\n{body}"
     return [Message("system", system), Message("user", user)]
@@ -230,7 +230,7 @@ async def apply(db: AsyncSession, org_id: uuid.UUID, ctx: Context, parsed: Parse
     if c.from_us:
         why = "tin do phía mình nói ra, không soạn trả lời"
     elif c.group_id and c.listen_mode == "silent" and not c.tagged:
-        why = "nhóm nghe im lặng: chỉ soạn tin khi được tag"
+        why = "nhóm ở chế độ Lắng nghe im lặng: chỉ soạn tin khi được tag"
     elif not c.tagged and (code := await _pending_draft(db, agent.id, c)):
         why = f"đã có bản nháp {code} chờ duyệt cho cùng nơi nhận"
     elif await _drafts_last_hour(db, agent.id) >= limits_of(agent)["drafts_per_hour"]:

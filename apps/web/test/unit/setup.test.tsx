@@ -256,7 +256,7 @@ describe('<SetupPage> — Thiết lập một màn, 3 bước', () => {
     await user.keyboard('246811');
     expect(next).toBeDisabled();
     await user.tab();
-    expect(await screen.findByText('Hai lần nhập PIN chưa khớp.')).toBeInTheDocument();
+    expect(await screen.findByText('Hai lần nhập mã PIN chưa khớp.')).toBeInTheDocument();
 
     await user.click(screen.getByLabelText('Nhập lại mã PIN — chữ số 6/6'));
     await user.keyboard('{Backspace}0');

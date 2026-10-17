@@ -998,7 +998,7 @@ async def patch_permissions(body: PermissionPatch, user: service.CurrentUser = D
     if body.role == rbac.OWNER and body.scope != rbac.ALL:
         raise field_errors({"scope": "Owner luôn toàn quyền ở mọi cột — khoá cứng, không sửa được"})
     if body.role == rbac.AUDITOR and body.permission in rbac.WRITE_PERMISSIONS and body.scope != rbac.NONE:
-        raise field_errors({"scope": "Auditor không bao giờ có quyền ghi — khoá cứng, không sửa được"})
+        raise field_errors({"scope": "Vai Kiểm soát không bao giờ có quyền ghi — khoá cứng, không sửa được"})
     row = (await db.execute(text("""
         SELECT rp.scope, r.id AS role_id FROM core.role_permissions rp JOIN core.roles r ON r.id = rp.role_id
         WHERE r.org_id = :o AND r.code = :role AND rp.permission_code = :perm"""),

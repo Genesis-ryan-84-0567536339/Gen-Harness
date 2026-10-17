@@ -940,7 +940,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       if (user.role.code !== 'owner') return { status: 409, code: 'NO_PIN', title: 'Tài khoản này không dùng mã PIN' };
       const pin = String(body.new_pin ?? '');
       if (!/^\d{6}$/.test(pin)) return invalid({ new_pin: 'PIN gồm đúng 6 chữ số' });
-      if (body.new_pin_confirm !== pin) return invalid({ new_pin_confirm: 'Hai lần nhập PIN chưa khớp' });
+      if (body.new_pin_confirm !== pin) return invalid({ new_pin_confirm: 'Hai lần nhập mã PIN chưa khớp' });
       if (body.current_password !== user.password) {
         record(user, 'account.password_check_failed', 'failed');
         return invalid({ current_password: WRONG_PW });
@@ -1068,7 +1068,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
           const errors: Record<string, string> = {};
           if (String(body.password ?? '').length < 12) errors.password = 'Mật khẩu cần ít nhất 12 ký tự.';
           if (!/^\d{6}$/.test(String(body.pin ?? ''))) errors.pin = 'PIN gồm đúng 6 chữ số.';
-          if (body.pin !== body.pin_confirm) errors.pin_confirm = 'Hai lần nhập PIN chưa khớp.';
+          if (body.pin !== body.pin_confirm) errors.pin_confirm = 'Hai lần nhập mã PIN chưa khớp.';
           if (users.some((u) => u.email === body.email)) errors.email = 'Email đã được dùng.';
           if (Object.keys(errors).length) return problem(res, 422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors });
           addOwner(String(body.email), String(body.password), String(body.pin), String(body.display_name));

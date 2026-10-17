@@ -99,7 +99,7 @@ describe('accountModel', () => {
     });
     expect(pinErrors({ current_password: 'x', new_pin: '12345', new_pin_confirm: '12345' }).new_pin).toBe('PIN gồm đúng 6 chữ số.');
     expect(pinErrors({ current_password: 'x', new_pin: '123456', new_pin_confirm: '123457' }).new_pin_confirm).toBe(
-      'Hai lần nhập PIN chưa khớp.',
+      'Hai lần nhập mã PIN chưa khớp.',
     );
   });
   it('mô tả thiết bị từ user-agent', () => {
