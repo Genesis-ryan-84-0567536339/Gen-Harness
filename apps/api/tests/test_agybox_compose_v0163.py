@@ -12,8 +12,8 @@ REPO = Path(__file__).resolve().parents[3]
 COMPOSE = yaml.safe_load((REPO / "deploy" / "compose.yaml").read_text(encoding="utf-8"))
 SERVICES: dict[str, Any] = COMPOSE["services"]
 BOX: dict[str, Any] = SERVICES["agy-box"]
-ENV_ALLOWED = {"GH_AGYBOX_KEY_FILE", "GH_CLI_HOME", "GH_CLI_BINARY", "AGY_CLI_DISABLE_AUTO_UPDATE",
-               "GH_AGYBOX_MAX_JOBS"}
+ENV_ALLOWED = {"GH_AGYBOX_KEY_FILE", "GH_CLI_BINARY", "AGY_CLI_DISABLE_AUTO_UPDATE", "GH_AGYBOX_MAX_JOBS",
+               "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"}
 
 
 def _nets(svc: dict[str, Any]) -> set[str]:
@@ -35,8 +35,9 @@ def test_box_env_is_exactly_the_allowlist_no_db_redis_or_keys() -> None:
         assert bad not in flat, bad
 
 
-def test_box_networks_are_agy_bus_and_agy_out_only() -> None:
-    assert _nets(BOX) == {"agy-bus", "agy-out"}
+def test_box_network_is_internal_agy_bus_only() -> None:
+    """Review v0.1.63 (P2-2): hộp chỉ ở agy-bus (internal); ra ngoài qua proxy agy-egress (chặn IP nội bộ)."""
+    assert _nets(BOX) == {"agy-bus"}
     nets = COMPOSE["networks"]
     assert nets["agy-bus"].get("internal") is True
     assert not nets["agy-out"].get("internal")
@@ -58,21 +59,17 @@ def test_box_hardening() -> None:
     assert BOX["healthcheck"]["test"][0] == "CMD" and "8090/healthz" in BOX["healthcheck"]["test"][-1]
 
 
-def test_box_mounts_only_agy_state_nocopy_after_api() -> None:
-    vols = BOX["volumes"]
-    assert len(vols) == 1
-    assert vols[0]["source"] == "agy_state" and vols[0]["target"] == "/var/lib/gh/agy"
-    # Giống worker: api chép nội dung ảnh (chủ gh:gh) vào volume mới trước; hộp mount nocopy sau, không tranh chép.
-    assert vols[0]["volume"] == {"nocopy": True}
-    assert BOX["depends_on"] == {"api": {"condition": "service_started"}}
-    for forbidden in ("claude_state", "gh_objects", "pg_data", "redis_data", "/var/run/docker.sock", "host"):
-        assert forbidden not in str(vols)
+def test_box_mounts_no_volume_at_all() -> None:
+    """Review v0.1.63 (P1-1): hộp không mount volume nào — kể cả agy_state (token đến theo từng yêu cầu đã ký); thứ duy
+    nhất ghi được là tmpfs /tmp (HOME tạm mỗi lượt), mất khi container dừng."""
+    assert "volumes" not in BOX and "volumes_from" not in BOX
+    assert "GH_CLI_HOME" not in BOX["environment"]
 
 
 def test_only_api_and_worker_reach_the_box() -> None:
     on_bus = {n for n, s in SERVICES.items() if "agy-bus" in _nets(s)}
-    assert on_bus == {"api", "worker", "agy-box"}
-    assert {n for n, s in SERVICES.items() if "agy-out" in _nets(s)} == {"agy-box"}
+    assert on_bus == {"api", "worker", "agy-box", "agy-egress"}
+    assert {n for n, s in SERVICES.items() if "agy-out" in _nets(s)} == {"agy-egress"}
     holders = {n for n, s in SERVICES.items() if "gh_agy_key" in (s.get("secrets") or [])}
     assert holders == {"api", "worker", "agy-box"}
     for n in ("api", "worker"):
@@ -88,9 +85,9 @@ def test_box_not_on_default_or_browser_networks_and_peers_not_exposed() -> None:
         assert not _nets(SERVICES[n]) & {"agy-bus", "agy-out"}, n
 
 
-def test_agy_state_only_in_api_worker_box() -> None:
+def test_agy_state_only_in_api_worker() -> None:
     users = {n for n, s in SERVICES.items() if "agy_state" in str(s.get("volumes", ""))}
-    assert users == {"api", "worker", "agy-box"}
+    assert users == {"api", "worker"}
 
 
 def test_make_secrets_generates_the_key() -> None:

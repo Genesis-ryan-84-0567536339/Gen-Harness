@@ -45,7 +45,7 @@ from typing import Any
 import orjson
 
 from gh.config import get_settings
-from gh.providers.clients import TOKEN_FILE, AgyClient, cli_env, cli_home_dir
+from gh.providers.clients import TOKEN_FILE, AgyClient, cli_env, cli_home_dir, read_token_file
 
 CANARY_MODEL = "gemini-3.1-pro"
 PROC1_ENVIRON = Path("/proc/1/environ")   # tiến trình api/worker trong container = PID 1
@@ -179,13 +179,22 @@ async def run(live: bool, environ: Path = PROC1_ENVIRON, secrets_dir: Path = RUN
                             and not any(p.is_file() for p in _walk(home, ".credentials.json")),
     }
     if live:
-        checks["co_phien"] = (cli_home_dir(s.cli_home) / TOKEN_FILE).exists()
+        checks["co_phien"] = read_token_file(cli_home_dir(s.cli_home) / TOKEN_FILE) is not None
         if not checks["co_phien"]:
             return {"result": "loi", "checks": checks, "agy_version": await _version(client), "mode": "live"}
     canary = f"GHCANARY-{secrets.token_hex(16)}"
     needle = canary.encode()
     box = Path(tempfile.mkdtemp(prefix="gh-canary-"))
     result: dict[str, Any] = {"mode": "live" if live else "offline"}
+    # Review v0.1.63 (P1-1): mỗi lượt agy chạy với HOME TẠM (xoá sau lượt) ⇒ log agy nằm ở đó — móc `on_home` đọc log
+    # và quét canary trên HOME tạm ngay trước khi xoá (ngoài HOME của kho phiên).
+    seen: dict[str, Any] = {"leak": False, "logs": []}
+
+    def capture(turn_home: Path) -> None:
+        seen["leak"] = seen["leak"] or any(_contains(p, needle) for p in _walk(turn_home))
+        seen["logs"] += [p.read_text(errors="replace") for p in _log_files(turn_home)]
+
+    client.on_home = capture
     try:
         secret = box / "canary"
         fd = os.open(secret, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -204,10 +213,10 @@ async def run(live: bool, environ: Path = PROC1_ENVIRON, secrets_dir: Path = RUN
         checks["chay_duoc"] = ran
         both = out + b"\n" + err
         checks["dau_ra_khong_lo"] = needle not in both
-        checks["log_khong_lo"] = not any(_contains(p, needle) for p in _walk(home))
+        checks["log_khong_lo"] = not seen["leak"] and not any(_contains(p, needle) for p in _walk(home))
         logs = [p for p in _log_files(home) if p.stat().st_mtime >= started]
         newest = max(logs, key=lambda p: p.stat().st_mtime) if logs else None
-        text = newest.read_text(errors="replace") if newest else ""
+        text = "\n".join(seen["logs"]) + (newest.read_text(errors="replace") if newest else "")
         # Go đếm byte (len(string)); chấp nhận cả số ký tự để không phụ thuộc cách agy đo.
         checks["stdin_toi_print_mode"] = any(f"promptLength={n}" in text
                                              for n in {len(prompt), len(prompt.encode())})

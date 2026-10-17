@@ -2,7 +2,7 @@
 # Sinh deploy/compose.release.yaml từ deploy/compose.yaml: thay từng dòng
 # "build: { context: .., dockerfile: ... }" bằng "image: <tham chiếu đã ghim
 # digest>" cho các service hiện build cục bộ (web, migrate, api, worker,
-# bridge, db, browser, browser-egress, agy-box) — xem docs/handoff/05-installer.md mục "Phát hành":
+# bridge, db, browser, browser-egress, agy-box, agy-egress) — xem docs/handoff/05-installer.md mục "Phát hành":
 # "compose.yaml nhúng trong genh ghim đúng digest của bản phát hành đó."
 #
 # migrate/api/worker/agy-box (v0.1.63, hộp riêng Antigravity) dùng CHUNG
@@ -89,7 +89,7 @@ cp "$IN" "$OUT"
 
 # replace_build_line <dockerfile path như xuất hiện trong compose.yaml> <image ref thay vào>
 # Thay MỌI dòng khớp (sed xử lý từng dòng của cả file) — đúng ý muốn cho
-# api.Dockerfile xuất hiện ở 4 service (migrate/api/worker/agy-box).
+# api.Dockerfile xuất hiện ở 5 service (migrate/api/worker/agy-box/agy-egress — proxy lối ra của hộp, review v0.1.63 P2-2).
 replace_build_line() {
 	local dockerfile="$1" image="$2"
 	local pattern="build: { context: .., dockerfile: ${dockerfile} }"
