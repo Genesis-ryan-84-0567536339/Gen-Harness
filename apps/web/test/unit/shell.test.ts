@@ -50,7 +50,8 @@ describe('screen registry', () => {
     // + Trang cảnh báo gửi Facebook (social/ghi-facebook, v0.1.47)
     // + Mặt tiền Owner (v0.1.55): 4 màn con tương đối của /owner (quan-he, viec, gen, them)
     // + Mặt tiền v2 (v0.1.59): thêm 2 trụ cột thong-tin, phan-tich ⇒ 6 màn con của /owner.
-    expect(paths).toHaveLength(39);
+    // + Nhật ký lắng nghe (listenlog, v0.1.71).
+    expect(paths).toHaveLength(40);
     for (const p of ['thong-tin', 'quan-he', 'phan-tich', 'viec', 'gen', 'them']) expect(paths).toContain(p);
     expect(paths).toContain('social/ghi-facebook');
     expect(paths).toContain('domain:business > connections');

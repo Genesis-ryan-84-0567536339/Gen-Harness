@@ -134,6 +134,8 @@ Luật cứng:
 ### 4.2 Ingest → Kho thô
 Consumer `ingest` (trong api) đọc `gh.bridge.inbound`, trong **một transaction**: ánh xạ nhóm/người gửi (`core.groups`, `core.person_identities`, tạo mới nếu chưa có), `INSERT raw.events` (khử trùng `(channel_id, external_msg_id)` + `content_hash`), `INSERT refinery.event_state(state='pending')`, `NOTIFY raw_ingested`; rồi `XACK`. Đẩy dòng mới tới màn Kho dữ liệu thô qua WebSocket (mục tiêu ≤ 2 giây từ lúc tin đến — handoff 07).
 
+**Nhật ký lắng nghe (v0.1.71).** Cột `raw.events.listen_mode` ghi chế độ nghe của nhóm (hoặc `silent|reply` của tin 1-1) LÚC tin vào kho. Ingest cũng ghi sự kiện nhẹ vào `ops.listen_events` (nhóm mới/rời/đổi tên/trở lại, thành viên vào-rời của nhóm đang nghe, phiên kênh nối/ngắt/đăng xuất, người lạ nhắn riêng lần đầu; lần quét danh bạ đầu tiên chỉ ghi một dòng tóm tắt) rồi phát WebSocket `listen.event` (chỉ tín hiệu). `GET /listen-log` (`gh/data_api/listen_log.py`) gộp `raw.events` + `ops.listen_events` thành một dòng thời gian, kèm sàng lọc (`refinery.event_state`), quyết định agent (`clean.evidence → agent.decisions`) và bản nháp; quyền = `data.read` + phạm vi nhóm + `direct_visible_sql` (tin 1-1), che số dài cho vai dưới Owner — không đường lách (xem `docs/api/phase-2.md`).
+
 ### 4.3 Core agent sàng lọc (refinery) — chu kỳ HOẶC ngưỡng
 - Cấu hình `refinery.schedule`: `interval_seconds` (mặc định 900), `count_threshold` (500), `batch_size` (250), `min_confidence` (0,60) — khớp `triggerConfig` của thiết kế. Chạy khi **điều kiện nào tới trước**.
 - **Đường nhanh** (quyết định Q3): tin tag agent và tin 1-1 được sàng lọc ngay khi tới, một lô 1 bản ghi, cùng quy tắc, cùng `SKIP LOCKED` → agent trực kênh trả lời không phải chờ chu kỳ.
@@ -345,6 +347,7 @@ Thực thể spec G1 → bảng:
 | cột `permit_hash`, `permit_expires_at` ở `biz.action_drafts` | Permit dùng một lần (§7.3). |
 | `agent.cli_profiles` | Nhiều tài khoản Antigravity CLI, một hồ sơ hoạt động (§11). |
 | `core.assignments` | Khách được phân cho Agent nhân viên, hàng đợi cho Operator (phạm vi `assigned`). |
+| `ops.listen_events` + cột `raw.events.listen_mode` (v0.1.71, migration 0041) | Sự kiện kênh và chế độ nghe lúc tin vào cho Nhật ký lắng nghe (§4.2). |
 
 ---
 

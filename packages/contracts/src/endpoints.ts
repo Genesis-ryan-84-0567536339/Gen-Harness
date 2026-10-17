@@ -21,6 +21,7 @@ import { diagnosticsEndpoints } from './diagnostics';
 import { pluginsEndpoints } from './p4-plugins';
 import { systemEndpoints } from './p4-system';
 import { defaultsEndpoints } from './defaults';
+import { listenLogEndpoints } from './listenLog';
 import { ownerEndpoints } from './owner';
 import type { Step10Body, Step11Body, Step10Invited, BackupConfig, Step8Body, Step8Agent, Step9Body, Step9State, SetupFollowUpItem } from './p4-system';
 import type {
@@ -325,6 +326,8 @@ export function createEndpoints(client: ApiClient) {
     diagnostics: diagnosticsEndpoints(r),
     /** v0.1.55 (G1): "Chế độ tiêu chuẩn" / "Về mặc định" — chỉ Owner. */
     defaults: defaultsEndpoints(r),
+    /** v0.1.71: Nhật ký lắng nghe — `api.listenLog.list(q) · stats()` (quyền `data.read`). */
+    listenLog: listenLogEndpoints(r),
     /**
      * v0.1.55 (G5) + v0.1.59 (G1): Mặt tiền Owner `/owner/*` — chỉ đọc, chỉ Owner, không gọi model:
      * `api.owner.today() · brief(id?) · feed(q) · feedContext(id) · relations(list) · insights(range, only?) ·

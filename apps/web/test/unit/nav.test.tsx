@@ -27,15 +27,15 @@ describe('navModel', () => {
     expect(findActive(NAV, 'nope')).toBeNull();
   });
 
-  it('lists every screen key in the tree, hidden ones included (21 design + 3 spec extras + Kết nối, Đội ngũ)', () => {
-    expect(screenKeys(NAV).size).toBe(26);
+  it('lists every screen key in the tree, hidden ones included (21 design + 3 spec extras + Kết nối, Đội ngũ + Nhật ký lắng nghe)', () => {
+    expect(screenKeys(NAV).size).toBe(27);
     expect(screenKeys(NAV).has('profile')).toBe(true);
     expect(screenKeys(NAV).has('plugins')).toBe(true);
   });
 
   it('v0.1.42: count = số màn không ẩn; Nâng cao thu gọn mặc định', () => {
-    expect(NAV.map((d) => d.count)).toEqual([14, 10]);
-    expect(buildNavigation(new Set(), true, { hasStaff: false }).map((d) => d.count)).toEqual([12, 10]);
+    expect(NAV.map((d) => d.count)).toEqual([14, 11]);
+    expect(buildNavigation(new Set(), true, { hasStaff: false }).map((d) => d.count)).toEqual([12, 11]);
     expect(business.collapsed).toBe(false);
     expect(tech.collapsed).toBe(true);
     expect(visibleGroups(tech).map((g) => g.key ?? g.name)).toEqual(['Tầng dữ liệu', 'Agent & Model', 'graph', 'supply']);

@@ -1,5 +1,6 @@
 import type { GenDoneEvent, GenStepEvent } from './gen';
 import type { NotificationItem } from './notifications';
+import type { ListenEventSignal } from './listenLog';
 /**
  * Phase-2 API types, hand-written from docs/api/phase-2.md (tầng dữ liệu,
  * kênh, bộ não AI, trình thiết lập 4–7 + 12, WebSocket). Numbers are raw —
@@ -669,6 +670,8 @@ export interface RealtimeEventMap {
   'channel.qr': ChannelQrEvent;
   'channel.status': ChannelStatusEvent;
   'group.discovered': GroupDiscoveredEvent;
+  /** v0.1.71: sự kiện kênh cho Nhật ký lắng nghe — chỉ tín hiệu (xem listenLog.ts). */
+  'listen.event': ListenEventSignal;
   'cli.login': CliLoginEvent;
   header: HeaderEvent;
   'gen.step': GenStepEvent;

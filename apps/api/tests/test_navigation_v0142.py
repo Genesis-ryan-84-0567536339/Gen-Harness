@@ -61,7 +61,7 @@ async def test_owner_tree_without_staff(owner_api: Api) -> None:
     for k in ALWAYS_HIDDEN | STAFF_ONLY:
         assert keys[k].get("hidden") is True, k
     assert all("hidden" not in n for n in walk(nav) if n["key"] not in ALWAYS_HIDDEN | STAFF_ONLY)
-    assert [d["count"] for d in nav] == [12, 10]
+    assert [d["count"] for d in nav] == [12, 11]
     assert [c["key"] for c in keys["team"]["children"]] == ["people", "care"]
     assert [c["key"] for c in keys["graph"]["children"]] == ["notebook"]
 
@@ -72,13 +72,13 @@ async def test_staff_reveals_people_and_care(owner_api: Api, db) -> None:  # typ
     nav = (await owner_api.get("/navigation")).json()
     assert by_key(nav)["people"].get("hidden") is True                # đã xoá / đã gộp ⇒ không tính
     assert by_key(nav)["care"].get("hidden") is True
-    assert [d["count"] for d in nav] == [12, 10]
+    assert [d["count"] for d in nav] == [12, 11]
     await add_staff(db, "NV-001")
     nav = (await owner_api.get("/navigation")).json()
     keys = by_key(nav)
     assert "hidden" not in keys["people"] and "hidden" not in keys["care"]
     assert keys["profile"]["hidden"] is True and keys["plugins"]["hidden"] is True
-    assert [d["count"] for d in nav] == [14, 10]
+    assert [d["count"] for d in nav] == [14, 11]
 
 
 async def test_names_and_icons(owner_api: Api) -> None:

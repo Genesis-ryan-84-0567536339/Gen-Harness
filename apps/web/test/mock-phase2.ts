@@ -38,6 +38,7 @@ import type {
   ViewScope,
   Weight,
 } from '../../../packages/contracts/src/phase2';
+import type { ListenLogDecision, ListenLogEvent, ListenLogItem, ListenLogMessage } from '../../../packages/contracts/src/listenLog';
 
 // ── seed file ─────────────────────────────────────────────────────────────
 type SeedRow = Record<string, unknown>;
@@ -747,6 +748,102 @@ export function createPhase2(opts: Phase2Options) {
 
   // ── realtime simulation ──
   let simSeq = 0;
+
+  // ── Nhật ký lắng nghe (v0.1.71): dòng thời gian gộp tin Kho thô + sự kiện kênh, dựng từ chính `raw` ở trên ──
+  const MODE_LABEL: Record<string, string> = {
+    pending: 'Chờ Sếp chọn', off: 'Không nghe', tagged_only: 'Nghe hết, chỉ trả lời khi được tag', silent: 'Lắng nghe im lặng',
+    proactive: 'Chủ động bắt tín hiệu', paused: 'Tạm dừng',
+  };
+  const EVENT_ICON: Record<string, [string, string]> = {
+    group_new: ['ph ph-users-three', 'accent'], group_left: ['ph ph-sign-out', 'warn'], group_rejoined: ['ph ph-sign-in', 'ok'],
+    group_renamed: ['ph ph-pencil-simple', 'neutral'], members_changed: ['ph ph-user-plus', 'neutral'],
+    channel_connected: ['ph ph-plugs-connected', 'ok'], channel_error: ['ph ph-wifi-slash', 'warn'], channel_ended: ['ph ph-plugs', 'bad'],
+    direct_new: ['ph ph-user-circle-plus', 'accent'], groups_synced: ['ph ph-address-book', 'neutral'],
+  };
+  const logEvents: ListenLogEvent[] = [];
+  const mkEvent = (at: number, type: string, text: string, o: { ch?: 'zalo' | 'whatsapp'; gid?: string; direct?: boolean; mode?: ListenMode } = {}): ListenLogEvent => {
+    const [icon, tone] = EVENT_ICON[type] ?? ['ph ph-info', 'neutral'];
+    const g = o.gid ? groupRef(o.gid) : null;
+    return {
+      kind: 'event', id: randomUUID(), at: iso(at), event_type: type, icon, tone, text,
+      channel: o.ch ? { type: o.ch, name: o.ch === 'zalo' ? 'Zalo' : 'WhatsApp' } : null, group: g, person: null, direct: !!o.direct,
+      listen_mode: o.mode ?? null, listen_mode_label: o.mode ? MODE_LABEL[o.mode] : null, raw_event_id: null,
+    };
+  };
+  if (!fresh) {
+    const t0 = anchorBase();
+    logEvents.push(
+      mkEvent(t0 - 3 * 60_000, 'group_new', 'Tài khoản Zalo của Sếp vừa được thêm vào nhóm «Đại lý Tây Nguyên». Nhóm tự vào chế độ: Lắng nghe im lặng.', { ch: 'zalo', mode: 'silent' }),
+      mkEvent(t0 - 41 * 60_000, 'members_changed', 'Nhóm «Vận hành Genesis — Quý 4»: 2 thành viên mới (Nguyễn Văn Bảo, Lê Minh Tâm), 1 thành viên rời (Phạm Thu Hà).', { ch: 'zalo', gid: 'GRP-ZL-0114' }),
+      mkEvent(t0 - 95 * 60_000, 'channel_error', 'Kênh WhatsApp mất kết nối, đang tự nối lại.', { ch: 'whatsapp' }),
+      mkEvent(t0 - 92 * 60_000, 'channel_connected', 'Kênh WhatsApp đã nối lại (WhatsApp Sếp).', { ch: 'whatsapp' }),
+      mkEvent(t0 - 3 * 3600_000, 'group_renamed', 'Nhóm «Truyền thông» đổi tên thành «Truyền thông & Sự kiện».', { ch: 'zalo', gid: 'GRP-ZL-0502' }),
+      mkEvent(t0 - 5 * 3600_000, 'group_left', 'Tài khoản WhatsApp của Sếp không còn trong nhóm «Hội cựu sinh viên» (đã rời hoặc bị mời ra).', { ch: 'whatsapp', gid: 'GRP-WA-0027' }),
+      mkEvent(t0 - 26 * 3600_000, 'channel_ended', 'Kênh Zalo đã đăng xuất.', { ch: 'zalo' }),
+      mkEvent(t0 - 25 * 3600_000, 'channel_connected', 'Kênh Zalo đã đăng nhập (Zalo Sếp).', { ch: 'zalo' }),
+    );
+    // Người mới nhắn riêng: chỉ Owner thấy (quy tắc 1-1).
+    logEvents.push({ ...mkEvent(t0 - 12 * 60_000, 'direct_new', 'Người mới nhắn riêng lần đầu trên Zalo: Trịnh Hoài Nam.', { ch: 'zalo', direct: true }), person: { id: 'p-nam', code: 'PER-1002', name: 'Trịnh Hoài Nam' } });
+  }
+  const dmRows = (): ListenLogMessage[] =>
+    fresh
+      ? []
+      : [
+          {
+            kind: 'message', id: 'dm-1', at: iso(anchorBase() - 11 * 60_000), code: 'RAW-918900', channel: { type: 'zalo', name: 'Zalo' }, group: null, direct: true,
+            sender: { id: 'p-nam', code: 'PER-1002', name: 'Trịnh Hoài Nam' }, direction: 'inbound', msg_kind: 'text',
+            text: 'Chào anh, em muốn hỏi báo giá 3 container thép cuộn, số của em 0912345678.', tagged: false, listen_mode: 'silent', listen_mode_label: 'Tin riêng — lưu im lặng',
+            listen_mode_known: true, screening: { state: 'clean', label: 'AskedPrice', confidence: 0.91, note: 'Đã vào kho sạch' }, decisions: [],
+            note: 'Tin riêng ở chế độ lưu im lặng — không đưa cho agent trực',
+          },
+        ];
+  const decisionsFor = (r: RawItem, idx: number): ListenLogDecision[] => {
+    if (r.state !== 'clean' || !r.group) return [];
+    const base = { at: iso(new Date(r.received_at).getTime() + 40_000), agent: { id: 'agent-mai', name: 'Trợ lý Mai' } };
+    if (idx % 6 === 0)
+      return [{ ...base, id: `dec-${r.id}`, decision: 'draft', outcome: 'held', label: 'Nháp trả lời: chờ duyệt', draft: { id: `draft-${idx}`, code: `ACT-${String(231 + idx).padStart(4, '0')}`, status: 'pending' } }];
+    if (idx % 6 === 2) return [{ ...base, id: `dec-${r.id}`, decision: 'note', outcome: 'noted', label: 'Ghi chú vào sổ tay', draft: null }];
+    if (idx % 6 === 4) return [{ ...base, id: `dec-${r.id}`, decision: 'silent', outcome: 'none', label: 'Im lặng', draft: null }];
+    return [];
+  };
+  const logMessages = (owner: boolean): ListenLogMessage[] => {
+    const rows: ListenLogMessage[] = [];
+    raw.forEach((r, idx) => {
+      const g = groups.find((x) => x.code === r.group?.code);
+      if (!g || !isListening(g)) return;
+      const decisions = decisionsFor(r, idx);
+      const quiet =
+        decisions.length === 0 && r.state === 'clean'
+          ? g.listen_mode === 'silent'
+            ? 'Nhóm ở chế độ Lắng nghe im lặng — agent chỉ trả lời khi được tag'
+            : 'Chưa có agent nào quyết định cho tin này'
+          : null;
+      rows.push({
+        kind: 'message', id: r.id, at: r.received_at, code: r.code, channel: r.channel, group: r.group, direct: false,
+        sender: r.person ? { id: r.person.id, code: r.person.code, name: r.person.name } : null, direction: r.direction, msg_kind: r.kind,
+        text: owner ? r.text : (maskText(r.text) ?? r.text), tagged: g.listen_mode === 'tagged_only' && idx % 4 === 0,
+        listen_mode: g.listen_mode, listen_mode_label: MODE_LABEL[g.listen_mode] ?? null, listen_mode_known: idx % 9 !== 8,
+        screening: {
+          state: r.state, label: r.label, confidence: r.confidence,
+          note: r.state === 'discarded' ? 'Đã loại khi sàng lọc: Trùng hẳn một tin đã có' : r.state === 'clean' ? 'Đã vào kho sạch' : 'Chờ lượt sàng lọc tới',
+        },
+        decisions, note: quiet,
+      });
+    });
+    return owner ? [...rows, ...dmRows()] : rows;
+  };
+  const logAll = (ctx: P2Ctx): ListenLogItem[] => {
+    const evs = logEvents.filter((e) => ctx.owner || !e.direct);
+    return [...logMessages(ctx.owner), ...evs].sort((a, b) => b.at.localeCompare(a.at));
+  };
+  const pushEvent = () => {
+    const g = groups.filter((x) => isListening(x))[simSeq % 3];
+    if (!g) return null;
+    const ev = mkEvent(Date.now(), 'members_changed', `Nhóm «${g.name}»: 1 thành viên mới (${PEOPLE[simSeq % PEOPLE.length][1]}).`, { ch: g.channel, gid: g.code });
+    logEvents.unshift(ev);
+    emit('listen.event', { id: ev.id, at: ev.at, event_type: ev.event_type, channel_type: g.channel, group_id: g.id, owner_only: false });
+    return ev;
+  };
   const pushRaw = () => {
     const tpl = RAW_TEMPLATES[simSeq % RAW_TEMPLATES.length];
     const listeningGroups = groups.filter((g) => isListening(g));
@@ -762,6 +859,7 @@ export function createPhase2(opts: Phase2Options) {
     rawPending++;
     g.raw24h++;
     emit('raw.new', item);
+    if (simSeq % 4 === 0) pushEvent();
     later(2500, () => {
       item.state = 'processing';
       emit('raw.state', { id: item.id, state: 'processing', label: null, confidence: null });
@@ -903,6 +1001,55 @@ export function createPhase2(opts: Phase2Options) {
 
     // pipeline
     if (p === '/data/pipeline' && m === 'GET') return need('data.read') ? reply(200, pipeline()) : true;
+
+    // Nhật ký lắng nghe (v0.1.71)
+    if (seg[0] === 'listen-log') {
+      if (!need('data.read')) return true;
+      if (seg[1] === 'stats' && m === 'GET') {
+        const day = Date.now() - 86_400_000;
+        const items = logAll(ctx).filter((i) => new Date(i.at).getTime() >= day);
+        const by = (['zalo', 'whatsapp'] as const).map((t) => ({
+          type: t, name: t === 'zalo' ? 'Zalo' : 'WhatsApp',
+          messages_24h: items.filter((i) => i.kind === 'message' && i.channel.type === t).length,
+          events_24h: items.filter((i) => i.kind === 'event' && i.channel?.type === t).length,
+          groups_listening: groups.filter((g) => g.channel === t && isListening(g)).length,
+        }));
+        reply(200, {
+          by_channel: by, messages_24h: by.reduce((n, c) => n + c.messages_24h, 0), events_24h: by.reduce((n, c) => n + c.events_24h, 0),
+          groups_listening: groups.filter((g) => isListening(g)).length,
+          groups: groups.filter((g) => isListening(g)).map((g) => ({ id: g.id, code: g.code, name: g.name, channel: g.channel, listen_mode: g.listen_mode })),
+        });
+        return true;
+      }
+      if (seg.length === 1 && m === 'GET') {
+        const ch = q.get('channel');
+        const gid = q.get('group_id');
+        const kind = q.get('kind') ?? 'all';
+        const search = (q.get('q') ?? '').toLowerCase();
+        const since = q.get('since') ?? '7d';
+        const sinceMs = since === '24h' ? 86_400_000 : since === '7d' ? 7 * 86_400_000 : since === '30d' ? 30 * 86_400_000 : Infinity;
+        const tagged = q.get('tagged') === 'true';
+        const acted = q.get('acted') === 'true';
+        const items = logAll(ctx).filter((i) => {
+          if (kind !== 'all' && i.kind !== kind) return false;
+          if ((tagged || acted) && i.kind === 'event') return false;
+          if (ch && (i.kind === 'message' ? i.channel.type : i.channel?.type) !== ch) return false;
+          if (gid && i.group?.id !== gid) return false;
+          if (Date.now() - new Date(i.at).getTime() > sinceMs + 86_400_000) return false;
+          if (i.kind === 'message' && tagged && !i.tagged) return false;
+          if (i.kind === 'message' && acted && !i.decisions.some((d) => d.decision !== 'silent')) return false;
+          if (search) {
+            const hay = i.kind === 'message' ? `${i.text ?? ''} ${i.sender?.name ?? ''} ${i.group?.name ?? ''}` : `${i.text} ${i.group?.name ?? ''}`;
+            if (!hay.toLowerCase().includes(search)) return false;
+          }
+          return true;
+        });
+        const limit = Math.min(100, Number(q.get('limit') ?? 50));
+        const off = Number(q.get('cursor') ?? 0);
+        reply(200, { items: items.slice(off, off + limit), next_cursor: off + limit < items.length ? String(off + limit) : null, decisions_visible: has(ctx, 'system.read') });
+        return true;
+      }
+    }
 
     // raw
     if (seg[0] === 'raw') {
@@ -1632,6 +1779,7 @@ export function createPhase2(opts: Phase2Options) {
     hooks: {
       rulesEnabled: () => rules.some((r) => r.enabled),
       pushRaw,
+      pushEvent,
       scan,
       setSimulation,
       setBridge: (on: boolean) => {

@@ -39,6 +39,7 @@ EVENT_PERMISSION: dict[str, str | None] = {
     "channel.qr": "system.read",
     "channel.status": "system.read",
     "group.discovered": "system.read",   # v0.1.65: nhóm mới phát hiện ⇒ Console hỏi Sếp Im lặng/Không nghe
+    "listen.event": "data.read",         # v0.1.71: sự kiện kênh cho Nhật ký lắng nghe (chỉ tín hiệu, không câu chữ)
     "cli.login": "system.manage",
     "header": None,
 }
@@ -49,6 +50,10 @@ MASKED_EVENTS = {"raw.new"}
 # Sự kiện mang NGUYÊN VĂN một tin: tin 1-1 (`data.group` rỗng) chỉ gửi cho Owner — vai dưới (kể cả Kiểm soát có
 # data.read) không nhận chuyện riêng của khách qua WebSocket (review v0.1.65 P2-2).
 OWNER_ONLY_WHEN_DIRECT = {"raw.new"}
+
+# Sự kiện tự khai báo `owner_only` trong gói tin (sự kiện 1-1 của Nhật ký lắng nghe — sự kiện kênh không thuộc nhóm
+# nào cũng có `group` rỗng nên không dùng được quy tắc `OWNER_ONLY_WHEN_DIRECT`).
+OWNER_ONLY_FLAGGED = {"listen.event"}
 
 
 def register_event(type: str, permission: str | None, *, masked: bool = False) -> None:
@@ -194,6 +199,9 @@ class Hub:
                 continue
             if (msg["type"] in OWNER_ONLY_WHEN_DIRECT and user.role_code != rbac.OWNER
                     and (msg.get("data") or {}).get("group") is None):
+                continue
+            if (msg["type"] in OWNER_ONLY_FLAGGED and user.role_code != rbac.OWNER
+                    and (msg.get("data") or {}).get("owner_only")):
                 continue
             out = text
             if msg["type"] in MASKED_EVENTS and user.role_code != rbac.OWNER:

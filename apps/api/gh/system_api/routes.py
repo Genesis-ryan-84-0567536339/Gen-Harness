@@ -23,6 +23,7 @@ from gh.boss_checks import service as boss_service
 from gh.chassis import actionlog
 from gh.chassis.bus import BRIDGE_CONTROL
 from gh.chassis.mcp_client import McpBlockedNetwork, McpError, pin_endpoint
+from gh.data import listen_events
 from gh.data.common import (
     ALL_LISTEN_MODES,
     CHANNEL_NAME,
@@ -36,7 +37,7 @@ from gh.data.common import (
     set_channel_setting,
 )
 from gh.data.ingest import close_sessions, publish_resume, sync_listen_sets, uptime_pct
-from gh.db import DB
+from gh.db import DB, sessionmaker
 from gh.errors import ApiError, conflict, field_errors, forbidden, not_found, pin_required
 from gh.gen import jev
 from gh.gen.coach import cache as coach_cache
@@ -251,7 +252,12 @@ async def channel_logout(type_: str, request: Request, user: service.CurrentUser
                            target_label=rows[0].account_label if rows else None,
                            detail={"sessions": [str(r.id) for r in rows]}, ip=user.ip)
     await health.clear(db, user.org_id, f"channel.down:{type_}")  # v0.1.36 (F-6a): Sếp chủ động đăng xuất
+    if rows:   # v0.1.71: dòng "Kênh … đã đăng xuất" cho Nhật ký lắng nghe
+        await listen_events.record(db, user.org_id, "channel_ended", channel_id=ch.id, channel_type=type_,
+                                   detail={"reason": "logged_out", "by": "owner"})
     await db.commit()
+    await listen_events.publish_pending(sessionmaker(), request.app.state.redis, user.org_id,
+                                        listen_events.take_pending(db))
     for r in rows:
         await request.app.state.bus.publish(BRIDGE_CONTROL, "session.logout",
                                             {"channel": type_, "session_id": str(r.id)}, actor=user.actor_id,

@@ -37,6 +37,35 @@ Quy tắc sàng lọc có kết quả `set person_type` (R-05 …) ghi ngược 
 - `GET /raw/export?…cùng bộ lọc…` (`data.manage`) 🔒 PIN `data.export` → `text/csv; charset=utf-8` (có BOM để Excel đọc đúng tiếng Việt).
 - WebSocket: sự kiện `raw.new` (cùng hình dạng một item) và `raw.state` `{"id", "state", "label", "confidence"}`.
 
+## Nhật ký lắng nghe (v0.1.71) — `/listen-log`
+
+Màn «Nhật ký lắng nghe» (Nâng cao › Tầng dữ liệu): MỘT dòng thời gian gộp tin nghe được (Kho thô) + sự kiện trên mọi kênh, kèm «hệ thống đã làm gì». Chỉ đọc. Quyền vào màn = `data.read` (thiếu quyền ⇒ `403 FORBIDDEN`, web hiện thẻ «Việc này cần quyền Xem tầng dữ liệu» + «Chi tiết kỹ thuật»).
+
+- `GET /listen-log?cursor=&limit=50&channel=&group_id=&since=7d&kind=all|message|event&tagged=false&acted=false&q=` →
+  ```json
+  {"items": [
+     {"kind": "message", "id": "…", "at": "2026-10-17T08:11:02Z", "code": "RAW-918431",
+      "channel": {"type": "zalo", "name": "Zalo"}, "group": {"id","code","name"} | null, "direct": false,
+      "sender": {"id","code","name"} | null, "direction": "inbound", "msg_kind": "text", "text": "…(≤ 400 ký tự, đã che)",
+      "tagged": true, "listen_mode": "tagged_only", "listen_mode_label": "Nghe hết, chỉ trả lời khi được tag", "listen_mode_known": true,
+      "screening": {"state": "clean", "label": "AskedPrice", "confidence": 0.87, "note": "Đã vào kho sạch"},
+      "decisions": [{"id","at","agent": {"id","name"}, "decision": "draft", "outcome": "held", "label": "Nháp trả lời: chờ duyệt",
+                     "draft": {"id","code","status"} | null}],
+      "note": "Vì sao hệ thống không làm gì thêm" | null},
+     {"kind": "event", "id": "…", "at": "…", "event_type": "group_new", "icon": "ph ph-users-three", "tone": "accent",
+      "text": "Tài khoản Zalo của Sếp vừa được thêm vào nhóm «…». Nhóm tự vào chế độ: Lắng nghe im lặng.",
+      "channel": {…} | null, "group": {…} | null, "person": {…} | null, "direct": false, "listen_mode": "silent" | null, "raw_event_id": null}],
+   "next_cursor": "1789632000000000_01a1…" | null, "decisions_visible": true}
+  ```
+  Mới nhất trên cùng, gộp hai nguồn theo `(thời điểm, id)`. `next_cursor` là chuỗi mờ — đưa nguyên vào `cursor` để lấy trang kế (không bỏ sót/trùng dòng); `null` = hết. Tham số lạ ⇒ `422`.
+  - Bộ lọc phía máy chủ: `channel`, `group_id`, `since` (`24h|7d|30d|all`), `kind` (Chỉ tin / Chỉ sự kiện), `tagged` (chỉ tin có tag agent), `acted` (chỉ tin agent đã ghi chú/gợi ý/soạn nháp — không tính im lặng), `q` (tìm chữ trong nội dung, tên người gửi, tên nhóm / câu sự kiện). `tagged`/`acted` tự loại sự kiện.
+  - `listen_mode`: chế độ nghe LÚC tin vào kho (cột `raw.events.listen_mode`; tin 1-1: `silent|reply`). `listen_mode_known: false` = tin cũ trước v0.1.71, đang hiện chế độ hiện tại của nhóm (web ghi «(hiện tại)»).
+  - Sự kiện (`event_type`): `group_new` (tài khoản được thêm vào nhóm — kèm chế độ nghe nhóm tự vào), `group_left`, `group_rejoined`, `group_renamed`, `members_changed` (thành viên vào/rời của nhóm ĐANG nghe, kèm ≤ 5 tên), `groups_synced` (lần quét danh bạ đầu tiên của kênh — chỉ một dòng tóm tắt), `channel_connected`, `channel_error`, `channel_ended` (đăng nhập/nối lại/mất kết nối/đăng xuất/hết hạn), `direct_new` (người mới nhắn riêng lần đầu). Lưu ở `ops.listen_events` (không chứa nội dung tin); câu tiếng Việt do máy chủ viết lúc đọc, đã che theo quyền.
+- `GET /listen-log/stats` → `{"by_channel": [{"type","name","messages_24h","events_24h","groups_listening"}], "messages_24h", "events_24h", "groups_listening", "groups": [{"id","code","name","channel","listen_mode"}]}` — số 24 giờ theo kênh (cùng phạm vi/quy tắc 1-1 với danh sách) và các nhóm đang nghe cho ô lọc.
+- Quyền và che (một nguồn với Kho thô/Hộp thư, không đường lách): tin nhóm theo phạm vi `data.read` của vai (`Scope.group_id_sql`); tin 1-1 và sự kiện `direct_new` chỉ Owner hoặc người phụ trách đúng người đó (`scope.direct_visible_sql`, v0.1.65); sự kiện của cả kênh chỉ phạm vi `all`; vai dưới Owner bị che số dài trong `text`/tên, và tìm chữ chạy trên bản đã bỏ số dài (không dò được số bị che). `decisions` chỉ có khi vai có `system.read`/`action.approve` (`decisions_visible`); `draft` (link `/workbench?id=<draft.id>`) chỉ khi bản nháp nằm trong phạm vi người xem.
+- Nhóm «Không nghe» / «Tạm dừng» / «Chờ Sếp chọn» KHÔNG lưu tin ⇒ không có dòng tin nào của chúng (chỉ có sự kiện nhóm); màn ghi chú rõ ở đầu.
+- WebSocket `listen.event` (`data.read`): `{id, at, event_type, channel_type, group_id, owner_only}` — chỉ là TÍN HIỆU (không câu chữ, không tên); sự kiện 1-1 có `owner_only: true` ⇒ chỉ Owner nhận. Console gom `raw.new`, `raw.state`, `listen.event`, `agent.decision`, `draft.*` thành một lần tải lại `/listen-log` (0,7–3 giây), nên phạm vi và việc che luôn do máy chủ quyết.
+
 ## Sàng lọc (`refinery`)
 
 - `GET /refinery/schedule` →
@@ -159,6 +188,7 @@ Cùng cookie phiên (gửi qua proxy). Server đẩy `{"type": "…", "data": {�
 | `raw.new`, `raw.state` | `data.read` | xem trên |
 | `refinery.progress`, `refinery.run` | `data.read` | xem trên |
 | `channel.qr`, `channel.status` | `system.read` | xem trên |
+| `listen.event` | `data.read` | v0.1.71 — tín hiệu sự kiện kênh cho Nhật ký lắng nghe (xem mục «Nhật ký lắng nghe»); 1-1 chỉ Owner. |
 | `group.discovered` | `system.read` | `{id, code, name, channel, listen_mode: "pending"/"silent"/"off"}` — nhóm MỚI vừa phát hiện (v0.1.65); Console mở hộp (chỉ khi `pending`) «Nhóm mới — chọn Im lặng/Không nghe». |
 | `cli.login` | `system.manage` | xem trên |
 | `header` | mọi người | `{channels_live, channels_connected, groups_listening, autonomy_level, data_confidence}` `data_confidence` (Owner chốt 24/09): số tin sàng lọc hôm nay (múi giờ tổ chức) vào thẳng Kho sạch ÷ (sạch + tin cậy thấp), không tính nhiễu; dạng 0–1, `null` khi hôm nay chưa sàng lọc tin nào. Gửi lại sau mỗi lượt sàng lọc. Cũng trả ở `GET /header`. |

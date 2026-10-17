@@ -13,6 +13,7 @@ import './styles/global.css';
 import './styles/shell.css';
 import './styles/setup.css';
 import './styles/data.css';
+import './styles/listenlog.css';
 import './styles/p3-core.css';
 import './styles/p3-queue.css';
 import './styles/p3-relations.css';
