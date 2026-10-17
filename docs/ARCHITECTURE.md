@@ -347,7 +347,7 @@ Thực thể spec G1 → bảng:
 | cột `permit_hash`, `permit_expires_at` ở `biz.action_drafts` | Permit dùng một lần (§7.3). |
 | `agent.cli_profiles` | Nhiều tài khoản Antigravity CLI, một hồ sơ hoạt động (§11). |
 | `core.assignments` | Khách được phân cho Agent nhân viên, hàng đợi cho Operator (phạm vi `assigned`). |
-| `ops.listen_events` + cột `raw.events.listen_mode` (v0.1.71, migration 0041) | Sự kiện kênh và chế độ nghe lúc tin vào cho Nhật ký lắng nghe (§4.2). |
+| `ops.listen_events` + cột `raw.events.listen_mode` (v0.1.68, migration 0040) | Sự kiện kênh và chế độ nghe lúc tin vào cho Nhật ký lắng nghe (§4.2). |
 
 ---
 

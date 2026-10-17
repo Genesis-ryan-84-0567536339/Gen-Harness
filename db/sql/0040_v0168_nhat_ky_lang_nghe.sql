@@ -1,4 +1,4 @@
--- Gen-Harness · v0.1.71: "Nhật ký lắng nghe" — một dòng thời gian gộp tin nghe được + sự kiện trên mọi kênh.
+-- Gen-Harness · v0.1.68: "Nhật ký lắng nghe" — một dòng thời gian gộp tin nghe được + sự kiện trên mọi kênh.
 -- (1) raw.events.listen_mode — chế độ nghe LÚC tin vào kho (nhóm: tagged_only | silent | proactive; tin 1-1: silent | reply).
 --     NULL = tin cũ (trước bản này, không biết). Thêm cột NULL là thay đổi siêu dữ liệu, không ghi lại bảng; bảng thô vẫn
 --     chỉ-INSERT (trigger raw_events_append_only không bị đụng).
