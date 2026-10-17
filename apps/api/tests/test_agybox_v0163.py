@@ -518,3 +518,10 @@ async def test_not_installed_never_alerts(owner_api, app, db, redis, monkeypatch
     _fake_status(monkeypatch, "not_installed")
     await _evaluate(redis, org, datetime.now(UTC))
     assert await _alert(db) is None
+
+
+def test_down_body_tells_to_start_not_update() -> None:
+    """Review v0.1.63 (P3): hộp tắt ⇒ `genh start` dựng lại hộp (không tải bản mới); `genh update` là việc khác."""
+    from gh import health
+
+    assert "genh start" in health.AGY_BOX_DOWN_BODY and "genh update" not in health.AGY_BOX_DOWN_BODY
