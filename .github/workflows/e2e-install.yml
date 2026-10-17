@@ -1480,22 +1480,6 @@ jobs:
             echo "sha=" >>"$GITHUB_OUTPUT"
           fi
 
-      # v0.1.38 (F-22): tệp GIẢ (không phải phiên thật) ở đường dẫn cũ của phiên Claude Code trong agy_state — sau nâng
-      # cấp api phải tự chuyển nó sang volume claude_state và xoá /var/lib/gh/agy/claude.
-      - name: Cài tệp giả ở đường dẫn phiên Claude cũ (F-22)
-        id: claude_probe
-        if: matrix.broken != 'true'
-        run: |
-          set -euo pipefail
-          have="$TAG"
-          if [ "$(printf '%s\n%s\n' v0.1.38 "$have" | sort -V | head -n1)" != "v0.1.38" ]; then
-            echo "::notice::$have cũ hơn v0.1.38 — chưa có volume claude_state / agy_canary, bỏ qua."; echo "run=false" >>"$GITHUB_OUTPUT"; exit 0
-          fi
-          api="$(docker ps --format '{{.Names}}' | grep -E '^gen-harness-api-[0-9]+$' | head -1)"
-          [ -n "$api" ] || { echo "::error::không thấy container api (bản cũ)" >&2; exit 1; }
-          docker exec "$api" sh -c 'mkdir -p /var/lib/gh/agy/claude/.claude && printf {\"probe\":1} > /var/lib/gh/agy/claude/.claude/.claude.json'
-          echo "run=true" >>"$GITHUB_OUTPUT"
-
       - name: Đặt genh ${{ needs.resolve.outputs.tag }} đè lên genh cũ (tải + kiểm sha256)
         run: |
           set -euo pipefail
@@ -1627,17 +1611,17 @@ jobs:
           echo "$bind" | grep -q "^0\.0\.0\.0:${GH_PORT}\$" || { echo "::error::sau update lại proxy không còn 0.0.0.0 (đang: $bind)" >&2; exit 1; }
           echo "OK: giữ 0.0.0.0/lan_legacy và đúng $owners chuông network.open_lan."
 
-      - name: Phiên Claude cũ đã chuyển sang claude_state + canary offline (F-22)
-        if: steps.claude_probe.outputs.run == 'true'
+      # v0.1.63 (review P1-1): api KHÔNG còn tự chuyển phiên Claude từ đường dẫn cũ (migrate_legacy_claude_home đã bỏ — mọi bản
+      # cài đã qua v0.1.38 nên bản cũ ≥ v0.1.38 không bao giờ có /var/lib/gh/agy/claude). Sau nâng cấp: đường dẫn cũ vẫn KHÔNG
+      # tồn tại, volume claude_state có sẵn thư mục phiên Claude, và agy phải cô lập (canary offline "khong_lo").
+      - name: Phiên Claude ở claude_state riêng + canary offline (F-22)
         run: |
           set -euo pipefail
           api="$(docker ps --format '{{.Names}}' | grep -E '^gen-harness-api-[0-9]+$' | head -1)"
           [ -n "$api" ] || { echo "::error::không thấy container api sau nâng cấp" >&2; exit 1; }
-          docker exec "$api" sh -c 'grep -q probe /var/lib/gh/claude/.claude/.claude.json' \
-            || { echo "::error::tệp ở đường dẫn cũ (/var/lib/gh/agy/claude/.claude/.claude.json) không được chuyển sang /var/lib/gh/claude/.claude sau nâng cấp (F-22)" >&2; exit 1; }
-          docker exec "$api" sh -c 'test ! -e /var/lib/gh/agy/claude' \
-            || { echo "::error::/var/lib/gh/agy/claude vẫn còn sau nâng cấp — agy vẫn đọc được phiên Claude (F-22)" >&2; exit 1; }
-          echo "OK: tệp đã sang /var/lib/gh/claude/.claude, /var/lib/gh/agy/claude đã xoá."
+          docker exec "$api" sh -c 'test ! -e /var/lib/gh/agy/claude && test -d /var/lib/gh/claude/.claude' \
+            || { echo "::error::sau nâng cấp phiên Claude Code nằm trong HOME của Antigravity CLI (/var/lib/gh/agy/claude) hoặc thiếu /var/lib/gh/claude/.claude (F-22)" >&2; exit 1; }
+          echo "OK: /var/lib/gh/agy/claude không có, /var/lib/gh/claude/.claude có."
           # Canary offline (python -m gh.providers.agy_canary — hợp đồng do gói agy-co-lap-api viết): in ĐÚNG một dòng
           # JSON {result, checks, agy_version}; chỉ in lại result/checks/agy_version — không bao giờ in đầu ra agy thô.
           rc=0
