@@ -57,6 +57,14 @@ export class RedisBus {
     return (await this.redis.get(`gh:bridge:listen_direct:${channel}`)) !== '0';
   }
 
+  /**
+   * Cờ «nhóm mới» của kênh (`gh:bridge:new_group_mode:<kênh>` = silent | ask | off, lõi ghi cùng tập nghe). Chưa có khoá
+   * (lõi cũ / lõi chưa đồng bộ) ⇒ null.
+   */
+  async newGroupMode(channel) {
+    return (await this.redis.get(`gh:bridge:new_group_mode:${channel}`)) ?? null;
+  }
+
   /** SET gh:permit:used:<nonce> 1 NX EX 600 → true nếu lần đầu. */
   async claimNonce(nonce) {
     return (await this.redis.set(`gh:permit:used:${nonce}`, '1', { NX: true, EX: 600 })) === 'OK';
