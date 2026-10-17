@@ -379,7 +379,7 @@ async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: u
         await redis.delete(f"gh:channel:qr:{s.id}")
         from gh import health  # v0.1.36 (F-6a): kênh đã nối lại ⇒ đóng sự cố "kênh rớt"
 
-        await health.clear(db, org_id, f"channel.down:{s.type}")
+        await health.clear(db, org_id, f"channel.down:{s.type}", redis=redis)
         await actionlog.record(db, org_id=org_id, actor_type="system", actor_id=f"bridge:{s.type}",
                                action="channel.session_active", target_type="channel_session",
                                target_id=str(s.id), target_label=label)

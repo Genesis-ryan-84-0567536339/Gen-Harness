@@ -643,6 +643,8 @@ export interface RealtimeEventMap {
   'gen.done': GenDoneEvent;
   /** v0.1.23 (B6): chỉ người nhận nhận được. */
   'notification.new': NotificationItem;
+  /** v0.1.69: sự cố đóng ⇒ chuông của nó đã đọc / "Đã xử lý" — mang `NotificationItem` đã cập nhật; chỉ chủ chuông nhận. */
+  'notification.resolved': NotificationItem;
   pong: Record<string, never>;
 }
 

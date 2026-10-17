@@ -27,20 +27,23 @@ log = logging.getLogger("gh.notifications")
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
 EVENT = "notification.new"
+#: v0.1.69: sự cố đóng ⇒ chuông của nó đổi sang đã đọc / "Đã xử lý" — mang đúng một `NotificationItem` đã cập nhật.
+EVENT_RESOLVED = "notification.resolved"
 # Người nhận lọc bằng `to_user` ở Hub.dispatch; không cần quyền riêng.
 realtime.register_event(EVENT, None)
+realtime.register_event(EVENT_RESOLVED, None)
 
 MAX_TITLE, MAX_BODY, MAX_LINK = 160, 1000, 300
 _PENDING = "gh_pending_notifications"
 _tasks: set[asyncio.Task[None]] = set()
 
 
-async def _publish_all(redis: Any, items: list[tuple[uuid.UUID, uuid.UUID, dict[str, Any]]]) -> None:
-    for org_id, uid, item in items:
+async def _publish_all(redis: Any, items: list[tuple[uuid.UUID, uuid.UUID, str, dict[str, Any]]]) -> None:
+    for org_id, uid, ev, item in items:
         try:
-            await realtime.publish(redis, EVENT, item, org_id=org_id, to_user=uid)
+            await realtime.publish(redis, ev, item, org_id=org_id, to_user=uid)
         except Exception:  # noqa: BLE001 — chuông vẫn thấy khi tải lại
-            log.warning("Không đẩy được notification.new", exc_info=True)
+            log.warning("Không đẩy được %s", ev, exc_info=True)
 
 
 def _after_commit(session: Any) -> None:
@@ -55,9 +58,9 @@ def _after_commit(session: Any) -> None:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
-    by_redis: dict[int, tuple[Any, list[tuple[uuid.UUID, uuid.UUID, dict[str, Any]]]]] = {}
-    for r, o, u, it in items:
-        by_redis.setdefault(id(r), (r, []))[1].append((o, u, it))
+    by_redis: dict[int, tuple[Any, list[tuple[uuid.UUID, uuid.UUID, str, dict[str, Any]]]]] = {}
+    for r, o, u, ev, it in items:
+        by_redis.setdefault(id(r), (r, []))[1].append((o, u, ev, it))
     for r, batch in by_redis.values():
         task = loop.create_task(_publish_all(r, batch))
         _tasks.add(task)
@@ -70,14 +73,15 @@ def _after_rollback(session: Any) -> None:
     session.info.pop(_PENDING, None)
 
 
-def _queue_publish(db: AsyncSession, redis: Any, org_id: uuid.UUID, uid: uuid.UUID, item: dict[str, Any]) -> None:
+def _queue_publish(db: AsyncSession, redis: Any, org_id: uuid.UUID, uid: uuid.UUID, item: dict[str, Any],
+                   ev: str = EVENT) -> None:
     """Chỉ đẩy WS SAU KHI transaction commit (rollback → bỏ), để client không nhận thông báo chưa/không tồn tại."""
     sync = db.sync_session
     if not event.contains(sync, "after_commit", _after_commit):
         event.listen(sync, "after_commit", _after_commit)
         event.listen(sync, "after_rollback", _after_rollback)
-    pending: list[tuple[Any, uuid.UUID, uuid.UUID, dict[str, Any]]] = sync.info.setdefault(_PENDING, [])
-    pending.append((redis, org_id, uid, item))
+    pending: list[tuple[Any, uuid.UUID, uuid.UUID, str, dict[str, Any]]] = sync.info.setdefault(_PENDING, [])
+    pending.append((redis, org_id, uid, ev, item))
 
 
 def pending_mark(db: AsyncSession) -> list[Any]:
@@ -121,8 +125,8 @@ async def notify(db: AsyncSession, org_id: uuid.UUID, user_ids: Iterable[uuid.UU
                  body: str = "", link: str | None = None, redis: Any = None,
                  incident_key: str | None = None) -> list[dict[str, Any]]:
     """Ghi một thông báo cho từng người nhận; có `redis` thì đẩy `notification.new` SAU KHI `db` commit (rollback
-    → không đẩy; lỗi đẩy không làm hỏng việc chính — chuông vẫn thấy khi tải lại). `incident_key` (sự cố sức khoẻ sinh ra
-    chuông, `health.raise_once`) để `resolve_incident` tắt đúng chuông của sự cố khi nó đóng."""
+    → không đẩy; lỗi đẩy không làm hỏng việc chính — chuông vẫn thấy khi tải lại). `incident_key` (sự cố sức khoẻ sinh
+    ra chuông, `health.raise_once`) để `resolve_incident` tắt đúng chuông của sự cố khi nó đóng."""
     out: list[dict[str, Any]] = []
     for uid in dict.fromkeys(user_ids):
         row = (await db.execute(text("""
@@ -139,21 +143,28 @@ async def notify(db: AsyncSession, org_id: uuid.UUID, user_ids: Iterable[uuid.UU
 
 
 async def resolve_incident(db: AsyncSession, org_id: uuid.UUID, *, kind: str, title: str | None = None,
-                           label: bool = True, key: str | None = None) -> int:
+                           label: bool = True, key: str | None = None, redis: Any = None) -> int:
     """v0.1.69 (F098): sự cố sức khoẻ đóng ⇒ chuông của chính sự cố đó tắt — `read_at` (hết đỏ, hết đếm "chưa đọc") và,
-    khi `label`, `resolved_at` ("Đã xử lý" ở chuông). `key` ⇒ chuông của đúng khoá sự cố đó (`incident_key`); chuông cũ chưa
-    có khoá (tạo trước v0.1.69) rơi về cách cũ: `title` khác None ⇒ chỉ chuông có đúng tiêu đề đó (nhiều khoá cùng `kind`,
-    vd. `job.timeout:<tên hàm>`: đóng một khoá không được tắt chuông của khoá còn mở), None ⇒ mọi chuông của `kind`.
-    Không đụng chuông đã gắn nhãn; chạy lại an toàn. Bên gọi commit. Trả số chuông đã đổi."""
+    khi `label`, `resolved_at` ("Đã xử lý" ở chuông). `key` ⇒ chuông của đúng khoá sự cố đó (`incident_key`); chuông cũ
+    chưa có khoá (tạo trước v0.1.69) rơi về cách cũ: `title` khác None ⇒ chỉ chuông có đúng tiêu đề đó (nhiều khoá cùng
+    `kind`, vd. `job.timeout:<tên hàm>`: đóng một khoá không được tắt chuông của khoá còn mở), None ⇒ mọi chuông của
+    `kind`.
+    Không đụng chuông đã gắn nhãn; chạy lại an toàn. Bên gọi commit. Có `redis` thì đẩy `notification.resolved` (item đã
+    cập nhật) tới chủ chuông SAU KHI commit để chuông đang mở đổi ngay. Trả số chuông đã đổi."""
     res = await db.execute(text("""
         UPDATE core.notifications
            SET read_at = COALESCE(read_at, now()),
                resolved_at = CASE WHEN :lab THEN now() ELSE resolved_at END
          WHERE org_id = :o AND kind = :k AND resolved_at IS NULL AND (:lab OR read_at IS NULL)
            AND (incident_key = :key
-                OR (incident_key IS NULL OR CAST(:key AS text) IS NULL) AND (CAST(:t AS text) IS NULL OR title = :t))"""),
+                OR (incident_key IS NULL OR CAST(:key AS text) IS NULL) AND (CAST(:t AS text) IS NULL OR title = :t))
+        RETURNING id, user_id, kind, title, body, link, created_at, read_at, resolved_at"""),
         {"o": org_id, "k": kind, "t": title, "lab": label, "key": key})
-    return int(getattr(res, "rowcount", 0) or 0)
+    rows = res.all()
+    if redis is not None:
+        for r in rows:
+            _queue_publish(db, redis, org_id, r.user_id, _out(r), EVENT_RESOLVED)
+    return len(rows)
 
 
 # Hạn lưu (v0.1.27): đã đọc quá 30 ngày → xoá; mọi thông báo (kể cả chưa đọc) quá 90 ngày → xoá. Job worker

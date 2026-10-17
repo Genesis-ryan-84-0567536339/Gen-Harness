@@ -255,12 +255,13 @@ async def raise_once(db: AsyncSession, org_id: uuid.UUID, *, key: str, kind: str
     return True
 
 
-async def clear(db: AsyncSession, org_id: uuid.UUID, key: str, *, label: bool = True) -> bool:
+async def clear(db: AsyncSession, org_id: uuid.UUID, key: str, *, label: bool = True, redis: Any = None) -> bool:
     """Đóng sự cố `key` đang mở (hết sự cố). Trả True nếu có dòng được đóng. Bên gọi commit.
 
     v0.1.69 (F098): đóng sự cố thì chuông của nó cũng tắt — đã đọc + "Đã xử lý" (`notifications.resolve_incident`).
     `label=False` (gộp sự cố này vào sự cố khác, vd. offsite.failed → offsite.stale) chỉ đánh dấu đã đọc, không nói
-    "Đã xử lý" vì vấn đề vẫn còn."""
+    "Đã xử lý" vì vấn đề vẫn còn. Có `redis` thì chuông đang mở đổi ngay (WebSocket `notification.resolved`, sau
+    commit)."""
     from gh import notifications
 
     row = (await db.execute(text("""UPDATE ops.health_alerts SET cleared_at = now()
@@ -274,7 +275,7 @@ async def clear(db: AsyncSession, org_id: uuid.UUID, key: str, *, label: bool = 
                                        WHERE org_id = :o AND kind = :kind AND key <> :k AND cleared_at IS NULL)"""),
                                {"o": org_id, "kind": row.kind, "k": key})).scalar_one()
     await notifications.resolve_incident(db, org_id, kind=row.kind, title=row.title if others else None, label=label,
-                                         key=key)
+                                         key=key, redis=redis)
     return True
 
 
@@ -793,8 +794,8 @@ async def _eval_update(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
                          title=f"Cập nhật lên {target} chưa thành công", body=body, link=STORAGE_LINK,
                          fingerprint=fingerprint, redis=redis)
     elif state in ("done", "idle", "failed"):  # 'failed' quá hạn: thẻ cập nhật đã thôi báo ⇒ đóng sự cố
-        # Chỉ 'done' là đã xử lý thật; 'idle'/'failed' quá hạn là tự hết hạn, vấn đề chưa chắc đã hết ⇒ không dán "Đã xử lý".
-        await clear(db, org_id, "update.failed", label=(state == "done"))
+        # Chỉ 'done' là đã xử lý thật; 'idle'/'failed' quá hạn là tự hết hạn, chưa chắc đã hết vấn đề ⇒ không dán nhãn.
+        await clear(db, org_id, "update.failed", label=(state == "done"), redis=redis)
 
 
 async def _eval_backup(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: datetime) -> None:
@@ -802,7 +803,7 @@ async def _eval_backup(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
 
     cfg = await _org_backup_cfg(db, org_id)
     if cfg is None:
-        await clear(db, org_id, "backup.stale")
+        await clear(db, org_id, "backup.stale", redis=redis)
         return
     if not cfg.configured:
         # F103: chưa có lịch sao lưu (Sếp rời thiết lập trước bước 11) thì KHÔNG có bản sao lưu tự động nào — trước đây
@@ -815,12 +816,12 @@ async def _eval_backup(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
                                   "giờ chạy rồi bấm lưu.",
                              link=BACKUP_LINK, fingerprint="not_configured", redis=redis)
         else:
-            await clear(db, org_id, "backup.stale")
+            await clear(db, org_id, "backup.stale", redis=redis)
         return
     latest = await _latest_backup()
     limit_text = backup_stale_limit(cfg.frequency)[1]
     if not _backup_stale(True, latest, cfg.created_at, now, cfg.frequency):
-        await clear(db, org_id, "backup.stale")
+        await clear(db, org_id, "backup.stale", redis=redis)
         return
     if latest is not None:
         try:
@@ -845,7 +846,7 @@ async def _eval_worker(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
                          body="Sàng lọc tin, nhắc việc và sao lưu theo lịch đang dừng. "
                               "Bấm để xem cách khởi động lại.", link=STORAGE_LINK, redis=redis)
     elif state == "ok":
-        await clear(db, org_id, "worker.silent")
+        await clear(db, org_id, "worker.silent", redis=redis)
 
 
 async def _eval_bridge(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: datetime) -> None:
@@ -859,7 +860,7 @@ async def _eval_bridge(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
                               "gửi, dù thẻ kênh vẫn ghi \"Đang kết nối\". Bấm để xem cách khởi động lại.",
                          link=HEALTH_LINK, redis=redis)
     else:
-        await clear(db, org_id, "bridge.silent")
+        await clear(db, org_id, "bridge.silent", redis=redis)
 
 
 async def sync_dlq_alert(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:
@@ -873,7 +874,7 @@ async def sync_dlq_alert(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> Non
                               "phát lại; phát lại vẫn lỗi thì gửi kèm khi báo lỗi (Trợ giúp › Báo lỗi).",
                          link=HEALTH_LINK, redis=redis)
     else:
-        await clear(db, org_id, "dlq.inbound")
+        await clear(db, org_id, "dlq.inbound", redis=redis)
 
 
 class DlqError(Exception):
@@ -944,7 +945,7 @@ async def _eval_disk(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:
                          body=f"Còn {_gb(ds.get('free_bytes'))} GB trống, cần tối thiểu {_gb(ds.get('min_bytes'))} GB"
                               " — cập nhật tự động đang tạm dừng.", link=STORAGE_LINK, redis=redis)
     elif ds.get("state") == "ok":
-        await clear(db, org_id, "disk.low")
+        await clear(db, org_id, "disk.low", redis=redis)
 
 
 async def _eval_autostart(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:
@@ -963,7 +964,7 @@ async def _eval_autostart(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> No
     good = ("yes", "not_applicable")
     linger_ok = st["linger"] in good or st["linger_required"] is False
     if st["docker_enabled"] in good and linger_ok:  # đã biết chắc không còn vấn đề; còn 'unknown' ⇒ để nguyên
-        await clear(db, org_id, "host.autostart")
+        await clear(db, org_id, "host.autostart", redis=redis)
 
 
 async def _eval_nightly(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: datetime) -> None:
@@ -995,7 +996,7 @@ async def _eval_nightly(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: da
         await raise_once(db, org_id, key="host.nightly", kind="host.nightly", severity="warn", title=title,
                          body=body, link=HEALTH_LINK, fingerprint=fingerprint, redis=redis)
     elif st["state"] in ("ok", "off", "other"):
-        await clear(db, org_id, "host.nightly")
+        await clear(db, org_id, "host.nightly", redis=redis)
 
 
 ACCESS_LINK = "/system?tab=storage&focus=access"
@@ -1021,7 +1022,7 @@ async def _eval_network(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None
                          title=OPEN_LAN_TITLE, body=OPEN_LAN_BODY, link=ACCESS_LINK, fingerprint="lan_legacy",
                          redis=redis)
     else:
-        await clear(db, org_id, "network.open_lan")
+        await clear(db, org_id, "network.open_lan", redis=redis)
 
 
 def _offsite_stale(st: dict[str, Any], org_created: datetime | None, now: datetime) -> bool:
@@ -1091,7 +1092,7 @@ async def _eval_offsite(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: da
                              body="Cắm ổ USB/NAS rồi bấm 'Sao lưu ra ổ ngoài ngay' để có bản sao mới ngoài máy chủ",
                              link=OFFSITE_LINK, fingerprint=severity, redis=redis)
     else:
-        await clear(db, org_id, "offsite.stale")
+        await clear(db, org_id, "offsite.stale", redis=redis)
 
     attempt = _parse_ts(st["last_attempt_at"])
     success = _parse_ts(st["last_success_at"])
@@ -1101,14 +1102,14 @@ async def _eval_offsite(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: da
     if failed and stale and code in OFFSITE_SAME_CAUSE:
         # F104: ổ chưa cắm/chưa chọn nơi lưu VÀ bản sao đã cũ là MỘT nguyên nhân, MỘT cách chữa ⇒ một sự cố (stale),
         # không hai dòng + hai chuông. Dòng failed đang mở (mở lúc bản sao chưa đủ cũ) đóng gộp vào stale.
-        await clear(db, org_id, "offsite.failed", label=False)
+        await clear(db, org_id, "offsite.failed", label=False, redis=redis)
     elif failed:
         await raise_once(db, org_id, key="offsite.failed", kind="offsite.failed", severity="warn",
                          title="Sao lưu ra ổ ngoài chưa thành công",
                          body=OFFSITE_FAILED_BODY.get(code, OFFSITE_FAILED_GENERIC), link=OFFSITE_LINK,
                          fingerprint=f"{st['last_attempt_at'] or ''}|{st['error_code'] or ''}", redis=redis)
     elif st["state"] != "running":  # đang chạy ⇒ chưa biết kết quả, để nguyên
-        await clear(db, org_id, "offsite.failed")
+        await clear(db, org_id, "offsite.failed", redis=redis)
 
 
 async def raise_model_expired(db: AsyncSession, org_id: uuid.UUID, provider_id: uuid.UUID, name: str, *,
@@ -1155,18 +1156,18 @@ async def _eval_budget(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
 
     budget = await ai_cost.get_budget(db, org_id)
     day = ai_cost.today_vn(now)
-    # Đóng sự cố do Sếp nâng/bỏ trần ngay trong ngày vượt ⇒ "Đã xử lý"; sự cố của NGÀY CŨ hết vì sang ngày mới (tổng chi về 0)
-    # là tự hết, không ai xử lý ⇒ chỉ đánh dấu đã đọc (fingerprint của sự cố = ngày VN lúc mở).
+    # Đóng sự cố do Sếp nâng/bỏ trần ngay trong ngày vượt ⇒ "Đã xử lý"; sự cố của NGÀY CŨ hết vì sang ngày mới (tổng chi
+    # về 0) là tự hết, không ai xử lý ⇒ chỉ đánh dấu đã đọc (fingerprint của sự cố = ngày VN lúc mở).
     opened_day = (await db.execute(text("""SELECT fingerprint FROM ops.health_alerts
                                            WHERE org_id = :o AND key = 'ai.budget' AND cleared_at IS NULL"""),
                                    {"o": org_id})).scalar_one_or_none()
     handled = opened_day == day.isoformat()
     if budget is None:
-        await clear(db, org_id, "ai.budget", label=handled)
+        await clear(db, org_id, "ai.budget", label=handled, redis=redis)
         return
     total = (await ai_cost.day_cost(db, org_id, day))["total_vnd"]
     if total <= budget:
-        await clear(db, org_id, "ai.budget", label=handled)
+        await clear(db, org_id, "ai.budget", label=handled, redis=redis)
         return
     await raise_once(db, org_id, key="ai.budget", kind="ai.budget_exceeded", severity="warn",
                      fingerprint=day.isoformat(), title=f"Chi phí AI hôm nay vượt trần {ai_cost.fmt_vnd(budget)}",
@@ -1195,11 +1196,11 @@ async def _eval_background_source(db: AsyncSession, org_id: uuid.UUID, redis: An
         return
     if (await has_api_source(db, org_id) or await has_agy_source(db, org_id)
             or await background_cli_allowed(db, org_id)):
-        await clear(db, org_id, BG_NO_SOURCE_KEY)
+        await clear(db, org_id, BG_NO_SOURCE_KEY, redis=redis)
         await redis.delete(BG_NO_SOURCE_FLAG.format(org_id), BG_NO_SOURCE_TRY.format(org_id))
 
 
-async def _eval_events(db: AsyncSession, org_id: uuid.UUID) -> None:
+async def _eval_events(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:
     """Dọn dòng sự kiện cũ: kênh đã đăng nhập lại (hoặc không còn kênh loại đó dùng được — bị xoá, plugin cầu nối bị
     tắt) / model đã ổn (hoặc bị tắt, bị xoá) ⇒ đóng sự cố."""
     keys = (await db.execute(text("""SELECT key FROM ops.health_alerts WHERE org_id = :o AND cleared_at IS NULL
@@ -1217,17 +1218,17 @@ async def _eval_events(db: AsyncSession, org_id: uuid.UUID) -> None:
                 WHERE c.org_id = :o AND c.type = :t AND (c.plugin_id IS NULL OR pl.is_enabled) LIMIT 1"""),
                 {"o": org_id, "t": ref})).first() is not None
             if live is not None or not usable:  # không còn kênh để "Đăng nhập lại" ⇒ dòng nút chết, đóng
-                await clear(db, org_id, key)
+                await clear(db, org_id, key, redis=redis)
         else:
             try:
                 pid = uuid.UUID(ref)
             except ValueError:
-                await clear(db, org_id, key)
+                await clear(db, org_id, key, redis=redis)
                 continue
             p = (await db.execute(text("SELECT is_enabled, auth_state FROM agent.providers WHERE id = :i"),
                                   {"i": pid})).one_or_none()
             if p is None or not p.is_enabled or p.auth_state != "expired":
-                await clear(db, org_id, key)
+                await clear(db, org_id, key, redis=redis)
 
 
 async def evaluate(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datetime,
@@ -1246,7 +1247,7 @@ async def evaluate(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: date
         ("host.nightly", lambda: _eval_nightly(db, org_id, redis, now)),
         ("offsite", lambda: _eval_offsite(db, org_id, redis, now)),
         ("models", lambda: _eval_models(db, org_id, redis)),
-        ("events", lambda: _eval_events(db, org_id)),
+        ("events", lambda: _eval_events(db, org_id, redis)),
         ("ai.budget", lambda: _eval_budget(db, org_id, redis, now)),
         ("ai.background_source", lambda: _eval_background_source(db, org_id, redis)),
         ("network", lambda: _eval_network(db, org_id, redis)),

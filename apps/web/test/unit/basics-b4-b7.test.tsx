@@ -219,6 +219,16 @@ describe('B6 — chuông thông báo', () => {
     expect(d.unread).toBe(2);
   });
 
+  it('WS notification.resolved làm mới chuông (đã đọc / "Đã xử lý") thay vì đợi lượt tải 120 giây', () => {
+    const qc = new QueryClient();
+    qc.setQueryData<NotificationsPage>(qk.notifications, page);
+    qc.setQueryData([...qk.notifications, 'all'], page);
+    expect(qc.getQueryState(qk.notifications)?.isInvalidated).toBe(false);
+    applyEvent(qc, { type: 'notification.resolved', data: N({ id: 'a', read: true, resolved: true }) } as RealtimeEvent);
+    expect(qc.getQueryState(qk.notifications)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState([...qk.notifications, 'all'])?.isInvalidated).toBe(true);
+  });
+
   it('huy hiệu gọn: 9+', () => {
     expect(badgeText(3)).toBe('3');
     expect(badgeText(12)).toBe('9+');

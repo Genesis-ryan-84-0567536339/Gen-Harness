@@ -1,7 +1,7 @@
 /**
  * Hợp đồng Đợt B6 (v0.1.23) — chuông thông báo ở header (`apps/api/gh/notifications.py`, bảng core.notifications).
  * Mỗi thông báo thuộc đúng một người nhận; API chỉ trả của người đang đăng nhập. Sự kiện WS `notification.new`
- * (chỉ gửi tới người nhận) mang đúng một `NotificationItem`.
+ * (chỉ gửi tới người nhận) mang đúng một `NotificationItem`; v0.1.69: `notification.resolved` cùng dạng, báo chuông vừa đóng.
  */
 import type { ApiClient } from './client';
 

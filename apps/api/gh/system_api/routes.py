@@ -219,7 +219,8 @@ async def channel_logout(type_: str, request: Request, user: service.CurrentUser
                            target_type="channel", target_id=type_,
                            target_label=rows[0].account_label if rows else None,
                            detail={"sessions": [str(r.id) for r in rows]}, ip=user.ip)
-    await health.clear(db, user.org_id, f"channel.down:{type_}")  # v0.1.36 (F-6a): Sếp chủ động đăng xuất
+    # v0.1.36 (F-6a): Sếp chủ động đăng xuất
+    await health.clear(db, user.org_id, f"channel.down:{type_}", redis=request.app.state.redis)
     await db.commit()
     for r in rows:
         await request.app.state.bus.publish(BRIDGE_CONTROL, "session.logout",
@@ -607,7 +608,7 @@ async def delete_provider(pid: uuid.UUID, request: Request, user: service.Curren
                      {"o": user.org_id, "p": pid})
     await db.execute(text("DELETE FROM agent.models WHERE provider_id = :p"), {"p": pid})
     await db.execute(text("DELETE FROM agent.providers WHERE id = :p"), {"p": pid})
-    await health.clear(db, user.org_id, f"model.auth_expired:{pid}")  # v0.1.36 (F-6b)
+    await health.clear(db, user.org_id, f"model.auth_expired:{pid}", redis=request.app.state.redis)  # v0.1.36 (F-6b)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="provider.deleted", target_type="provider", target_id=str(pid),
                            target_label=p.name, detail={"kind": p.kind}, ip=user.ip)

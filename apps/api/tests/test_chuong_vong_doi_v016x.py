@@ -116,19 +116,18 @@ async def test_clear_one_of_many_keys_of_same_kind_only_resolves_its_own_bell(ow
 
 
 async def test_clear_same_title_other_key_does_not_resolve_the_other_bell(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
-    """Review P3: hai khoá cùng `kind` TRÙNG tiêu đề (hai nguồn cùng tên) ⇒ chọn chuông theo tiêu đề tắt nhầm chuông kia.
-    Chuông lưu khoá sự cố (`incident_key`) nên đóng khoá nào tắt đúng chuông của khoá đó."""
+    """Review P3: hai khoá cùng `kind` TRÙNG tiêu đề (hai nguồn cùng tên) ⇒ chọn chuông theo tiêu đề tắt nhầm chuông
+    kia. Chuông lưu khoá sự cố (`incident_key`) nên đóng khoá nào tắt đúng chuông của khoá đó."""
     org = await org_id(db)
     title = "Model hết đăng nhập: Gemini"
     await _raise(db, org, "model.auth_expired:a", "model.auth_expired", title)
     await _raise(db, org, "model.auth_expired:b", "model.auth_expired", title)
-    keys = [r.incident_key for r in (await db.execute(text("""SELECT incident_key FROM core.notifications
-                                                              WHERE kind = 'model.auth_expired' ORDER BY created_at"""))).all()]
+    q = """SELECT incident_key, resolved_at IS NOT NULL AS resolved, read_at IS NOT NULL AS read
+           FROM core.notifications WHERE kind = 'model.auth_expired' ORDER BY created_at"""
+    keys = [r.incident_key for r in (await db.execute(text(q))).all()]
     assert keys == ["model.auth_expired:a", "model.auth_expired:b"]
     await _clear(db, org, "model.auth_expired:a")
-    rows = (await db.execute(text("""SELECT incident_key, resolved_at IS NOT NULL AS resolved, read_at IS NOT NULL AS read
-                                     FROM core.notifications WHERE kind = 'model.auth_expired'
-                                     ORDER BY created_at"""))).all()
+    rows = (await db.execute(text(q))).all()
     assert [(r.incident_key, r.resolved, r.read) for r in rows] == [
         ("model.auth_expired:a", True, True), ("model.auth_expired:b", False, False)]
 
@@ -145,6 +144,53 @@ async def test_clear_still_resolves_legacy_bell_without_incident_key(owner_api: 
     await _clear(db, org, "worker.silent")
     [item] = (await owner_api.get("/notifications")).json()["items"]
     assert item["resolved"] is True and item["read"] is True
+
+
+class _FakeRedis:
+    def __init__(self) -> None:
+        self.published: list[dict[str, Any]] = []
+
+    async def publish(self, channel: str, payload: bytes) -> None:
+        import orjson
+
+        self.published.append(orjson.loads(payload))
+
+
+async def test_clear_pushes_notification_resolved_after_commit(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    """Review P3: đóng sự cố phải đẩy WebSocket `notification.resolved` (chỉ tới chủ chuông, sau commit) để chuông
+    đang mở đổi ngay sang "Đã xử lý" — không đợi 120 giây tải lại."""
+    import asyncio
+
+    org = await org_id(db)
+    redis = _FakeRedis()
+    await health.raise_once(db, org, key="disk.low", kind="disk.low", severity="warn", title="Ổ đĩa sắp hết chỗ",
+                            body="x", link=None, redis=redis)
+    await db.commit()
+    await asyncio.sleep(0.05)
+    assert [m["type"] for m in redis.published] == ["notification.new"]
+    await health.clear(db, org, "disk.low", redis=redis)
+    await asyncio.sleep(0.05)
+    assert len(redis.published) == 1  # chưa commit ⇒ chưa đẩy
+    await db.commit()
+    await asyncio.sleep(0.05)
+    assert [m["type"] for m in redis.published] == ["notification.new", "notification.resolved"]
+    msg = redis.published[1]
+    assert msg["data"]["kind"] == "disk.low" and msg["data"]["resolved"] is True and msg["data"]["read"] is True
+    assert msg["to_user"] == redis.published[0]["to_user"]
+
+
+async def test_clear_without_label_pushes_read_but_not_resolved(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    import asyncio
+
+    org = await org_id(db)
+    redis = _FakeRedis()
+    await health.raise_once(db, org, key="disk.low", kind="disk.low", severity="warn", title="Ổ đĩa sắp hết chỗ",
+                            body="x", link=None, redis=redis)
+    await health.clear(db, org, "disk.low", label=False, redis=redis)
+    await db.commit()
+    await asyncio.sleep(0.05)
+    data = [m["data"] for m in redis.published if m["type"] == "notification.resolved"]
+    assert len(data) == 1 and data[0]["read"] is True and data[0]["resolved"] is False
 
 
 async def test_clear_resolves_every_old_bell_of_the_incident(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
@@ -278,12 +324,12 @@ async def test_update_failed_worse_outcome_rings_again(owner_api: Api, link: Pat
     assert len(await _bells(db, "update.failed")) == 2
 
 
-async def test_update_failed_nightly_slot_beyond_24h_does_not_close_and_reopen(owner_api: Api, link: Path, db, redis) -> None:  # type: ignore[no-untyped-def]
+async def test_update_failed_nightly_slot_beyond_24h_keeps_one_incident(owner_api: Api, link: Path, db, redis) -> None:  # type: ignore[no-untyped-def]
     """Review P2-1: lịch đêm 03:00 + RandomizedDelaySec 1800 ⇒ lần thử kế cách lần trước tới 24 giờ 30 phút. Hạn 24 giờ
     đóng sự cố giữa hai lần thử rồi mở lại (chuông lặp mỗi đêm) ⇒ hạn 26 giờ: cách 25 giờ vẫn là MỘT sự cố mở."""
     org = await org_id(db)
     now = datetime.now(UTC)
-    await _update_status(link, finished_at=_iso(now - timedelta(hours=25)), message="Hết chỗ trống để cập nhật (GH-E948)")
+    await _update_status(link, finished_at=_iso(now - timedelta(hours=25)), message="Hết chỗ trống (GH-E948)")
     await _evaluate(redis, org)
     [alert] = await _alerts(db, "update.failed")
     assert alert.cleared_at is None

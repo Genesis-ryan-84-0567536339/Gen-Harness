@@ -142,7 +142,7 @@ async def _job_timeout_alert(ctx: dict[str, Any], name: str, *, open_: bool) -> 
                     body="Hệ thống vẫn chạy; việc này sẽ thử lại ở lượt sau. Nếu còn lặp lại, mở Sức khoẻ hệ thống.",
                     link=health.HEALTH_LINK, fingerprint=str(TIMEOUT_ALERT_AFTER), redis=ctx.get("redis"))
             else:
-                await health.clear(db, org, key)
+                await health.clear(db, org, key, redis=ctx.get("redis"))
         await db.commit()
 
 
