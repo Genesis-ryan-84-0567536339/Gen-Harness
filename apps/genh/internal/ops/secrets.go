@@ -28,6 +28,11 @@ import (
 // `docker compose up` báo "bind source path does not exist" và update rollback.
 // Vì vậy MỌI lệnh vận hành tìm compose.yaml (LocatePath/LocatePathSync) đều gọi
 // ensureAuxSecrets trước — idempotent, không bao giờ ghi đè khoá đã có.
+//
+// GHI CHÚ (review v0.1.63, P3): tệp RỖNG (hoặc thư mục rỗng do Docker tạo) của BẤT KỲ khoá nào ở đây — kể cả
+// gh_offsite_key — bị coi là "chưa có" và sinh khoá MỚI. Với gh_offsite_key nghĩa là "Khoá khôi phục" đổi: bản in
+// "Bộ khôi phục" cũ và gói .ghbundle mã hoá bằng khoá cũ không mở được bằng khoá mới (khoá cũ vốn đã mất khi tệp
+// rỗng). Sếp đối chiếu mã khoá (8 ký tự đầu sha256, offsiteKeyID) ở Console › Sao lưu với bản in sau mỗi lần như vậy.
 var auxSecretFiles = []string{"gh_bridge_key", "gh_browser_key", agyKeyName, offsiteKeyName}
 
 // agyKeyName là tên Docker secret của khoá HMAC giữa api/worker và dịch vụ agy-box.

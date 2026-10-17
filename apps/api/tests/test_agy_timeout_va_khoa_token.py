@@ -101,6 +101,14 @@ def test_token_expiry_and_needs_refresh() -> None:
     assert token_expiry(b'{"expires_at": "2026-10-16T10:00:00Z"}') == pytest.approx(1_792_144_800.0)
     claims = base64.urlsafe_b64encode(json.dumps({"exp": 4102444800}).encode()).decode().rstrip("=")
     assert token_expiry(json.dumps({"id_token": f"h.{claims}.s"}).encode()) == 4102444800.0
+    # định dạng thật của agy 1.2.9: expiry + refresh_token nằm trong "token" (không ở cấp đầu)
+    nested = json.dumps({"token": {"access_token": "a", "refresh_token": "r", "expiry": "2026-10-16T10:00:00.5Z"},
+                         "auth_method": "oauth"}).encode()
+    assert token_expiry(nested) == pytest.approx(1_792_144_800.5)
+    assert token_needs_refresh(nested, now=1_792_144_790.0) and not token_needs_refresh(nested, now=1_792_140_000.0)
+    no_exp = json.dumps({"token": {"refresh_token": "r"}}).encode()
+    assert token_expiry(no_exp) is None and token_needs_refresh(no_exp)  # có refresh, không rõ hạn ⇒ coi có thể làm mới
+    assert not token_needs_refresh(json.dumps({"token": {"access_token": "a"}}).encode())
     assert token_expiry(b"khong-phai-json") is None and token_expiry(b"[]") is None and token_expiry(b"{}") is None
     assert token_needs_refresh(_token(now + 30), now=now)                  # sắp hết
     assert token_needs_refresh(_token(now - 5), now=now)                   # đã hết

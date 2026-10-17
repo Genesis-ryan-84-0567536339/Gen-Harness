@@ -220,3 +220,20 @@ func TestPullStep_AgyBoxAnhRieng_DuocTai(t *testing.T) {
 		t.Fatalf("agy-box phải nằm trong pullServiceOrder; gọi: %v", fp.called)
 	}
 }
+
+// Gói sửa review v0.1.63 (P2-2): proxy lối ra agy-egress (cùng ảnh api) cũng nằm trong danh sách tải.
+func TestPullStep_AgyEgressAnhRieng_DuocTai(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "compose.yaml")
+	if err := os.WriteFile(path, []byte("services:\n  agy-egress:\n    image: ghcr.io/o/egress:1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fp := &fakePuller{}
+	step := pullStep{puller: fp, locate: func(string) (string, error) { return path, nil }}
+	if err := step.Run(context.Background(), &Env{}, ReporterFunc(func(Progress) {})); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(fp.called) != 1 || fp.called[0] != "ghcr.io/o/egress:1" {
+		t.Fatalf("agy-egress phải nằm trong pullServiceOrder; gọi: %v", fp.called)
+	}
+}
