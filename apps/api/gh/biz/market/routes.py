@@ -18,7 +18,15 @@ from gh.auth import rbac, service
 from gh.auth.deps import require
 from gh.biz.core import explain
 from gh.biz.core.drafts import Target, _execute_internal, create_draft
-from gh.biz.core.scope import Scope, ensure_active_user, ensure_group, ensure_person, not_found, scope_for
+from gh.biz.core.scope import (
+    Scope,
+    direct_visible_sql,
+    ensure_active_user,
+    ensure_group,
+    ensure_person,
+    not_found,
+    scope_for,
+)
 from gh.biz.market import service as msvc
 from gh.biz.market.jobs import recompute_matches_org
 from gh.biz.market.service import CLOSED_STAGES, OPEN_STAGES, STAGES, person_or_group_scope_sql
@@ -538,8 +546,9 @@ async def search_conversations(request: Request, q: str | None = None, event_typ
     chỉ thuộc về nhóm không dựng được một dòng người)."""
     sc = await scope_for(db, user, "opportunity.read")
     scope_sql, scope_params = person_or_group_scope_sql(sc, "mu.person_id", "mu.group_id")
-    base_conds = ["mu.org_id = :o", "mu.superseded_by IS NULL", "mu.person_id IS NOT NULL", scope_sql]
-    params: dict[str, Any] = {"o": user.org_id, **scope_params}
+    dm_sql, dm_params = direct_visible_sql(user, "mu.group_id", "mu.person_id")   # tin 1-1: chỉ Owner/người được giao
+    base_conds = ["mu.org_id = :o", "mu.superseded_by IS NULL", "mu.person_id IS NOT NULL", scope_sql, dm_sql]
+    params: dict[str, Any] = {"o": user.org_id, **scope_params, **dm_params}
     if event_type:
         base_conds.append("mu.event_type = :et")
         params["et"] = event_type

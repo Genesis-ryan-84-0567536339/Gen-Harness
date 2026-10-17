@@ -204,8 +204,9 @@ async def test_ws_dispatch_filters_by_permission_org_and_masks(app, redis) -> No
                    auditor: user("auditor", "o1", {"data.read": "all"}),
                    manager: user("manager", "o1", {"data.read": "none"}),
                    other: user("owner", "o2", {"data.read": "all"})}
-    await hub.dispatch({"type": "raw.new", "data": {"text": "STK 0123456789", "payload": {"x": 1}}, "at": "t",
-                        "org_id": "o1"})
+    # tin NHÓM (có `group`): tin 1-1 chỉ Owner nhận, xem test_tin_1_1_chi_owner_v0165
+    await hub.dispatch({"type": "raw.new", "data": {"text": "STK 0123456789", "payload": {"x": 1},
+                                                    "group": {"id": "g1"}}, "at": "t", "org_id": "o1"})
     await hub.dispatch({"type": "cli.login", "data": {"status": "waiting_code"}, "at": "t", "org_id": "o1"})
     assert len(owner.sent) == 2 and "0123456789" in owner.sent[0]
     assert len(auditor.sent) == 1 and "0123456789" not in auditor.sent[0] and "payload" not in auditor.sent[0]

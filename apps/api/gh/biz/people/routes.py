@@ -424,11 +424,10 @@ async def _explain_review(db: AsyncSession, user: service.CurrentUser, sc: Scope
         raise not_found("Đánh giá")
     if not user.pin_active():
         raise pin_required()
-    owner = user.role_code == rbac.OWNER
     ids = explain.unit_ids_of(r.evidence)
     payload = explain.payload("review", id, f"{r.display_name} — đánh giá {r.created_at.date().isoformat()}",
                               f"{float(r.score):.0f}/100", method="manual" if r.overridden_by else "rules+model",
-                              units=await explain.units_payload(db, ids, is_owner=owner))
+                              units=await explain.units_payload(db, ids, viewer=user))
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="people_review.explained", target_type="people_review", target_id=str(rid),
                            result="ok", ip=user.ip)

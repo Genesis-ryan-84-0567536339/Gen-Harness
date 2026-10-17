@@ -18,7 +18,7 @@ from gh import realtime
 from gh.auth import rbac, service
 from gh.auth.deps import current_user, require
 from gh.biz.core import drafts, explain
-from gh.biz.core.scope import Scope, ensure_group, ensure_person, not_found, scope_for
+from gh.biz.core.scope import Scope, direct_visible_sql, ensure_group, ensure_person, not_found, scope_for
 from gh.biz.queue import service as qsvc
 from gh.chassis import actionlog
 from gh.data.common import LISTENING_MODES, iso, mask_text
@@ -146,7 +146,7 @@ async def list_inbox(tab: Literal["all", "opportunity", "alert", "approval", "re
                      limit: int = Query(50, ge=1, le=200), user: service.CurrentUser = Depends(current_user),
                      db: AsyncSession = DB) -> dict[str, Any]:
     sc = await scope_for(db, user, "queue.read")
-    where, params = qsvc.item_scope_sql(sc, "i")
+    where, params = qsvc.item_scope_sql(sc, "i", user)
     tcfg = await triage.get_settings(db, user.org_id)
     min_score = int(tcfg["min_score"]) if tcfg["enabled"] else None
     hide = hide_junk and min_score is not None
@@ -193,11 +193,11 @@ async def list_inbox(tab: Literal["all", "opportunity", "alert", "approval", "re
             "triage": {"enabled": min_score is not None, "min_score": min_score, "hidden": int(hidden)}}
 
 
-async def _load_item(db: AsyncSession, org_id: uuid.UUID, sc: Scope, item_id: uuid.UUID) -> Any:
-    where, params = qsvc.item_scope_sql(sc, "i")
+async def _load_item(db: AsyncSession, user: service.CurrentUser, sc: Scope, item_id: uuid.UUID) -> Any:
+    where, params = qsvc.item_scope_sql(sc, "i", user)
     r = (await db.execute(
         text(_ITEMS_CTE.format(scope=where, silence="TRUE") + " SELECT * FROM items WHERE item_id = :i"),  # noqa: S608
-        {"o": org_id, "opp": OPP_EVENTS, "reply": REPLY_EVENTS, "i": item_id, **params})).one_or_none()
+        {"o": user.org_id, "opp": OPP_EVENTS, "reply": REPLY_EVENTS, "i": item_id, **params})).one_or_none()
     if r is None:
         raise not_found("Mục trong hàng đợi")
     return r
@@ -207,15 +207,15 @@ async def _load_item(db: AsyncSession, org_id: uuid.UUID, sc: Scope, item_id: uu
 async def get_inbox_item(item_id: uuid.UUID, user: service.CurrentUser = Depends(current_user),
                          db: AsyncSession = DB) -> dict[str, Any]:
     sc = await scope_for(db, user, "queue.read")
-    r = await _load_item(db, user.org_id, sc, item_id)
+    r = await _load_item(db, user, sc, item_id)
     owner = user.role_code == rbac.OWNER
     tcfg = await triage.get_settings(db, user.org_id)
     payload = _item_payload(r, owner=owner, min_score=int(tcfg["min_score"]) if tcfg["enabled"] else None)
     if r.item_type == "unit":
-        payload["units"] = await explain.units_payload(db, [item_id], is_owner=owner)
+        payload["units"] = await explain.units_payload(db, [item_id], viewer=user)
     elif r.item_type == "alert":
         ev = (await db.execute(text("SELECT evidence FROM biz.alerts WHERE id = :i"), {"i": item_id})).scalar_one()
-        payload["units"] = await explain.units_payload(db, explain.unit_ids_of(ev), is_owner=owner)
+        payload["units"] = await explain.units_payload(db, explain.unit_ids_of(ev), viewer=user)
         payload["status"] = r.alert_status
     elif r.item_type == "draft":
         payload["status"] = r.draft_status
@@ -233,7 +233,7 @@ async def act_inbox_item(item_id: uuid.UUID, request: Request, body: ActIn | Non
                          user: service.CurrentUser = Depends(require("queue.act")),
                          db: AsyncSession = DB) -> dict[str, Any]:
     sc = await scope_for(db, user, "queue.act")
-    r = await _load_item(db, user.org_id, sc, item_id)
+    r = await _load_item(db, user, sc, item_id)
     body = body or ActIn()
     if r.item_type == "draft":
         raise ApiError(409, "USE_WORKBENCH", "Duyệt bản nháp này ở Bàn làm việc")
@@ -297,7 +297,7 @@ async def assign_inbox_item(item_id: uuid.UUID, body: AssignIn,
                             user: service.CurrentUser = Depends(require("queue.act")),
                             db: AsyncSession = DB) -> dict[str, Any]:
     sc = await scope_for(db, user, "queue.act")
-    r = await _load_item(db, user.org_id, sc, item_id)
+    r = await _load_item(db, user, sc, item_id)
     target = (await db.execute(text("""SELECT id, display_name FROM core.users
                                        WHERE id = :u AND org_id = :o AND is_active
                                          AND deleted_at IS NULL"""),
@@ -321,7 +321,7 @@ async def silence_inbox_item(item_id: uuid.UUID, body: SilenceIn | None = None,
                              user: service.CurrentUser = Depends(require("queue.act")),
                              db: AsyncSession = DB) -> dict[str, Any]:
     sc = await scope_for(db, user, "queue.act")
-    r = await _load_item(db, user.org_id, sc, item_id)
+    r = await _load_item(db, user, sc, item_id)
     body = body or SilenceIn()
     await qsvc.silence(db, user.org_id, r.item_type, item_id, user_id=user.id, reason=body.reason, until=body.until)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
@@ -347,7 +347,7 @@ def _kpi(key: str, label: str, value: Any, *, unit: str | None = None, row: int 
 
 async def _queue_widget(db: AsyncSession, user: service.CurrentUser, sc: Scope) -> list[dict[str, Any]]:
     """Khối "Hàng đợi cần xử lý" của Tổng quan: cơ hội mới / cảnh báo / chờ duyệt / đến hạn, ưu tiên trước."""
-    where2, params2 = qsvc.item_scope_sql(sc, "i")
+    where2, params2 = qsvc.item_scope_sql(sc, "i", user)
     qrows = (await db.execute(text(f"""
         SELECT i.item_type, i.item_id, i.code, i.title, i.priority, i.created_at
         FROM biz.inbox_items i
@@ -392,6 +392,8 @@ async def _signals(db: AsyncSession, user: service.CurrentUser, sc: Scope) -> li
     where, params = sc.person_id_sql("mu.person_id") if not sc.is_all else ("TRUE", {})
     gwhere, gparams = sc.group_id_sql("mu.group_id") if not sc.is_all else ("TRUE", {})
     scope_cond = "TRUE" if sc.is_all else f"({where} OR {gwhere})"
+    dm_sql, dm_params = direct_visible_sql(user, "mu.group_id", "mu.person_id")   # tin 1-1: chỉ Owner/người được giao
+    scope_cond = f"({scope_cond}) AND {dm_sql}"
     rows = (await db.execute(text(f"""
         SELECT entities->>'product' AS topic,
                count(*) FILTER (WHERE observed_at > now() - interval '7 days') AS this_week,
@@ -401,7 +403,7 @@ async def _signals(db: AsyncSession, user: service.CurrentUser, sc: Scope) -> li
         WHERE mu.org_id = :o AND mu.superseded_by IS NULL AND entities->>'product' IS NOT NULL
           AND mu.observed_at > now() - interval '14 days' AND {scope_cond}
         GROUP BY 1 ORDER BY this_week DESC LIMIT :n"""),  # noqa: S608
-        {"o": user.org_id, "n": SIGNALS_LIMIT, **params, **gparams})).all()
+        {"o": user.org_id, "n": SIGNALS_LIMIT, **params, **gparams, **dm_params})).all()
     out = []
     for r in rows:
         delta = (float(r.this_week - r.last_week) / r.last_week * 100) if r.last_week else None

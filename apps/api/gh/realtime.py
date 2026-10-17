@@ -46,6 +46,10 @@ EVENT_PERMISSION: dict[str, str | None] = {
 # Sự kiện mang nội dung tin nhắn: vai trò dưới Owner nhận bản đã che số dài (khoá cứng 8).
 MASKED_EVENTS = {"raw.new"}
 
+# Sự kiện mang NGUYÊN VĂN một tin: tin 1-1 (`data.group` rỗng) chỉ gửi cho Owner — vai dưới (kể cả Kiểm soát có
+# data.read) không nhận chuyện riêng của khách qua WebSocket (review v0.1.65 P2-2).
+OWNER_ONLY_WHEN_DIRECT = {"raw.new"}
+
 
 def register_event(type: str, permission: str | None, *, masked: bool = False) -> None:
     """Các cụm màn giai đoạn 3 khai báo sự kiện WS của mình (gọi lúc import routes). Loại chưa khai báo bị bỏ."""
@@ -187,6 +191,9 @@ class Hub:
             if to_user and str(user.id) != to_user:
                 continue
             if not allowed(user.permissions, msg["type"]):
+                continue
+            if (msg["type"] in OWNER_ONLY_WHEN_DIRECT and user.role_code != rbac.OWNER
+                    and (msg.get("data") or {}).get("group") is None):
                 continue
             out = text
             if msg["type"] in MASKED_EVENTS and user.role_code != rbac.OWNER:

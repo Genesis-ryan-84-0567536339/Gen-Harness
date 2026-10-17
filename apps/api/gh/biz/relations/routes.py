@@ -25,7 +25,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gh.auth import rbac, service
 from gh.auth.deps import require
 from gh.biz.core import explain
-from gh.biz.core.scope import Scope, ensure_active_user, ensure_group, ensure_person, not_found, scope_for
+from gh.biz.core.scope import (
+    Scope,
+    direct_visible_sql,
+    ensure_active_user,
+    ensure_group,
+    ensure_person,
+    not_found,
+    scope_for,
+)
 from gh.biz.relations import service as rsvc
 from gh.chassis import actionlog
 from gh.chassis.objects import ObjectNotFound, content_hash, get_object_store, new_key
@@ -405,13 +413,15 @@ async def _profile_payload(person_id: uuid.UUID, user: service.CurrentUser, db: 
         SELECT dimension, value, trend, updated_at FROM clean.current_scores
         WHERE subject_type = 'person' AND subject_id = :p ORDER BY dimension"""), {"p": person_id})).all()
 
-    timeline = (await db.execute(text("""
+    dm_sql, dm_params = direct_visible_sql(user, "mu.group_id", "mu.person_id")   # tin 1-1: chỉ Owner/người được giao
+    timeline = (await db.execute(text(f"""
         SELECT mu.id, mu.event_type, mu.conclusion, mu.confidence, mu.observed_at,
                g.id AS g_id, g.code AS g_code, g.name AS g_name, gc.type AS g_channel
         FROM clean.meaning_units mu LEFT JOIN core.groups g ON g.id = mu.group_id
         LEFT JOIN core.channels gc ON gc.id = g.channel_id
-        WHERE mu.org_id = :o AND mu.person_id = :p AND mu.superseded_by IS NULL
-        ORDER BY mu.observed_at DESC LIMIT 30"""), {"o": user.org_id, "p": person_id})).all()
+        WHERE mu.org_id = :o AND mu.person_id = :p AND mu.superseded_by IS NULL AND {dm_sql}
+        ORDER BY mu.observed_at DESC LIMIT 30"""),  # noqa: S608 — biểu thức nội bộ
+        {"o": user.org_id, "p": person_id, **dm_params})).all()
 
     docs = (await db.execute(text("""
         SELECT id, title, mime, bytes, created_at FROM biz.documents
