@@ -219,6 +219,29 @@ describe('API & Model — thẻ nhà cung cấp', () => {
     expect(calls.filter((c) => c.method === 'POST')[1].body).toEqual({ model_name: 'gemini-2.5-flash', daily_quota: null, rate_limit_per_min: null });
   });
 
+  it('P2-2 (review): model còn lượt gọi 30 ngày ⇒ máy chủ 409, màn hiện nguyên câu thân thiện; "Tắt model" / "Bật model" gửi enabled', async () => {
+    const MSG = 'Model “gemini-2.5-flash” đã có lượt gọi trong 30 ngày qua — gỡ đi sẽ mất lịch sử chi phí. Bấm “Tắt model” để ngừng dùng mà vẫn giữ lịch sử.';
+    const off: Provider = { ...GEMINI, models: [GEMINI.models[0], { ...GEMINI.models[1], is_default: false, enabled: false }] };
+    const calls = mockFetch((c) => {
+      if (c.method === 'DELETE') return json(409, { code: 'MODEL_HAS_CALLS', title: MSG, status: 409 });
+      if (c.method === 'POST' && c.url.endsWith('/providers/pv-gemini/models')) return json(201, off);
+      return baseHandler([off])(c);
+    });
+    renderUi(<ApiScreen />);
+    await screen.findByText('Gemini API', { selector: '.apm-provider__name' });
+    const user = userEvent.setup();
+    const manage = within(cardOf('Gemini API')).getByTestId('provider-manage-pv-gemini');
+    await user.click(within(manage).getByText('Quản lý khoá và model'));
+    await user.click(within(manage).getByRole('button', { name: 'Gỡ model gemini-2.5-flash' }));
+    expect(await within(manage).findByText(MSG)).toBeInTheDocument();
+    // Tắt model đang bật (không gửi trường nào khác ⇒ máy chủ giữ hạn mức)
+    await user.click(within(manage).getByRole('button', { name: 'Tắt model gemini-2.5-flash' }));
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ model_name: 'gemini-2.5-flash', enabled: false }));
+    // Model đã tắt ⇒ nút là "Bật model"
+    await user.click(within(manage).getByRole('button', { name: 'Bật model gemini-2.5-pro' }));
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST')[1].body).toEqual({ model_name: 'gemini-2.5-pro', enabled: true }));
+  });
+
   it('F019: chỉ có nguồn CLI ⇒ nút "Kiểm tra kết nối" đầu trang tắt (không báo xanh 0/0); có nguồn khoá API ⇒ kiểm', async () => {
     mockFetch(baseHandler([AGY]));
     const { unmount } = renderUi(<ApiScreen />);

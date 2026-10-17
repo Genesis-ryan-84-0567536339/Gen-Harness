@@ -75,3 +75,64 @@ async def test_credentials_label_error_is_connection_error_and_no_qr_rows(owner_
         cli = next(c for c in rows if c["name"].startswith("Antigravity"))
         assert cli["state_label"] == label, (state, cli)
     assert not [c for c in rows if "QR" in c["name"] or c["icon"] == "qr-code"]
+
+
+# ─── review v0.1.66 (P2-2): gỡ model KHÔNG được xoá dây chuyền bảng giá khi model còn lịch sử chi phí ─────────────────
+
+async def _call(db, org, model, days_ago: int) -> None:  # type: ignore[no-untyped-def]
+    await db.execute(text("""INSERT INTO agent.model_calls (org_id, at, model_id, agent_key, purpose, tokens_in,
+                                                            tokens_out, latency_ms, status)
+                             VALUES (:o, now() - make_interval(days => :d), :m, 'core.gen', 'test', 1000, 500, 10,
+                                     'ok')"""),
+                     {"o": org, "d": days_ago, "m": model})
+    await db.commit()
+
+
+async def test_delete_model_with_recent_calls_is_refused_and_keeps_price(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    pid, ids = await add_source(db, org, API, "alpha", 1, ["m-flash", "m-pro"])
+    await bind(db, org, "core.gen", ids["m-pro"])
+    await db.execute(text("""INSERT INTO agent.model_prices (model_id, org_id, in_vnd_per_mtok, out_vnd_per_mtok)
+                             VALUES (:m, :o, 100, 200)"""), {"m": ids["m-pro"], "o": org})
+    await _call(db, org, ids["m-pro"], 3)
+    r = await owner_api.send("DELETE", f"/providers/{pid}/models/{ids['m-pro']}")
+    assert r.status_code == 409, r.text
+    body = r.json()
+    assert body["code"] == "MODEL_HAS_CALLS"
+    assert "30 ngày" in body["title"] and "Tắt model" in body["title"] and "m-pro" in body["title"]
+    # Không mất gì: model, dòng gán, bảng giá (xoá dây chuyền sẽ làm chi phí lịch sử tụt về 0).
+    await db.rollback()
+    assert (await db.execute(text("SELECT count(*) FROM agent.models WHERE id = :m"),
+                             {"m": ids["m-pro"]})).scalar_one() == 1
+    assert (await db.execute(text("SELECT count(*) FROM agent.bindings"))).scalar_one() == 1
+    assert (await db.execute(text("SELECT count(*) FROM agent.model_prices"))).scalar_one() == 1
+    # Không ghi Action Log "đã gỡ".
+    assert (await db.execute(text("""SELECT count(*) FROM ops.action_log
+                                  WHERE action = 'provider.model_deleted'"""))).scalar_one() == 0
+
+
+async def test_delete_model_with_only_old_calls_is_allowed(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    pid, ids = await add_source(db, org, API, "alpha", 1, ["m-flash", "m-pro"])
+    await _call(db, org, ids["m-pro"], 45)          # quá 30 ngày ⇒ gỡ được
+    await _call(db, org, ids["m-flash"], 2)         # lượt gọi của model KHÁC không cản
+    r = await owner_api.send("DELETE", f"/providers/{pid}/models/{ids['m-pro']}")
+    assert r.status_code == 204, r.text
+
+
+async def test_model_can_be_disabled_and_enabled_keeping_history(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    pid, ids = await add_source(db, org, API, "alpha", 1, ["m-flash", "m-pro"], default="m-pro")
+    await _call(db, org, ids["m-pro"], 1)
+    r = await owner_api.send("POST", f"/providers/{pid}/models", {"model_name": "m-pro", "enabled": False})
+    assert r.status_code == 201, r.text
+    m = next(x for x in r.json()["models"] if x["model_name"] == "m-pro")
+    assert m["enabled"] is False and not m.get("is_default")      # tắt ⇒ không còn là model đã chốt
+    # Hạn mức không bị đụng, lịch sử còn nguyên, bật lại được.
+    r = await owner_api.send("POST", f"/providers/{pid}/models", {"model_name": "m-pro", "enabled": True})
+    assert r.status_code == 201, r.text
+    assert next(x for x in r.json()["models"] if x["model_name"] == "m-pro")["enabled"] is True
+    # Không gửi `enabled` (vd chỉ sửa hạn mức) ⇒ giữ trạng thái đang có.
+    await owner_api.send("POST", f"/providers/{pid}/models", {"model_name": "m-pro", "enabled": False})
+    r = await owner_api.send("POST", f"/providers/{pid}/models", {"model_name": "m-pro", "daily_quota": 9})
+    assert next(x for x in r.json()["models"] if x["model_name"] == "m-pro")["enabled"] is False

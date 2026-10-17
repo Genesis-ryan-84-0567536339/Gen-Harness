@@ -313,6 +313,7 @@ function ModelLimitRow({ provider: p, model: m, onRemove, removing }: { provider
   const [daily, setDaily] = useState(m.daily_quota == null ? '' : String(m.daily_quota));
   const [perMin, setPerMin] = useState(m.rate_limit_per_min == null ? '' : String(m.rate_limit_per_min));
   const [bad, setBad] = useState(false);
+  const enabled = m.enabled !== false;   // thiếu trường (máy chủ cũ) = đang bật
   const submit = () => {
     const d = parseQuotaInput(daily);
     const r = parseQuotaInput(perMin);
@@ -327,6 +328,7 @@ function ModelLimitRow({ provider: p, model: m, onRemove, removing }: { provider
     <div className="apm-manage__row apm-manage__row--model">
       <span className="apm-manage__name mono" title={m.model_name}>
         {m.model_name}
+        {enabled ? '' : ' (đã tắt)'}
       </span>
       <label className="apm-manage__field">
         <span className="muted-note">Hạn mức/ngày</span>
@@ -338,6 +340,20 @@ function ModelLimitRow({ provider: p, model: m, onRemove, removing }: { provider
       </label>
       <Button variant="secondary" className="btn-22" loading={save.isPending} aria-label={`Lưu hạn mức của ${m.model_name}`} onClick={submit}>
         Lưu hạn mức
+      </Button>
+      <Button
+        variant="secondary"
+        className="btn-22"
+        loading={save.isPending && save.variables?.body.enabled !== undefined}
+        aria-label={`${enabled ? 'Tắt' : 'Bật'} model ${m.model_name}`}
+        onClick={() =>
+          save.mutate(
+            { id: p.id, body: { model_name: m.model_name, enabled: !enabled } },
+            { onSuccess: () => toast(enabled ? `Đã tắt ${m.model_name} — lịch sử chi phí vẫn giữ.` : `Đã bật lại ${m.model_name}.`) },
+          )
+        }
+      >
+        {enabled ? 'Tắt model' : 'Bật model'}
       </Button>
       <Button
         variant="ghost"

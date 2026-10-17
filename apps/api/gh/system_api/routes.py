@@ -343,6 +343,9 @@ class ModelIn(BaseModel):
     # v0.1.32: mức suy nghĩ tách khỏi tên model (agy `--effort low|medium|high`; claude thêm xhigh, max).
     # None = để CLI tự chọn (không gửi --effort).
     effort: Literal["low", "medium", "high", "xhigh", "max"] | None = None
+    # Review v0.1.66 (P2-2): "Tắt model" / "Bật model" — ngừng dùng mà giữ lịch sử chi phí.
+    # Không gửi ⇒ giữ trạng thái đang có.
+    enabled: bool | None = None
 
 
 async def _add_key(db: AsyncSession, provider_id: uuid.UUID, kind: str, secret: str) -> None:
@@ -713,10 +716,16 @@ async def add_model(pid: uuid.UUID, body: ModelIn, request: Request, user: servi
                            errors={"model_name": probe["error"]}, technical=probe.get("error_detail"),
                            available=probe.get("available") or [])
     await db.execute(text("""
-        INSERT INTO agent.models (provider_id, model_name, effort, daily_quota, rate_limit_per_min)
-        VALUES (:p, :m, :e, :q, :r)
-        ON CONFLICT (provider_id, model_name) DO UPDATE SET effort = :e, daily_quota = :q, rate_limit_per_min = :r"""),
-        {"p": pid, "m": name, "e": effort, "q": daily_quota, "r": rate_limit})
+        INSERT INTO agent.models (provider_id, model_name, effort, daily_quota, rate_limit_per_min, is_enabled)
+        VALUES (:p, :m, :e, :q, :r, COALESCE(CAST(:en AS boolean), true))
+        ON CONFLICT (provider_id, model_name) DO UPDATE
+          SET effort = :e, daily_quota = :q, rate_limit_per_min = :r,
+              is_enabled = COALESCE(CAST(:en AS boolean), agent.models.is_enabled)"""),
+        {"p": pid, "m": name, "e": effort, "q": daily_quota, "r": rate_limit, "en": body.enabled})
+    if body.enabled is False:
+        # Model đã tắt không thể là model Sếp đã chốt ("Dùng model này") — chuỗi bỏ qua model tắt.
+        await db.execute(text("UPDATE agent.models SET is_default = false WHERE provider_id = :p AND model_name = :m"),
+                         {"p": pid, "m": name})
     if body.make_default:
         await db.execute(text("UPDATE agent.models SET is_default = false WHERE provider_id = :p AND is_default"),
                          {"p": pid})
@@ -734,13 +743,24 @@ async def add_model(pid: uuid.UUID, body: ModelIn, request: Request, user: servi
 @router.delete("/providers/{pid}/models/{mid}", status_code=204)
 async def delete_model(pid: uuid.UUID, mid: uuid.UUID, request: Request, user: service.CurrentUser = Depends(MANAGE),
                        db: AsyncSession = DB) -> Response:
-    """v0.1.66 (F008): gỡ một model đã thêm nhầm. Gỡ luôn dòng gán model trỏ vào nó (vai đó quay về model chuẩn). Không
-    xoá được model cuối cùng của nguồn Jev (`system_one`: không có danh sách model để chọn)."""
+    """v0.1.66 (F008): gỡ một model đã thêm nhầm. Gỡ luôn dòng gán model trỏ vào nó (vai đó quay về model chuẩn).
+    Model còn lượt gọi trong 30 ngày ⇒ 409 `MODEL_HAS_CALLS` (gỡ sẽ xoá dây chuyền bảng giá, chi phí lịch sử tụt về 0) —
+    dùng "Tắt model" (`POST /providers/{id}/models` với `enabled: false`)."""
     p = await _provider(db, user.org_id, pid)
     row = (await db.execute(text("""SELECT model_name FROM agent.models WHERE id = :m AND provider_id = :p"""),
                             {"m": mid, "p": pid})).one_or_none()
     if row is None:
         raise not_found("Model")
+    # Review v0.1.66 (P2-2): xoá model kéo theo `agent.model_prices` (ON DELETE CASCADE) mà chi phí tính lúc đọc từ
+    # bảng giá ⇒ chi phí hôm nay / 7 ngày tụt về 0, trần chi phí không kêu, không đảo ngược. Model còn lượt gọi trong
+    # 30 ngày ⇒ không cho gỡ (chỉ "Tắt model": ngừng dùng, giữ lịch sử).
+    used = (await db.execute(text("""SELECT EXISTS (SELECT 1 FROM agent.model_calls
+                                     WHERE org_id = :o AND model_id = :m AND at >= now() - interval '30 days')"""),
+                             {"o": user.org_id, "m": mid})).scalar_one()
+    if used:
+        raise conflict("MODEL_HAS_CALLS",
+                       f"Model “{row.model_name}” đã có lượt gọi trong 30 ngày qua — gỡ đi sẽ mất lịch sử chi phí. "
+                       "Bấm “Tắt model” để ngừng dùng mà vẫn giữ lịch sử.")
     await db.execute(text("DELETE FROM agent.bindings WHERE org_id = :o AND model_id = :m"),
                      {"o": user.org_id, "m": mid})
     await db.execute(text("DELETE FROM agent.models WHERE id = :m"), {"m": mid})

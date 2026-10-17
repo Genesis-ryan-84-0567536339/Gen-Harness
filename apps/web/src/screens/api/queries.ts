@@ -76,7 +76,7 @@ export const useTestProvider = () => {
 export const useAddModel = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, body }: { id: string; body: { model_name: string; daily_quota?: number | null; rate_limit_per_min?: number | null } }) =>
+    mutationFn: ({ id, body }: { id: string; body: { model_name: string; daily_quota?: number | null; rate_limit_per_min?: number | null; enabled?: boolean } }) =>
       api.providers.addModel(id, body),
     onSuccess: () => invalidateProviders(qc),
   });
