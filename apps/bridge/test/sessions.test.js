@@ -38,24 +38,23 @@ test('tập nghe: tin nhóm không thuộc gh:bridge:listen:zalo → không publ
   mgr.shutdown();
 });
 
-test('tập nghe: tin 1-1 chỉ đi khi listen_direct = "1"; tin của chính mình theo cùng luật', async () => {
+test('tập nghe: tin 1-1 mặc định ĐI (lưu im lặng), chỉ listen_direct = "0" mới chặn; tin của chính mình theo cùng luật', async () => {
   const { bus, mgr, api } = await activeZalo();
-  api.listener.emit('message', zaloMessage({ group: false, threadId: '111', msgId: '10' }));
-  await tick(5);
-  assert.equal(bus.of(STREAMS.inbound).length, 0);
+  api.listener.emit('message', zaloMessage({ group: false, threadId: '111', msgId: '10' }));   // chưa có khoá ⇒ mặc định đi
+  await waitFor(() => bus.of(STREAMS.inbound).length === 1);
   bus.direct.zalo = '0';
   api.listener.emit('message', zaloMessage({ group: false, threadId: '111', msgId: '11' }));
   await tick(5);
-  assert.equal(bus.of(STREAMS.inbound).length, 0);
+  assert.equal(bus.of(STREAMS.inbound).length, 1);
   bus.direct.zalo = '1';
   api.listener.emit('message', zaloMessage({ group: false, threadId: '111', msgId: '12' }));
   api.listener.emit('message', zaloMessage({ group: false, threadId: '111', msgId: '13', isSelf: true, uidFrom: '900' }));
   // Tin mình gửi trong nhóm không được nghe → bỏ
   api.listener.emit('message', zaloMessage({ threadId: 'G5', msgId: '14', isSelf: true, uidFrom: '900' }));
-  await waitFor(() => bus.of(STREAMS.inbound).length === 2);
+  await waitFor(() => bus.of(STREAMS.inbound).length === 3);
   await tick(5);
   assert.deepEqual(bus.of(STREAMS.inbound).map((e) => [e.payload.external_msg_id, e.payload.direction]),
-    [['12', 'inbound'], ['13', 'outbound']]);
+    [['10', 'inbound'], ['12', 'inbound'], ['13', 'outbound']]);
   mgr.shutdown();
 });
 

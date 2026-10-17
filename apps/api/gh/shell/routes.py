@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gh.auth import service
 from gh.auth.deps import current_user
 from gh.chassis import policy
+from gh.data.common import LISTENING_MODES
 from gh.db import DB, sessionmaker
 from gh.errors import JsonResponse
 from gh.shell import navigation
@@ -45,8 +46,8 @@ async def header_payload(db: AsyncSession, org_id: Any) -> dict[str, Any]:
         SELECT count(DISTINCT c.id) FROM core.channels c JOIN core.channel_sessions s ON s.channel_id = c.id
         WHERE c.org_id = :o AND s.started_at IS NOT NULL"""), {"o": org_id})).scalar_one()
     groups = (await db.execute(text("""
-        SELECT count(*) FROM core.groups WHERE org_id = :o AND listen_mode IN ('tagged_only','silent','proactive')"""),
-        {"o": org_id})).scalar_one()
+        SELECT count(*) FROM core.groups WHERE org_id = :o AND left_at IS NULL AND listen_mode = ANY(:m)"""),
+        {"o": org_id, "m": list(LISTENING_MODES)})).scalar_one()
     org = (await db.execute(text("SELECT settings, timezone FROM core.organizations WHERE id = :o"),
                             {"o": org_id})).one()
     settings = org.settings or {}

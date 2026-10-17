@@ -28,7 +28,7 @@ function stub(agentLevel: number, opts: { getFails?: boolean } = {}) {
     }
     if (url.endsWith('/setup/steps/9') && opts.getFails) return json(500, { status: 500, code: 'INTERNAL', title: 'Lỗi máy chủ' });
     if (url.endsWith('/setup/steps/9')) return json(200, { agent: { id: 'a1', name: 'Trợ lý Mai', autonomy_level: level } });
-    if (url.endsWith('/setup/hard-boundaries')) return json(200, ['Chỉ lắng nghe nhóm Owner đã bật']);
+    if (url.endsWith('/setup/hard-boundaries')) return json(200, ['Chỉ lưu tin của nhóm Sếp đã chọn nghe']);
     if (url.endsWith('/setup/state')) return json(200, { finished: true, current_step: 12, steps: [] });
     return json(404, { status: 404, code: 'NOT_FOUND', title: 'Không tồn tại' });
   }));

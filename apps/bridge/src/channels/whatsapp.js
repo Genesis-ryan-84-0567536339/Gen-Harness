@@ -212,6 +212,7 @@ export class WhatsAppAdapter extends EventEmitter {
     this.retrying = false; // đã báo lõi "mất mạng, đang nối lại"
     this.everActive = false;
     this.cancelled = false;
+    this.lastSyncComplete = true;
     this.groupNames = new Map();
     this.names = new Map(); // jid → pushName (chỉ trong RAM, dùng cho danh bạ nhóm)
     this.recent = new RecentIds(2000);
@@ -472,22 +473,35 @@ export class WhatsAppAdapter extends EventEmitter {
     return res?.key?.id ? String(res.key.id) : null;
   }
 
+  /**
+   * Danh bạ: MỌI nhóm kèm MỌI thành viên (Q5=2). Một lần gọi duy nhất nên không cần giãn cách. `role` = 'admin' khi
+   * participant.admin ('admin' | 'superadmin'), còn lại 'member'.
+   */
   async syncGroups() {
     if (!this.sock) throw new Error('SESSION_NOT_ACTIVE');
     const all = await this.sock.groupFetchAllParticipating();
+    this.lastSyncComplete = true;
+    const mine = new Set([this.own?.jid, this.own?.lid].filter(Boolean));
     return Object.entries(all || {}).map(([jid, g]) => {
       const participants = Array.isArray(g.participants) ? g.participants : [];
       const name = g.subject || '';
       this.groupNames.set(jid, name);
+      const count = Number(g.size ?? participants.length) || participants.length;
       return {
         external_id: jid,
         name,
-        member_count: Number(g.size ?? participants.length) || participants.length,
+        member_count: count,
+        members_complete: participants.length > 0 && participants.length >= count,
         members: participants.map((p) => {
-          const id = p.id || '';
+          // Nhóm địa chỉ theo LID liệt kê CHÍNH MÌNH bằng LID (kèm phoneNumber = JID), còn tin của mình luôn mang JID ⇒ nếu
+          // giữ nguyên LID thì người của Sếp (nhận diện theo JID) "vắng" trong danh sách đủ và bị đánh dấu đã rời nhóm.
+          // So cả JID lẫn LID của chính mình (id, lid, phoneNumber) và báo bằng JID.
+          const isMe = [p.id, p.lid, p.phoneNumber].map(bareJid).some((j) => j && mine.has(j));
+          const id = isMe && this.own?.jid ? this.own.jid : (p.id || '');
           const member = { external_id: id, name: p.name || p.notify || this.names.get(bareJid(id)) || '' };
           const phone = phoneOf(p.phoneNumber) || phoneOf(id);
           if (phone) member.phone = phone;
+          member.role = p.admin ? 'admin' : 'member';
           return member;
         }),
       };

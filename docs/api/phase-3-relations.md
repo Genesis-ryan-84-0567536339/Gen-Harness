@@ -65,7 +65,7 @@ BOT trực nhóm (`core.groups.assigned_agent_id`) + mức tự trị riêng nh�
             "priority": "P1", "bot": AgentRef | null, "autonomy_level": 3 | null,
             "owner_user_id": "uuid" | null}], "next_cursor", "total"}
 ```
-`POST /directory/people/{id}/bot` (`profile.write`) `{"agent_id"?: uuid|null, "autonomy_level"?: 0-6|null}` →
+`POST /directory/people/{id}/bot` (**chỉ Owner + mã PIN `policy.change`**, v0.1.65 — gán BOT bỏ qua chế độ im lặng của tin 1-1; `POST /directory/people/bulk-bot` cùng quyền; BOT của nhóm vẫn `profile.write`) `{"agent_id"?: uuid|null, "autonomy_level"?: 0-6|null}` →
 **Thiết lập BOT + tự trị riêng từng người**. Lưu vào `core.persons.attrs.agent_id` / `attrs.autonomy_level` —
 quyết định tự đưa ra vì `core.persons` không có cột `assigned_agent_id` như `core.groups` (spec chỉ nói "gán
 BOT cho từng người", không nói thêm cột); dùng `attrs` giữ đúng quy ước `attrs.autonomy_level` đã có từ

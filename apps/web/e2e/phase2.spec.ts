@@ -246,10 +246,13 @@ test.describe('Kết nối › kênh & đăng nhập', () => {
     const dlg = page.getByRole('dialog', { name: 'Nhóm Zalo' });
     await dlg.getByLabel('Chế độ lắng nghe của Nhóm riêng của Sếp').selectOption('silent');
     await expect(dlg.getByLabel('Chế độ lắng nghe của Nhóm riêng của Sếp')).toHaveValue('silent');
-    await dlg.getByRole('switch', { name: /nghe tin nhắn 1-1/ }).click();
+    // v0.1.65: tin 1-1 có ba mức (mặc định "Lưu im lặng"); đổi mức vẫn cần mã PIN.
+    const direct = dlg.getByLabel('Tin nhắn 1-1 trên Zalo');
+    await expect(direct).toHaveValue('silent');
+    await direct.selectOption('off');
     await expect(page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' })).toBeVisible();
     await page.keyboard.type(OWNER.pin);
-    await expect(dlg.getByRole('switch', { name: /Tắt nghe tin nhắn 1-1/ })).toBeVisible();
+    await expect(dlg.getByLabel('Tin nhắn 1-1 trên Zalo')).toHaveValue('off');
     await page.keyboard.press('Escape');
     await expect(zalo).toContainText('39 nhóm lắng nghe');
   });
@@ -381,11 +384,11 @@ test('setup: Nguồn AI + Xong ở trình thiết lập, bước 5–7 ở Hư�
   await next.click();
   await expect(page).toHaveURL(/\/guide$/);
 
-  // Bước 6 — every group starts at Không nghe.
+  // Bước 6 — v0.1.65: every synced group starts "Chờ Sếp chọn" (pending, chưa lưu tin).
   await page.goto('/guide/6');
   await expect(page.getByRole('heading', { name: 'Chọn nhóm lắng nghe' })).toBeVisible();
   const mode = page.getByLabel('Chế độ lắng nghe của Vận hành Genesis — Quý 4');
-  await expect(mode).toHaveValue('off');
+  await expect(mode).toHaveValue('pending');
   await expect(next).toBeDisabled();
   await mode.selectOption('tagged_only');
   await expect(next).toBeEnabled();

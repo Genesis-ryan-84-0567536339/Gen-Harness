@@ -242,7 +242,7 @@ describe('bước 9 — một dòng ghi chú thay ô tích', () => {
         return json(200, { ...stateAt(10, [1, 2, 3, 4, 8, 9]), hard_boundaries: [], agent: { id: 'a1', name: 'Trợ lý', autonomy_level: 4 } });
       }
       if (c.url.endsWith('/setup/steps/9')) return json(200, { agent: { id: 'a1', name: 'Trợ lý', autonomy_level: 4 } });
-      if (c.url.endsWith('/setup/hard-boundaries')) return json(200, ['Chỉ lắng nghe nhóm Owner đã bật']);
+      if (c.url.endsWith('/setup/hard-boundaries')) return json(200, ['Chỉ lưu tin của nhóm Sếp đã chọn nghe']);
       if (c.url.endsWith('/setup/state')) return json(200, stateAt(9, [1, 2, 3, 4, 8]));
       return undefined;
     });
@@ -259,7 +259,7 @@ describe('bước 9 — một dòng ghi chú thay ô tích', () => {
     expect(note).toHaveTextContent('50.000.000 ₫');
     expect(screen.queryByRole('checkbox')).toBeNull();
     expect(screen.queryByLabelText(/Tôi đã đọc/)).toBeNull();
-    expect(await screen.findByText('Chỉ lắng nghe nhóm Owner đã bật')).toBeInTheDocument();
+    expect(await screen.findByText('Chỉ lưu tin của nhóm Sếp đã chọn nghe')).toBeInTheDocument();
     const next = screen.getByRole('button', { name: /Tiếp tục/ });
     await waitFor(() => expect(next).toBeEnabled());
     // Ghi chú nói đúng mức Sếp đang chọn (không cố định "Soạn sẵn chờ duyệt").

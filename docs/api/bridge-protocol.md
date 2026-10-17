@@ -50,7 +50,8 @@ Secret riêng `gh_bridge_key` (32 byte base64; `GH_BRIDGE_KEY_FILE` hoặc `GH_B
 `gh.bridge.directory`
 | type | payload |
 |---|---|
-| `groups` | `{channel, session_id, groups: [{external_id, name, member_count, members: [{external_id, name, phone?}]}]}` — khi đăng nhập xong, mỗi 30 phút, và khi có `directory.sync`. `members` có thể rỗng nếu nền tảng không cho lấy. |
+| `groups` | `{channel, session_id, groups_complete, groups: [{external_id, name, member_count, members_complete, members: [{external_id, name, phone?, role?}]}]}` — khi đăng nhập xong, mỗi 2 giờ (`GH_BRIDGE_DIRECTORY_MS`), sau khi phát hiện nhóm mới (cách lần quét trước ≥ 10 phút) và khi có `directory.sync` (nút «Cập nhật danh sách nhóm»; hai lệnh chạm nhau dùng chung một lượt quét). Thu thành viên của **mọi** nhóm, kể cả nhóm «Không nghe» và nhóm chờ chọn (Sếp chốt Q5=2), giãn cách `GH_BRIDGE_DIRECTORY_GAP_MS` (1 giây) giữa các lần hỏi nền tảng. Nền tảng trả lỗi ⇒ bridge DỪNG cả lượt (không hỏi tiếp), gửi phần đã quét với `groups_complete=false` và lùi lịch: gấp đôi chu kỳ mỗi lần lỗi liên tiếp, tối đa 8 giờ; một lượt đủ thì về chu kỳ gốc. Giãn cách thật: mọi lượt quét (chu kỳ, nhóm mới, nối lại sau mất mạng) cách lúc BẮT ĐẦU lượt trước ≥ 10 phút (kể cả lượt lỗi), trừ lần đầu sau đăng nhập; đang lùi lịch vì lỗi thì nhóm mới / nối lại chờ hết chu kỳ lùi; nút «Cập nhật danh sách nhóm» (`directory.sync`) cách lượt trước ≥ 5 phút, bấm sớm hơn bị bỏ qua. `role` = `admin`\|`member` khi nền tảng cho biết (Zalo `creatorId`/`adminIds`, WhatsApp `participant.admin`), bỏ trống nếu không biết. `members_complete` = nhận đủ số thành viên nền tảng báo; `groups_complete` = lượt quét không lỗi và có nhóm. Chỉ khi cờ `true` lõi mới đặt `left_at` cho thành viên vắng và cờ «đã rời» cho nhóm vắng; `members` có thể rỗng nếu nền tảng không cho lấy. |
+| `group.discovered` | `{channel, session_id, group_id, name, member_count}` — tin đầu tiên từ một nhóm chưa có trong danh bạ của phiên (mỗi nhóm báo một lần; `member_count` có thể `null`). Không kèm nội dung tin; tin đó KHÔNG được lưu. Lõi tạo nhóm ở trạng thái `pending` và bắn WS `group.discovered` để Console hỏi Sếp «Im lặng» hay «Không nghe». |
 
 `gh.bridge.inbound`
 | type | payload |
@@ -59,7 +60,11 @@ Secret riêng `gh_bridge_key` (32 byte base64; `GH_BRIDGE_KEY_FILE` hoặc `GH_B
 
 ## Chỉ nghe nhóm đã bật (khoá cứng)
 
-Lõi giữ tập `gh:bridge:listen:<channel>` = mã nhóm phía nền tảng có `listen_mode` khác `off`/`paused`, và khoá `gh:bridge:listen_direct:<channel>` = `"1"` nếu Owner cho nghe tin 1-1. Bridge kiểm tra **trước khi** XADD: tin nhóm không thuộc tập → bỏ ngay (không lưu, không log nội dung). Lõi kiểm lần hai ở ingest. Tin của chính tài khoản (outbound) cũng theo luật này.
+Lõi giữ tập `gh:bridge:listen:<channel>` = mã nhóm phía nền tảng có `listen_mode` thuộc `tagged_only`/`silent`/`proactive` (hằng `LISTENING_MODES` ở `api/gh/data/common.py`; `off`, `paused` và `pending` KHÔNG nghe), và khoá `gh:bridge:listen_direct:<channel>` = `"0"` nếu Sếp chọn không lưu tin 1-1, `"1"` còn lại (tin 1-1 mặc định LƯU IM LẶNG từ v0.1.65; khoá chưa có cũng coi là lưu). Bridge kiểm tra **trước khi** XADD: tin nhóm không thuộc tập → bỏ ngay (không lưu, không log nội dung; nhóm lạ chỉ báo `group.discovered`). Lõi kiểm lần hai ở ingest. Tin của chính tài khoản (outbound) cũng theo luật này.
+
+`listen_mode = pending` (v0.1.65): nhóm mới phát hiện, chờ Sếp chọn — không lưu tin nhưng vẫn thu thành viên. Nhóm đang `off` ở bản cũ giữ nguyên `off`.
+
+Tin 1-1 theo `core.organizations.settings.direct_mode.<kênh>`: `silent` (mặc định) lưu vào Kho thô nhưng không đi đường nhanh, không tự trả lời và **không đưa cho agent trực**; `reply` = như `listen_direct` bật của bản cũ (đường nhanh + agent trực được trả lời); `off` = không lưu. Ngoại lệ: người được Sếp gán BOT đích danh thì tin 1-1 của họ vẫn đi đường nhanh và BOT đó phụ trách dù kênh để `silent`.
 
 ## Ánh xạ thư viện (theo bridge của dự án cũ)
 

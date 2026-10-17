@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import text
 
 from gh.memory import notebook
-from tests.conftest import Api
+from tests.conftest import Api, verify_pin
 from tests.phase2 import listen, msg, org_id, put
 from tests.test_rbac_api import login_as
 
@@ -115,6 +115,7 @@ async def test_directory_bot_assignment_person_and_group(world, owner_api: Api, 
         VALUES (:o, 'Trợ lý thương mại', 'Báo giá', 'commercial', '{}', 'lễ phép', 'khi được tag', '{}', 3, true)
         RETURNING id"""), {"o": world["org"]})).scalar_one()
     await db.commit()
+    await verify_pin(owner_api)   # review v0.1.65 P2-3: gán BOT cho người cần Owner + PIN policy.change
 
     r = await owner_api.send("POST", f"/directory/people/{world['pa']}/bot",
                              {"agent_id": str(agent_id), "autonomy_level": 4})

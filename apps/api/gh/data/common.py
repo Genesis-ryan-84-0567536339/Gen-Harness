@@ -1,5 +1,6 @@
 """Tiện ích dùng chung cho tầng dữ liệu: mã công khai, dòng Kho thô, thời gian."""
 
+import json
 import re
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -10,7 +11,58 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 CHANNEL_PREFIX = {"zalo": "ZL", "whatsapp": "WA", "telegram": "TG", "linkedin": "LI"}
 CHANNEL_NAME = {"zalo": "Zalo", "whatsapp": "WhatsApp", "telegram": "Telegram", "linkedin": "LinkedIn"}
+# v0.1.65 (F1): MỘT nguồn cho chế độ nghe của nhóm — API, bridge và web (`ListenMode`, contracts/phase2.ts) theo đây.
+#   · ĐANG nghe (lưu tin vào Kho thô): tagged_only ("Nghe hết, chỉ trả lời khi được tag"), silent, proactive.
+#   · KHÔNG nghe: off ("Không nghe"), paused (Sếp tạm dừng), pending (nhóm mới phát hiện, CHỜ Sếp chọn — không lưu tin,
+#     vẫn thu danh sách thành viên).
 LISTENING_MODES = ("tagged_only", "silent", "proactive")
+NOT_LISTENING_MODES = ("off", "paused", "pending")
+ALL_LISTEN_MODES = ("pending", "off", "tagged_only", "silent", "proactive", "paused")
+#: Chế độ Sếp được CHỌN (không ai tự đặt lại về "pending").
+SETTABLE_LISTEN_MODES = ("off", "tagged_only", "silent", "proactive", "paused")
+NEW_GROUP_MODE = "pending"
+
+# Nhóm MỚI phát hiện sau này (theo kênh, `core.organizations.settings.new_group_mode.<kênh>`; Sếp chốt 17/10/2026):
+#   ask = nhóm vào `pending` + hộp hỏi Sếp (MẶC ĐỊNH, cũng là bản cài cũ — không tự bật nghe ngầm) · silent = vào
+#   "Im lặng" ngay (lưu tin, không trả lời) · off = vào "Không nghe" (không lưu tin). Cả ba vẫn thu thành viên.
+#   Chỉ áp cho nhóm tạo SAU khi đặt — không bao giờ đổi nhóm đã có.
+NEW_GROUP_MODES = ("ask", "silent", "off")
+DEFAULT_NEW_GROUP_MODE = "ask"
+
+
+def new_group_mode(settings: dict[str, Any] | None, channel_type: str) -> str:
+    """Thiết lập nhóm mới của một kênh; thiếu/sai kiểu/giá trị lạ ⇒ `ask`."""
+    block = (settings or {}).get("new_group_mode")
+    v = block.get(channel_type) if isinstance(block, dict) else None
+    return str(v) if v in NEW_GROUP_MODES else DEFAULT_NEW_GROUP_MODE
+
+
+def initial_group_mode(settings: dict[str, Any] | None, channel_type: str) -> str:
+    """Chế độ nghe của một nhóm VỪA được tạo: ask ⇒ pending, còn lại ⇒ đúng giá trị Sếp đã chọn (silent | off)."""
+    m = new_group_mode(settings, channel_type)
+    return NEW_GROUP_MODE if m == "ask" else m
+
+# Tin riêng 1-1 (theo kênh, lưu ở `core.organizations.settings.direct_mode.<kênh>`): off = không lưu; silent = lưu nhưng
+# không tự trả lời và không đưa cho agent trực (MẶC ĐỊNH); reply = lưu + agent trực được phép trả lời (= `listen_direct`
+# bật của bản ≤ 0.1.64).
+DIRECT_MODES = ("off", "silent", "reply")
+DEFAULT_DIRECT_MODE = "silent"
+
+
+def direct_mode(settings: dict[str, Any] | None, channel_type: str) -> str:
+    """Chế độ tin 1-1 của một kênh. Khoá mới `direct_mode` thắng; chưa có thì đọc khoá cũ `listen_direct`
+    (true ⇒ reply); còn lại ⇒ mặc định silent."""
+    s = settings or {}
+    v = (s.get("direct_mode") or {}).get(channel_type)
+    if v in DIRECT_MODES:
+        return str(v)
+    return "reply" if (s.get("listen_direct") or {}).get(channel_type) is True else DEFAULT_DIRECT_MODE
+
+
+#: Cùng quy tắc `direct_mode` nhưng cho SQL (bí danh `o` = core.organizations, `c` = core.channels).
+DIRECT_MODE_SQL = ("COALESCE(NULLIF(o.settings #>> ARRAY['direct_mode', c.type], ''), "
+                   "CASE WHEN o.settings #>> ARRAY['listen_direct', c.type] = 'true' THEN 'reply' "
+                   f"ELSE '{DEFAULT_DIRECT_MODE}' END)")
 SINCE = {"24h": timedelta(hours=24), "7d": timedelta(days=7), "30d": timedelta(days=30)}
 RAW_CODE_RE = re.compile(r"^RAW-(\d+)$")
 
@@ -93,6 +145,16 @@ async def fetch_raw(db: AsyncSession, event_id: uuid.UUID) -> Any:
 async def org_settings(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
     return (await db.execute(text("SELECT settings FROM core.organizations WHERE id = :o"),
                              {"o": org_id})).scalar_one() or {}
+
+
+async def set_channel_setting(db: AsyncSession, org_id: uuid.UUID, key: str, channel_type: str, value: Any) -> None:
+    """Ghi `settings.<key>.<kênh>` = value (JSON), tạo khối `<key>` nếu chưa là object. Chỉ gọi với `key` là hằng."""
+    await db.execute(text("""
+        UPDATE core.organizations SET settings = jsonb_set(
+          CASE WHEN jsonb_typeof(settings -> CAST(:k AS text)) = 'object' THEN settings
+               ELSE jsonb_set(settings, ARRAY[CAST(:k AS text)], '{}'::jsonb) END,
+          ARRAY[CAST(:k AS text), CAST(:t AS text)], CAST(:v AS jsonb)) WHERE id = :o"""),
+        {"k": key, "t": channel_type, "v": json.dumps(value), "o": org_id})
 
 
 async def live_person(db: AsyncSession, person_id: uuid.UUID) -> uuid.UUID:

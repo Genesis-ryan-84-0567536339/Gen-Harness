@@ -394,7 +394,7 @@ async def labels(db: AsyncSession, user: service.CurrentUser, ptype: str, fields
         from gh.errors import ApiError
 
         try:
-            r = await _load_item(db, user.org_id, await scope_for(db, user, "queue.read"),
+            r = await _load_item(db, user, await scope_for(db, user, "queue.read"),
                                  uuid.UUID(fields["item_id"]))
         except ApiError as e:
             raise ValueError("mục trong Hộp thư không tồn tại hoặc ngoài phạm vi") from e

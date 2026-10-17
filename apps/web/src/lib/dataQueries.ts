@@ -27,6 +27,8 @@ export const qk2 = {
   idHistory: ['identity', 'history'] as const,
   channels: ['channels', 'list'] as const,
   channelGroups: (type: string) => ['channels', 'groups', type] as const,
+  /** v0.1.65: nhóm mới chờ chọn — nằm DƯỚI khoá `channelGroups` nên invalidate bảng nhóm cũng làm mới hộp này. */
+  pendingGroups: (type: string) => ['channels', 'groups', type, 'pending'] as const,
   providers: ['providers', 'list'] as const,
   credentials: ['providers', 'credentials'] as const,
   cliProfiles: ['cli', 'profiles'] as const,
@@ -78,6 +80,14 @@ export const useChannelGroups = (type: string, enabled = true) =>
   useQuery({
     queryKey: qk2.channelGroups(type),
     queryFn: ({ signal }) => api.channels.groups(type, signal),
+    enabled,
+  });
+
+/** v0.1.65: nhóm mới phát hiện đang CHỜ Sếp chọn Im lặng/Không nghe (`GET /channels/{type}/groups?pending=1`). */
+export const usePendingGroups = (type: string, enabled = true) =>
+  useQuery({
+    queryKey: qk2.pendingGroups(type),
+    queryFn: ({ signal }) => api.channels.pendingGroups(type, signal),
     enabled,
   });
 

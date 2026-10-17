@@ -151,7 +151,7 @@ const LESSON_DEFS: Array<{ id: string; title: string; body: string; target?: str
   { id: 'N09', title: 'Bản sao ngoài máy', body: 'Cắm ổ USB/NAS vào máy chủ để có thêm một bản sao dữ liệu ngoài máy.', target: 'system.storage.offsite' },
   { id: 'N10', title: 'Truy cập từ xa', body: 'Mở Console từ điện thoại bằng địa chỉ truy cập từ xa; đổi chế độ bằng lệnh genh remote trên máy chủ.', target: 'system.remote_access' },
   { id: 'G05', title: 'Kết nối Zalo / WhatsApp', body: 'Kênh nhắn tin là nguồn dữ liệu đầu tiên của hệ thống; quét mã QR để nối.', target: 'guide.item.do:5' },
-  { id: 'G06', title: 'Chọn nhóm cho agent lắng nghe', body: 'Nhóm mới luôn ở chế độ Không nghe; Sếp chọn nhóm nào agent được nghe.', target: 'guide.item.do:6' },
+  { id: 'G06', title: 'Chọn nhóm cho agent lắng nghe', body: 'Nhóm mới chờ Sếp chọn (chưa lưu tin); Sếp chọn nhóm nào agent được nghe.', target: 'guide.item.do:6' },
   { id: 'G07', title: 'Bật sàng lọc dữ liệu', body: 'Tin thô được lọc và chấm điểm trước khi vào kho sạch.', target: 'guide.item.do:7' },
   { id: 'G08', title: 'Tạo agent đầu tiên', body: 'Agent là nhân viên AI làm việc thay Sếp trên các kênh.', target: 'guide.item.do:8' },
   { id: 'G09', title: 'Đặt mức tự trị', body: 'Mức tự trị quyết định agent được tự làm đến đâu trước khi chờ Sếp duyệt.', target: 'guide.item.do:9' },

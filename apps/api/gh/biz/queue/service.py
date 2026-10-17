@@ -12,7 +12,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gh.biz.core.scope import Scope
+from gh.auth.service import CurrentUser
+from gh.biz.core.scope import Scope, direct_visible_sql
 from gh.data.common import iso
 
 
@@ -47,16 +48,21 @@ TABS = ("all", "opportunity", "alert", "approval", "reply", "candidate")
 ITEM_TYPES = ("unit", "alert", "draft")
 
 
-def item_scope_sql(sc: Scope, alias: str = "i") -> tuple[str, dict[str, Any]]:
+def item_scope_sql(sc: Scope, alias: str, user: CurrentUser) -> tuple[str, dict[str, Any]]:
     """Một dòng `biz.inbox_items` thấy được khi đối tượng nó gắn vào trong phạm vi, hoặc chính item được giao
     thẳng cho mình / team mình (`core.assignments(subject_type='queue')`, dùng khi giao mà không cần sở hữu
-    người/nhóm — ví dụ Operator được giao xử lý một cảnh báo cụ thể)."""
+    người/nhóm — ví dụ Operator được giao xử lý một cảnh báo cụ thể).
+
+    Thêm (review v0.1.65 P2-2): mục `unit` sinh từ tin 1-1 (không nhóm) chỉ Owner hoặc người được giao đúng người đó
+    xem — kể cả phạm vi `all` của Vận hành/Kiểm soát (xem `gh.biz.core.scope.direct_visible_sql`)."""
+    dm, dp = direct_visible_sql(user, f"{alias}.group_id", f"{alias}.person_id")
+    dm_cond = "TRUE" if dm == "TRUE" else f"({alias}.item_type <> 'unit' OR {dm})"
     if sc.is_all:
-        return "TRUE", {}
+        return dm_cond, dp
     sw, sp = sc.subject_sql(f"{alias}.subject_type", f"{alias}.subject_id")
     q = (f"EXISTS (SELECT 1 FROM core.assignments qa WHERE qa.subject_type = 'queue' "
          f"AND qa.subject_id = {alias}.item_id AND qa.active_to IS NULL AND qa.user_id = ANY(:scope_users))")
-    return f"({sw} OR {q})", sp
+    return f"(({sw} OR {q}) AND {dm_cond})", {**sp, **dp}
 
 
 def not_silenced_sql(alias: str = "i", *, item_type: str | None = None, id_col: str = "item_id") -> str:

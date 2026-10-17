@@ -34,7 +34,10 @@ export function loadConfig(env = process.env) {
     orgId: env.GH_ORG_ID || '',
     consumer: env.GH_BRIDGE_CONSUMER || os.hostname(),
     heartbeatMs: Number(env.GH_BRIDGE_HEARTBEAT_MS || 15000),
-    directoryMs: Number(env.GH_BRIDGE_DIRECTORY_MS || 30 * 60 * 1000),
+    // Chu kỳ quét danh bạ + thành viên mọi nhóm: 2 giờ (nhóm mới được báo ngay qua group.discovered, xem sessions.js).
+    directoryMs: Number(env.GH_BRIDGE_DIRECTORY_MS || 2 * 60 * 60 * 1000),
+    // Giãn cách giữa hai lần hỏi nền tảng khi quét thành viên (ms).
+    directoryGapMs: Number(env.GH_BRIDGE_DIRECTORY_GAP_MS || 1000),
     bridgeKey: key,
     bridgeKeyError: error,
   };

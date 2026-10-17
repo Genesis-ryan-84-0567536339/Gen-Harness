@@ -340,6 +340,12 @@ export function applyEvent(qc: QueryClient, e: RealtimeEvent): void {
       );
       return;
     }
+    case 'group.discovered': {
+      // v0.1.65: nhóm mới chờ Sếp chọn ⇒ hộp "Nhóm mới" hiện ngay, số nhóm trên thẻ kênh cập nhật.
+      void qc.invalidateQueries({ queryKey: qk2.channels });
+      void qc.invalidateQueries({ queryKey: qk2.channelGroups(e.data.channel) });
+      return;
+    }
     case 'channel.status': {
       const d = e.data;
       qc.setQueryData<Channel[]>(qk2.channels, (old) =>

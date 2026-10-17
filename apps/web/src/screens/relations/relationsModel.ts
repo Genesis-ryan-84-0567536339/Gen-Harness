@@ -34,14 +34,16 @@ export const GROUP_KIND_LABEL: Record<string, string> = {
   internal: 'Nội bộ', market: 'Thị trường', partner: 'Đối tác', customer: 'Khách', private: 'Riêng tư',
 };
 export const LISTEN_MODE_LABEL: Record<ListenMode, string> = {
+  pending: 'Chờ Sếp chọn',
   off: 'Không lắng nghe',
-  tagged_only: 'Chỉ khi được tag',
+  // Q6=1 (v0.1.65): chế độ này vẫn lưu mọi tin của nhóm; chỉ việc trả lời mới cần được tag.
+  tagged_only: 'Nghe hết, chỉ trả lời khi được tag',
   silent: 'Lắng nghe im lặng',
   proactive: 'Chủ động bắt tín hiệu',
-  paused: 'Tạm dừng · chờ QR',
+  paused: 'Tạm dừng', // do Sếp tự chọn — không phải "chờ QR" (F066)
 };
 export function listenModeTone(m: ListenMode): string {
-  return m === 'proactive' ? ACC3 : m === 'paused' ? WARN : m === 'off' ? N5 : N3;
+  return m === 'proactive' ? ACC3 : m === 'paused' || m === 'pending' ? WARN : m === 'off' ? N5 : N3;
 }
 
 export const CHANNEL_LABEL: Record<string, string> = { zalo: 'Zalo', whatsapp: 'WhatsApp', telegram: 'Telegram', linkedin: 'LinkedIn' };

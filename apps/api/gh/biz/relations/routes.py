@@ -23,9 +23,17 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.auth import rbac, service
-from gh.auth.deps import require
+from gh.auth.deps import require, require_owner, require_pin
 from gh.biz.core import explain
-from gh.biz.core.scope import Scope, ensure_active_user, ensure_group, ensure_person, not_found, scope_for
+from gh.biz.core.scope import (
+    Scope,
+    direct_visible_sql,
+    ensure_active_user,
+    ensure_group,
+    ensure_person,
+    not_found,
+    scope_for,
+)
 from gh.biz.relations import service as rsvc
 from gh.chassis import actionlog
 from gh.chassis.objects import ObjectNotFound, content_hash, get_object_store, new_key
@@ -287,11 +295,14 @@ class BulkBotIn(BaseModel):
 
 
 @router.post("/directory/people/bulk-bot")
-async def set_people_bot_bulk(body: BulkBotIn, user: service.CurrentUser = Depends(WRITE),
+async def set_people_bot_bulk(body: BulkBotIn, user: service.CurrentUser = Depends(require_owner),
+                              _pin: Any = Depends(require_pin("policy.change")),
                               db: AsyncSession = DB) -> dict[str, Any]:
     """Gán BOT / mức tự trị cho MỌI người khớp bộ lọc (trong phạm vi ghi của người gọi) — một câu lệnh, một giao
-    dịch (đủ hoặc không gì cả). `expected_total` là số giao diện đã hiện cho Sếp: lệch (có người mới vào/ra khỏi bộ
-    lọc) ⇒ 409, không đổi gì — Sếp thấy số mới rồi quyết lại."""
+    dịch (đủ hoặc không gì cả). Chỉ Owner + mã PIN `policy.change` (review v0.1.65 P2-3): gán BOT cho một người làm
+    tin 1-1 của họ đi thẳng tới BOT dù kênh để im lặng — là đổi mức tự trị, không phải sửa hồ sơ thường.
+    `expected_total` là số giao diện đã hiện cho Sếp: lệch (có người mới vào/ra khỏi bộ lọc) ⇒ 409, không đổi gì —
+    Sếp thấy số mới rồi quyết lại."""
     fields = body.model_fields_set
     set_agent, set_autonomy = "agent_id" in fields, "autonomy_level" in fields
     if not set_agent and not set_autonomy:
@@ -346,8 +357,11 @@ class PersonBotIn(BaseModel):
 
 
 @router.post("/directory/people/{person_id}/bot")
-async def set_person_bot(person_id: uuid.UUID, body: PersonBotIn, user: service.CurrentUser = Depends(WRITE),
+async def set_person_bot(person_id: uuid.UUID, body: PersonBotIn, user: service.CurrentUser = Depends(require_owner),
+                         _pin: Any = Depends(require_pin("policy.change")),
                          db: AsyncSession = DB) -> dict[str, Any]:
+    """Gán/bỏ BOT hoặc đổi mức tự trị cho MỘT người — chỉ Owner + mã PIN `policy.change` (review v0.1.65 P2-3), cùng
+    lý do với bulk-bot: gán BOT bỏ qua chế độ im lặng của tin 1-1."""
     sc = await scope_for(db, user, "profile.write")
     await ensure_person(db, sc, person_id)
     await rsvc.set_person_bot(db, person_id, agent_id=body.agent_id, set_agent="agent_id" in body.model_fields_set,
@@ -405,13 +419,15 @@ async def _profile_payload(person_id: uuid.UUID, user: service.CurrentUser, db: 
         SELECT dimension, value, trend, updated_at FROM clean.current_scores
         WHERE subject_type = 'person' AND subject_id = :p ORDER BY dimension"""), {"p": person_id})).all()
 
-    timeline = (await db.execute(text("""
+    dm_sql, dm_params = direct_visible_sql(user, "mu.group_id", "mu.person_id")   # tin 1-1: chỉ Owner/người được giao
+    timeline = (await db.execute(text(f"""
         SELECT mu.id, mu.event_type, mu.conclusion, mu.confidence, mu.observed_at,
                g.id AS g_id, g.code AS g_code, g.name AS g_name, gc.type AS g_channel
         FROM clean.meaning_units mu LEFT JOIN core.groups g ON g.id = mu.group_id
         LEFT JOIN core.channels gc ON gc.id = g.channel_id
-        WHERE mu.org_id = :o AND mu.person_id = :p AND mu.superseded_by IS NULL
-        ORDER BY mu.observed_at DESC LIMIT 30"""), {"o": user.org_id, "p": person_id})).all()
+        WHERE mu.org_id = :o AND mu.person_id = :p AND mu.superseded_by IS NULL AND {dm_sql}
+        ORDER BY mu.observed_at DESC LIMIT 30"""),  # noqa: S608 — biểu thức nội bộ
+        {"o": user.org_id, "p": person_id, **dm_params})).all()
 
     docs = (await db.execute(text("""
         SELECT id, title, mime, bytes, created_at FROM biz.documents
@@ -445,7 +461,7 @@ async def _profile_payload(person_id: uuid.UUID, user: service.CurrentUser, db: 
         "bot": rsvc.agent_ref(uuid.UUID(r.attrs["agent_id"]), None) if r.attrs and r.attrs.get("agent_id") else None,
         "owner_note": r.attrs.get("owner_note") if r.attrs else None,
         "identities": [{"id": str(i.id), "channel": {"type": i.channel_type, "name": i.channel_name},
-                        "external_id": i.external_id, "handle": i.handle,
+                        "external_id": mask_text(i.external_id, owner), "handle": i.handle,
                         "phone_e164": mask_text(i.phone_e164, owner), "first_seen_at": iso(i.first_seen_at)}
                        for i in identities],
         "scores": [{"dimension": s.dimension, "label": explain.DIMENSION_LABELS.get(s.dimension, s.dimension),

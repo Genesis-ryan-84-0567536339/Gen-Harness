@@ -45,24 +45,24 @@ const CHANNELS: DirChannel[] = [
 
 const KIND_CODE: Record<string, string> = { 'Nội bộ': 'internal', 'Thị trường': 'market', 'Đối tác': 'partner', Khách: 'customer' };
 const MODE_CODE: Record<string, DirGroup['listen_mode']> = {
-  'Chỉ khi được tag': 'tagged_only',
+  'Nghe hết, chỉ trả lời khi được tag': 'tagged_only',
   'Lắng nghe im lặng': 'silent',
   'Chủ động bắt tín hiệu': 'proactive',
-  'Tạm dừng · chờ QR': 'paused',
+  'Tạm dừng': 'paused',
   'Không lắng nghe': 'off',
   'Chỉ hợp nhất danh tính': 'off',
 };
 
 function seedGroups(): DirGroup[] {
   const rows: Array<[string, string, string, string, string, string, string, string, boolean?]> = [
-    ['g-zl-0114', 'GRP-ZL-0114', 'Vận hành Genesis — Quý 4', 'Nội bộ', '24', '412', '87', 'Chỉ khi được tag'],
+    ['g-zl-0114', 'GRP-ZL-0114', 'Vận hành Genesis — Quý 4', 'Nội bộ', '24', '412', '87', 'Nghe hết, chỉ trả lời khi được tag'],
     ['g-zl-0231', 'GRP-ZL-0231', 'Group Ngành gỗ Miền Nam', 'Thị trường', '412', '6412', '94', 'Lắng nghe im lặng'],
-    ['g-zl-0174', 'GRP-ZL-0174', 'Ban Tài chính', 'Nội bộ', '11', '96', '58', 'Chỉ khi được tag'],
+    ['g-zl-0174', 'GRP-ZL-0174', 'Ban Tài chính', 'Nội bộ', '11', '96', '58', 'Nghe hết, chỉ trả lời khi được tag'],
     ['g-zl-0356', 'GRP-ZL-0356', 'Group Nhân sự Logistics', 'Thị trường', '286', '2634', '64', 'Lắng nghe im lặng'],
     ['g-zl-0489', 'GRP-ZL-0489', 'Đối tác in ấn Thành Phát', 'Đối tác', '4', '784', '87', 'Chủ động bắt tín hiệu'],
-    ['g-zl-0502', 'GRP-ZL-0502', 'Truyền thông & Sự kiện', 'Nội bộ', '13', '28', '22', 'Chỉ khi được tag'],
-    ['g-wa-0007', 'GRP-WA-0007', 'Điều hành mở rộng', 'Nội bộ', '6', '54', '44', 'Tạm dừng · chờ QR'],
-    ['g-wa-0011', 'GRP-WA-0011', 'Kho lạnh Tân Cảng', 'Khách', '3', '42', '58', 'Tạm dừng · chờ QR'],
+    ['g-zl-0502', 'GRP-ZL-0502', 'Truyền thông & Sự kiện', 'Nội bộ', '13', '28', '22', 'Nghe hết, chỉ trả lời khi được tag'],
+    ['g-wa-0007', 'GRP-WA-0007', 'Điều hành mở rộng', 'Nội bộ', '6', '54', '44', 'Tạm dừng'],
+    ['g-wa-0011', 'GRP-WA-0011', 'Kho lạnh Tân Cảng', 'Khách', '3', '42', '58', 'Tạm dừng'],
     ['g-li-0001', 'GRP-LI-0001', 'Mạng đối tác ngành gỗ', 'Thị trường', '128', '0', '18', 'Chỉ hợp nhất danh tính'],
   ];
   const CH: Record<string, { type: DirGroup['channel']['type']; name: string }> = {

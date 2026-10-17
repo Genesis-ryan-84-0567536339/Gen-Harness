@@ -122,8 +122,8 @@ describe('Nhóm & Con người', () => {
   });
 
   it('gán BOT cho một người qua hộp thoại', async () => {
-    // Nút "Đổi" chỉ hiện với quyền profile.write.
-    queryClient.setQueryData(qk.me, { id: 'u', permissions: { 'profile.read': 'all', 'profile.write': 'all' } });
+    // Nút "Đổi" (BOT cho người) chỉ hiện với Owner có quyền profile.write (review v0.1.65 P2-3).
+    queryClient.setQueryData(qk.me, { id: 'u', role: { code: 'owner', name: 'Owner' }, permissions: { 'profile.read': 'all', 'profile.write': 'all' } });
     const calls = mockFetch((c) => {
       if (c.url.includes('/directory/channels')) return json(200, CHANNELS);
       if (c.url.includes('/directory/groups')) return json(200, GROUPS);
@@ -141,6 +141,9 @@ describe('Nhóm & Con người', () => {
     const row = (await screen.findByText('Trịnh Mỹ Duyên')).closest('tr')!;
     await user.click(within(row).getByRole('button', { name: 'Đổi' }));
     const dlg = await screen.findByRole('dialog', { name: 'Thiết lập BOT + tự trị' });
+    // v0.1.65 (B8, F080): gán BOT cho một người có tác dụng thật với tin nhắn riêng của người đó — hộp nói rõ điều này.
+    expect(within(dlg).getByTestId('person-bot-hint')).toHaveTextContent(/phụ trách tin nhắn riêng \(1-1\) của người này/);
+    expect(within(dlg).getByTestId('person-bot-hint')).toHaveTextContent(/kể cả khi kênh đang ở chế độ “Lưu im lặng”/);
     await user.click(within(dlg).getByText('Key Account junior'));
     await user.click(within(dlg).getByRole('button', { name: 'Lưu' }));
 
@@ -186,7 +189,7 @@ describe('Hồ sơ sống', () => {
   });
 
   it('v0.1.43 (F-30): mức tự trị 3 mức; dialog không đổi gì → Lưu tắt, không PATCH; chọn mức khác → PATCH đúng mức', async () => {
-    queryClient.setQueryData(qk.me, { id: 'u', permissions: { 'profile.read': 'all', 'profile.write': 'all' } });
+    queryClient.setQueryData(qk.me, { id: 'u', role: { code: 'owner', name: 'Owner' }, permissions: { 'profile.read': 'all', 'profile.write': 'all' } });
     const calls = mockFetch((c) => {
       if (c.method === 'PATCH' && c.url.includes('/profile/p1')) return json(200, { ...PROFILE, autonomy_level: 4 });
       return c.url.includes('/profile/p1') ? json(200, PROFILE) : json(404);

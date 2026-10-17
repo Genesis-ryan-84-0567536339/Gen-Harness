@@ -405,8 +405,16 @@ export interface Channel {
   last_heartbeat_at: string | null;
   stats: ChannelStats | null;
   qr: ChannelQr | null;
-  /** QR channels: listen to 1-1 (direct) messages too. `PATCH /channels/{type}` 🔒 `policy.change`. */
+  /** QR channels: 1-1 messages are stored (`direct_mode` ≠ off). `PATCH /channels/{type}` 🔒 `policy.change`. */
   listen_direct?: boolean;
+  /** v0.1.65: tin riêng 1-1 — `silent` (mặc định) lưu nhưng không tự trả lời · `reply` agent trực được trả lời · `off` không lưu. */
+  direct_mode?: DirectMode;
+  /** v0.1.65: số nhóm mới phát hiện đang CHỜ Sếp chọn (`listen_mode = 'pending'`, chưa rời). Máy chủ cũ không gửi. */
+  groups_pending?: number;
+  /** v0.1.65 (F1d): chế độ cho nhóm MỚI phát hiện sau này — `ask` (mặc định: chờ Sếp chọn) · `silent` (vào Im lặng ngay) · `off` (vào Không nghe). Máy chủ cũ không gửi. `PATCH /channels/{type}` 🔒 `policy.change`. */
+  new_group_mode?: NewGroupMode;
+  /** v0.1.65 (F1d): Sếp đã chọn ở hộp hỏi / thẻ kênh kể từ lần nối kênh gần nhất (false ⇒ hộp hỏi bật sẵn ô «Áp dụng cho các nhóm mới sau này»). */
+  new_group_asked?: boolean;
   session_id?: string | null;
   ended_at?: string | null;
   /** Last bridge error for this channel, if any. */
@@ -417,7 +425,13 @@ export interface Channel {
   bridge_online?: boolean | null;
 }
 
-export type ListenMode = 'off' | 'tagged_only' | 'silent' | 'proactive' | 'paused';
+/** Chế độ nghe của nhóm. `pending` = nhóm mới phát hiện, CHỜ Sếp chọn (chưa lưu tin, vẫn thu thành viên); Sếp không tự đặt lại về `pending`. Khớp `ALL_LISTEN_MODES` ở api/gh/data/common.py. */
+export type ListenMode = 'pending' | 'off' | 'tagged_only' | 'silent' | 'proactive' | 'paused';
+/** Chế độ Sếp được CHỌN cho một nhóm (khớp `SETTABLE_LISTEN_MODES`). */
+export type SettableListenMode = Exclude<ListenMode, 'pending'>;
+export type DirectMode = 'off' | 'silent' | 'reply';
+/** Chế độ cho nhóm mới sau này (F1d). */
+export type NewGroupMode = 'ask' | 'silent' | 'off';
 export type ViewScope = 'owner' | 'manager' | 'all_members';
 export type GroupKind = 'internal' | 'market' | 'partner' | 'customer' | 'private';
 
@@ -429,6 +443,17 @@ export interface ChannelGroup {
   kind: GroupKind | string;
   listen_mode: ListenMode;
   view_scope: ViewScope;
+  /** v0.1.65: Sếp đã rời nhóm (danh bạ đầy đủ gần nhất không còn nhóm này) — không đếm "đang lắng nghe". */
+  left?: boolean;
+}
+
+/** WS `group.discovered` (v0.1.65): nhóm mới phát hiện, chờ Sếp chọn Im lặng/Không nghe. */
+export interface GroupDiscoveredEvent {
+  id: string;
+  code: string;
+  name: string;
+  channel: ChannelType;
+  listen_mode: ListenMode;
 }
 
 /** WS `channel.qr`. */
@@ -604,7 +629,7 @@ export interface CliLoginEvent {
 
 // ── setup 4–7, 12 ─────────────────────────────────────────────────────────
 export interface SetupStep6Body {
-  groups: Array<{ id: string; listen_mode: ListenMode; view_scope: ViewScope }>;
+  groups: Array<{ id: string; listen_mode: SettableListenMode; view_scope: ViewScope }>;
 }
 
 export interface SetupStep7Body {
@@ -639,6 +664,7 @@ export interface RealtimeEventMap {
   'refinery.run': RefineryRun;
   'channel.qr': ChannelQrEvent;
   'channel.status': ChannelStatusEvent;
+  'group.discovered': GroupDiscoveredEvent;
   'cli.login': CliLoginEvent;
   header: HeaderEvent;
   'gen.step': GenStepEvent;

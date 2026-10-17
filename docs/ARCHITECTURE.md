@@ -230,7 +230,7 @@ Bàn làm việc: Duyệt và gửi · Sửa rồi gửi · Huỷ → `approved 
 **Mặc định mở hết, trừ quyền nguy hiểm nghiêm trọng.** Mọi giới hạn khác là cài đặt Owner tự bật/tắt (PIN + log).
 
 Khoá cứng, không tắt được bằng cài đặt:
-1. Chỉ lắng nghe nhóm Owner đã bật (`listen_authorized_only`).
+1. Chỉ lưu tin của nhóm Sếp đã chọn nghe (`listen_authorized_only`).
 2. Hệ thống không tự ra quyết định nhân sự.
 3. Gửi ra ngoài, vượt ngưỡng tiền, liên quan nhân sự → chờ duyệt (ngưỡng tiền Owner đặt).
 4. MCP: tool ghi qua duyệt; agent chỉ gọi tool Owner đã mở.
@@ -260,6 +260,7 @@ Mật khẩu argon2id (≥12 ký tự), TOTP tuỳ chọn *(chưa làm — ROADM
   1. quyền chức năng — `require(permission)`;
   2. phạm vi dữ liệu — mọi truy vấn qua `ScopeFilter(user)`: Manager = team mình; Operator = hàng đợi được giao; Agent nhân viên = khách được phân; Auditor = đọc, không có quyền ghi nào.
 - Đánh giá nhân sự: khoá mức Owner (yêu cầu của dự án, chip "Dữ liệu khoá ở cấp Owner", guard MCP "Dữ liệu nhân sự chỉ ở mức Owner"). Mặc định (quyết định Q4): chỉ Owner thấy nội dung; Auditor thấy nhật ký ai đã xem; Manager không thấy. Owner có thể tự cấp thêm cho vai trò khác trong Quyền hạn (PIN + log). Mọi lần xem vào Action Log.
+- Tin riêng 1-1 (`group_id IS NULL`, v0.1.65): chỉ Owner xem nguyên văn, vai khác chỉ khi người đó do chính mình phụ trách / được giao thẳng — dù phạm vi `all` (Vận hành, Kiểm soát). MỘT quy tắc `gh.biz.core.scope.direct_visible_sql` ghép vào Hộp thư, Kho thô, Kho sạch, hồ sơ, tìm kiếm, chứng cứ và sự kiện WebSocket `raw.new`; Gen của nhân viên đọc qua các API này nên theo cùng. Gán/bỏ BOT cho **người** (bỏ qua chế độ im lặng của tin 1-1) chỉ Owner + mã PIN `policy.change`.
 - Ranh giới "Ẩn dữ liệu nhạy cảm khỏi mọi vai trò dưới Owner" áp ở serializer (trường được gắn nhãn nhạy cảm bị che).
 - Row-Level Security Postgres bật ở giai đoạn hoàn thiện như lớp phòng thủ thứ hai (handoff 03).
   RLS chỉ là phòng thủ phụ (mỗi bản cài 1 tổ chức) — không mở rộng thêm.

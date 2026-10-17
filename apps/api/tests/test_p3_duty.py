@@ -163,6 +163,20 @@ async def test_direct_message_needs_channel_wide_scope(w, db, redis) -> None:  #
     assert grp not in {x.agent_id for x in await decisions(db)}
 
 
+async def test_silent_direct_message_is_not_given_to_duty_agent(w, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """v0.1.65: tin 1-1 mặc định IM LẶNG — lưu nhưng agent trực (dù có phạm vi cả kênh) không được đưa; chỉ khi Sếp
+    đặt kênh sang `reply` (hoặc khoá cũ `listen_direct` bật) mới có quyết định."""
+    wide = await make_agent(db, w, [None], name="Cả kênh")
+    [u] = await refine(w, redis, msg(BUY, group=None, sender="u9", name="Anh Tùng"))
+    await hook(w, redis, decide("draft"), [u])
+    assert await decisions(db) == [] and await agent_drafts(db) == []
+    await db.execute(text("""UPDATE core.organizations SET settings = settings || '{"direct_mode": {"zalo": "reply"}}'
+                             WHERE id = :o"""), {"o": w["org"]})
+    await db.commit()
+    await hook(w, redis, decide("draft"), [u])
+    assert [d.agent_id for d in await decisions(db)] == [wide]
+
+
 # ─── từng quyết định ─────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("choice", ["silent", "note", "suggest", "draft", "send"])

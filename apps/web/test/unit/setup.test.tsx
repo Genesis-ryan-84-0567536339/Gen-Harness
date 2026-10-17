@@ -386,7 +386,7 @@ describe('<SetupPage> — Thiết lập một màn, 3 bước', () => {
         state = stateAt(9, [1, 2, 3, 4, 8], [5, 6, 7]);
         return json(200, { ...state, agent: { id: 'a1', name: body.name, try_reply: 'Chào Sếp, em là Thư ký.', try_error: null } });
       }
-      if (url.endsWith('/setup/hard-boundaries')) return json(200, ['Chỉ lắng nghe nhóm Owner đã bật']);
+      if (url.endsWith('/setup/hard-boundaries')) return json(200, ['Chỉ lưu tin của nhóm Sếp đã chọn nghe']);
       if (url.endsWith('/setup/steps/9') && init.method === 'PUT') {
         calls.push({ url, body });
         state = stateAt(10, [1, 2, 3, 4, 8, 9], [5, 6, 7]);
@@ -404,7 +404,7 @@ describe('<SetupPage> — Thiết lập một màn, 3 bước', () => {
     expect(calls[0].body).toMatchObject({ name: 'Thư ký', template: 'secretary' });
     await user.click(screen.getByRole('button', { name: /Tiếp tục/ }));
     await screen.findByRole('heading', { name: 'Bước 9' });
-    expect(await screen.findByText('Chỉ lắng nghe nhóm Owner đã bật')).toBeInTheDocument();
+    expect(await screen.findByText('Chỉ lưu tin của nhóm Sếp đã chọn nghe')).toBeInTheDocument();
     // v0.1.55 (G2): không còn ô tích — một dòng ghi chú, bấm Tiếp tục là đã đọc ranh giới (gửi ack_boundaries: true).
     expect(screen.getByTestId('step9-ack-note')).toBeInTheDocument();
     await user.click(await screen.findByRole('button', { name: /Tiếp tục/ }));

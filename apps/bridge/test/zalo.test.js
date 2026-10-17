@@ -168,13 +168,13 @@ test('logout giữa lúc chờ quét QR → huỷ QR, không phát expired', asy
 
 test('đồng bộ danh bạ: nhóm, số thành viên, tên thành viên; directory.sync theo lệnh', async () => {
   const api = makeZaloApi({ groups: { G1: { name: 'Nhóm bán hàng', totalMember: 2, memVerList: ['111_0', '222_3'] } } });
-  const { bus, mgr, keyring } = await setup({ zalo: makeZaloLib({ api }) });
+  const { bus, mgr, keyring } = await setup({ zalo: makeZaloLib({ api }), manualMinGapMs: 0 });
   const blob = keyring.encryptTransport(JSON.stringify({ imei: 'i', cookie: [], userAgent: 'u' }), 'zalo:s1');
   await mgr.handleControl(ctl('session.login', { channel: 'zalo', session_id: 's1', credential: blob }));
   const g = await waitFor(() => bus.of(STREAMS.directory, 'groups')[0]);
   assert.deepEqual(g.payload, {
-    channel: 'zalo', session_id: 's1',
-    groups: [{ external_id: 'G1', name: 'Nhóm bán hàng', member_count: 2,
+    channel: 'zalo', session_id: 's1', groups_complete: true,
+    groups: [{ external_id: 'G1', name: 'Nhóm bán hàng', member_count: 2, members_complete: true,
       members: [{ external_id: '111', name: 'Người 111' }, { external_id: '222', name: 'Người 222' }] }],
   });
   await mgr.handleControl(ctl('directory.sync', { channel: 'zalo', session_id: 's1' }));

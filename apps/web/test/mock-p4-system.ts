@@ -101,7 +101,7 @@ interface BoundaryRow {
 // ở client (`STATIC_HARD_BOUNDARIES`, `packages/contracts/src/p4-system.ts`).
 function seedBoundaries(): BoundaryRow[] {
   return [
-    { code: 'listen_authorized_only', label: 'Chỉ lắng nghe nhóm Owner đã bật', enabled: true, locked: true, params: {} },
+    { code: 'listen_authorized_only', label: 'Chỉ lưu tin của nhóm Sếp đã chọn nghe', enabled: true, locked: true, params: {} },
     { code: 'disclose_staff_observation', label: 'Công khai nội bộ khi dùng để đánh giá nhân sự', enabled: true, locked: false, params: {} },
     { code: 'hide_sensitive_below_owner', label: 'Ẩn dữ liệu nhạy cảm khỏi vai trò dưới Owner', enabled: true, locked: true, params: {} },
     { code: 'personnel_alert_requires_evidence', label: 'Điểm số, cảnh báo nhân sự phải có chứng cứ', enabled: true, locked: true, params: {} },

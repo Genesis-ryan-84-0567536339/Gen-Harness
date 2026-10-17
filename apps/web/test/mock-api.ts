@@ -78,7 +78,7 @@ interface User {
 }
 
 const MOCK_HARD_BOUNDARIES = [
-  'Chỉ lắng nghe nhóm Owner đã bật',
+  'Chỉ lưu tin của nhóm Sếp đã chọn nghe',
   'Hệ thống không tự ra quyết định nhân sự',
   'Gửi ra ngoài, vượt ngưỡng tiền, liên quan nhân sự → luôn chờ duyệt ở Bàn làm việc',
 ];
@@ -1465,6 +1465,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
  *   /api/v1/__mock/notify   {"title","body","link","kind"} gives every Owner one notification (notification.new)
  *   /api/v1/__mock/raw      {} pushes one simulated raw message (raw.new → raw.state)
  *   /api/v1/__mock/scan     {"type":"zalo"} simulates the phone scanning the QR
+ *   /api/v1/__mock/discover {"type"?:"zalo"} 3 nhóm MỚI vào `pending` + WS `group.discovered` (v0.1.65)
  *   /api/v1/__mock/simulate {"on":bool} toggles the background simulation
  *   /api/v1/__mock/bridge   {"online":bool} makes channel login answer 503 BRIDGE_OFFLINE
  *   /api/v1/__mock/pin_expire {} ends every PIN session (v0.1.45 — kiểm lại hộp PIN của thao tác kế tiếp)
@@ -1576,6 +1577,9 @@ export function createMockApi(opts: MockOptions = {}) {
           return done(res, 200, current.phase2.hooks.pushRaw());
         case 'scan':
           return done(res, current.phase2.hooks.scan(String(body.type ?? 'zalo')) ? 204 : 409);
+        case 'discover':
+          // v0.1.65: {"type"?:"zalo"} — bridge phát hiện nhóm mới: 3 nhóm `pending` + WS `group.discovered`.
+          return done(res, 200, { added: current.phase2.hooks.discover(body.type === 'whatsapp' ? 'whatsapp' : 'zalo') });
         case 'simulate':
           current.phase2.hooks.setSimulation(Boolean(body.on));
           return done(res);

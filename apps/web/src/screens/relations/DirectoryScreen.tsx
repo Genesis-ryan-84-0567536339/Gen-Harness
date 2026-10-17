@@ -8,6 +8,7 @@ import { Button, Dialog, EmptyState, Icon, Tabs, TextField, type FilterOption, t
 import { errorDetail, errorText } from '../../lib/errorText';
 import { fmtInt } from '../../lib/format';
 import { useCan } from '../../lib/permissions';
+import { useIsOwnerRole } from '../../owner/queries';
 import { useAgentOptions, useEmptyAgentsText } from '../../lib/pickers';
 import { toast } from '../../lib/toast';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
@@ -330,7 +331,10 @@ function PeoplePane() {
   );
   const [botFor, setBotFor] = useState<DirPerson | null>(null);
   const [bulk, setBulk] = useState(false);
-  const canWrite = useCan('profile.write');
+  // Gán/đổi BOT cho NGƯỜI chỉ Owner (+ mã PIN): máy chủ từ chối vai khác (review v0.1.65 P2-3), nên không hiện nút.
+  const canProfileWrite = useCan('profile.write');
+  const isOwner = useIsOwnerRole();
+  const canBot = canProfileWrite && isOwner;
 
   return (
     <div className="dir-people">
@@ -347,7 +351,7 @@ function PeoplePane() {
         <span className="dir-filters__spacer" />
         <div className="dir-filters__actions">
           {people.data ? <span className="raw-count">{fmtInt(total)} người khớp</span> : null}
-          {canWrite ? (
+          {canBot ? (
             // Đang hiện dữ liệu cũ của bộ lọc trước (placeholder) ⇒ số "khớp" chưa phải của bộ lọc này ⇒ chưa cho áp dụng.
             <Button variant="primary" icon="ph ph-robot" disabled={!total || people.isPlaceholderData} onClick={() => setBulk(true)}>
               Thiết lập BOT cho nhóm đã lọc
@@ -425,7 +429,7 @@ function PeoplePane() {
                     <td>
                       <div className="dir-bot-cell">
                         <span className="dir-bot-cell__name">{p.bot ? p.bot.name : 'Chưa gán'}</span>
-                        {canWrite ? (
+                        {canBot ? (
                           <Button variant="ghost" size="sm" onClick={() => setBotFor(p)}>
                             Đổi
                           </Button>
@@ -498,6 +502,10 @@ function PersonBotDialog({ person, onClose }: { person: DirPerson; onClose: () =
       }
     >
       <div className="dlg-fields">
+        <p className="risk-box__text" data-testid="person-bot-hint">
+          BOT được gán sẽ phụ trách tin nhắn riêng (1-1) của người này: trợ lý được kích hoạt để soạn trả lời (vẫn qua duyệt theo mức tự trị),
+          kể cả khi kênh đang ở chế độ “Lưu im lặng”. Muốn trợ lý thôi phụ trách, chọn “Chưa gán”.
+        </p>
         <AgentChoices value={agentId} onChange={setAgentId} current={person.bot} />
         <AutonomySelect current={person.autonomy_level} value={picked} onChange={setPicked} />
         {setBot.isError ? <InlineError detail={errorDetail(setBot.error)}>{errorText(setBot.error)}</InlineError> : null}

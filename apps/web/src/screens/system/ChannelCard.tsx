@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { ApiError, type Channel, type ChannelGroup, type ListenMode, type ViewScope } from '@gen-harness/contracts';
-import { Button, Dialog, EmptyState, Icon, Switch, TextField } from '@gen-harness/ui';
+import { ApiError, type Channel, type ChannelGroup, type DirectMode, type ListenMode, type ViewScope } from '@gen-harness/contracts';
+import { Button, Dialog, EmptyState, Icon, TextField } from '@gen-harness/ui';
 import { api } from '../../lib/api';
 import { qk2, useChannelGroups } from '../../lib/dataQueries';
 import { fmtInt } from '../../lib/format';
@@ -15,10 +15,13 @@ import { Bar, CardError, InlineError, SkeletonLines } from '../common';
 import { ConnectionStatusPill } from '../connections/ConnectionStatusPill';
 import { useSystemHealth } from './queries';
 import { channelConnStatus } from '../connections/connectionsModel';
+import { NewGroupModeSelect, NewGroupsBox, RefreshGroupsButton } from './NewGroupsBox';
 import {
   BRIDGE_OFFLINE_TEXT,
   BRIDGE_OFFLINE_TITLE,
+  DIRECT_MODES,
   LISTEN_MODES,
+  PENDING_MODE_LABEL,
   VIEW_SCOPES,
   channelAction,
   channelErrorText,
@@ -31,6 +34,7 @@ import {
   channelStats,
   channelStatus,
   channelTileTone,
+  directModeOf,
   groupKindLabel,
   isBridgeLost,
   isDenseQr,
@@ -243,8 +247,21 @@ export function ChannelCard({ channel, canManage, large }: { channel: Channel; c
 
       {showQr ? <QrBlock channel={c} large={large} /> : null}
 
+      {!showQr && isQrChannel(c) && c.installed && c.state === 'active' ? (
+        <NewGroupsBox channel={c} canManage={canManage} onOpenAll={() => setGroupsOpen(true)} />
+      ) : null}
+
       {!showQr && (c.state === 'expired' || c.state === 'error') && c.error ? (
         <ErrorWithDetail className="write-error ch-fail" text={channelErrorText(c.error, c.name, c.type, !!c.resumable)} detail={c.error} />
+      ) : null}
+
+      {!showQr && isQrChannel(c) && c.installed && c.state === 'active' ? <NewGroupModeSelect channel={c} canManage={canManage} /> : null}
+
+      {!showQr && canManage && isQrChannel(c) && c.installed && c.state === 'active' ? (
+        <div className="ch-tools">
+          <RefreshGroupsButton channel={c} />
+          <span>Tự quét lại mỗi 2 giờ; nhóm mới được báo ngay khi có tin đầu tiên.</span>
+        </div>
       ) : null}
 
       <div className="ch-stats">
@@ -428,7 +445,7 @@ export function RiskWarningDialog({
         </div>
         <ul className="risk-list">
           <li>Dùng tài khoản Sếp sở hữu, không dùng tài khoản của nhân viên hay khách.</li>
-          <li>Gen chỉ nghe nhóm Sếp bật — nhóm mới luôn ở chế độ Không nghe.</li>
+          <li>Gen chỉ lưu tin của nhóm Sếp đã chọn nghe — nhóm mới chờ Sếp chọn Im lặng hay Không nghe, chưa lưu tin nào.</li>
           <li>Tin gửi đi phải qua duyệt và ranh giới tự trị, không gửi hàng loạt.</li>
           <li>Đăng xuất bất cứ lúc nào ở đây hoặc trong ứng dụng trên điện thoại.</li>
         </ul>
@@ -462,21 +479,23 @@ export function GroupsDialog({
 }) {
   const c = channel;
   const groups = useChannelGroups(channel.type, open);
+  const mode = directModeOf(c);
   const direct = useMutation({
-    mutationFn: (v: boolean) => api.channels.update(c.type, { listen_direct: v }),
-    onMutate: (v) => {
-      queryClient.setQueryData<Channel[]>(qk2.channels, (old) => old?.map((x) => (x.type === c.type ? { ...x, listen_direct: v } : x)));
-    },
+    mutationFn: (v: DirectMode) => api.channels.update(c.type, { direct_mode: v }),
     onSuccess: (next) => {
       queryClient.setQueryData<Channel[]>(qk2.channels, (old) => old?.map((x) => (x.type === c.type ? next : x)));
-      toast(next.listen_direct ? `${c.name}: đang nghe cả tin nhắn 1-1` : `${c.name}: không nghe tin nhắn 1-1`, 'neutral');
+      const m = directModeOf(next);
+      toast(
+        m === 'off' ? `${c.name}: không lưu tin nhắn 1-1` : m === 'reply' ? `${c.name}: lưu tin 1-1 và cho trợ lý trả lời` : `${c.name}: lưu tin 1-1 im lặng, không tự trả lời`,
+        'neutral',
+      );
     },
     onError: (e) => {
       void queryClient.invalidateQueries({ queryKey: qk2.channels });
       toast(errorText(e), 'bad');
     },
   });
-  const showDirect = isQrChannel(c) && c.installed && typeof c.listen_direct === 'boolean';
+  const showDirect = isQrChannel(c) && c.installed && (typeof c.listen_direct === 'boolean' || c.direct_mode !== undefined);
   return (
     <Dialog
       open={open}
@@ -484,22 +503,29 @@ export function GroupsDialog({
       width={720}
       padded={false}
       title={`Nhóm ${channel.name}`}
-      kicker="Nhóm mới luôn ở chế độ Không nghe — Sếp bật từng nhóm"
+      kicker="Nhóm mới chờ Sếp chọn Im lặng hay Không nghe — chưa lưu tin nào cho tới khi Sếp chọn"
     >
       {showDirect ? (
         <div className="ch-direct">
           <span className="ch-direct__label">
-            Nghe tin nhắn 1-1
-            <span className="ch-direct__hint">
-              {c.listen_direct ? 'Đang bật — tin nhắn riêng gửi tới tài khoản cũng vào kho thô.' : 'Mặc định tắt — chỉ nghe nhóm. Đổi cần mã PIN.'}
+            Tin nhắn 1-1 (riêng)
+            <span className="ch-direct__hint" data-testid="direct-hint">
+              {DIRECT_MODES.find((d) => d.value === mode)?.hint} Đổi cần mã PIN.
             </span>
           </span>
-          <Switch
-            checked={!!c.listen_direct}
-            label={`${c.listen_direct ? 'Tắt' : 'Bật'} nghe tin nhắn 1-1 trên ${c.name}`}
+          <select
+            className="mini-select"
+            aria-label={`Tin nhắn 1-1 trên ${c.name}`}
+            value={mode}
             disabled={!canManage || direct.isPending}
-            onChange={(v) => direct.mutate(v)}
-          />
+            onChange={(e) => direct.mutate(e.target.value as DirectMode)}
+          >
+            {DIRECT_MODES.map((d) => (
+              <option key={d.value} value={d.value}>
+                {d.label}
+              </option>
+            ))}
+          </select>
         </div>
       ) : null}
       {groups.isPending ? (
@@ -589,7 +615,10 @@ function GroupRow({
     <tr>
       <td>
         <div className="grp-name">{g.name}</div>
-        <div className="grp-code">{g.code}</div>
+        <div className="grp-code">
+          {g.code}
+          {g.left ? ' · Sếp đã rời nhóm' : ''}
+        </div>
       </td>
       <td style={{ fontSize: 11, color: 'var(--color-neutral-400)' }}>{groupKindLabel(g.kind)}</td>
       <td className="td-id">{fmtInt(g.members)}</td>
@@ -601,6 +630,11 @@ function GroupRow({
           disabled={!canManage}
           onChange={(e) => change({ listen_mode: e.target.value as ListenMode })}
         >
+          {g.listen_mode === 'pending' ? (
+            <option value="pending" disabled>
+              {PENDING_MODE_LABEL}
+            </option>
+          ) : null}
           {LISTEN_MODES.map((m) => (
             <option key={m.value} value={m.value}>
               {m.label}
