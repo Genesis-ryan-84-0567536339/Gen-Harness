@@ -16,7 +16,7 @@ from gh.biz.core import drafts, explain
 from gh.biz.core.scope import Scope, ensure_group, ensure_person, not_found, scope_for
 from gh.biz.queue import service as qsvc
 from gh.chassis import actionlog
-from gh.data.common import iso, mask_text, parse_cursor
+from gh.data.common import has_masked_number, iso, mask_text, parse_cursor
 from gh.db import DB
 from gh.errors import ApiError, forbidden, model_unavailable
 from gh.providers.clients import Message
@@ -312,6 +312,11 @@ async def _decide(request: Request, draft_id: uuid.UUID, user: service.CurrentUs
                            {"i": draft_id, "o": user.org_id, **params})).first()
     if ok is None:
         raise not_found("Bản nháp")
+    if verdict == "edit" and user.role_code != rbac.OWNER and has_masked_number(body.text):
+        # Review v0.1.67 P3: vai dưới Owner chỉ thấy số đã che (•••••678); "Khôi phục bản trước" / "Sửa rồi gửi" /
+        # dùng bản dịch đưa chuỗi che đó vào ô sửa — gửi đi là gửi khách số sai và ghi đè mất số thật trong nháp.
+        raise ApiError(422, "MASKED_TEXT", "Nội dung có số đã che nên chưa gửi được",
+                       "Chỗ số bị che (•••) chỉ Sếp thấy đủ. Hãy xoá hoặc viết lại phần đó, hoặc nhờ Sếp duyệt.")
     try:
         await drafts.decide(db, draft_id=draft_id, org_id=user.org_id, user_id=user.id, verdict=verdict,
                             text_override=body.text, reason=body.reason, side_actions=body.side_actions,

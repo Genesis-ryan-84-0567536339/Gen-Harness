@@ -111,6 +111,15 @@ async def live_person(db: AsyncSession, person_id: uuid.UUID) -> uuid.UUID:
 _RE_LONGNUM = re.compile(r"(?<!\d)(\d[\d .-]{7,22}\d)(?!\d)")
 
 
+#: Dấu vết của `mask_text` trong một chuỗi (≥ 5 dấu • liền nhau, phần còn lại là 3 số cuối).
+_RE_MASKED = re.compile(r"•{4,}")
+
+
+def has_masked_number(text_: str | None) -> bool:
+    """Chuỗi có chỗ số nhạy cảm đã bị `mask_text` che — vai dưới Owner KHÔNG được gửi đi nguyên chuỗi đó."""
+    return bool(text_ and _RE_MASKED.search(text_))
+
+
 def mask_text(text_: str | None, is_owner: bool) -> str | None:
     if text_ is None or is_owner:
         return text_

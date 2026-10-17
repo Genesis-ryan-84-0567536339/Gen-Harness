@@ -13,6 +13,11 @@ export const N4 = 'var(--color-neutral-400)';
 export const N5 = 'var(--color-neutral-500)';
 export const N8 = 'var(--color-neutral-800)';
 
+/** Chuỗi có số nhạy cảm đã bị máy chủ che (•••••678, vai dưới Owner) — không đưa vào ô sửa để gửi đi (review v0.1.67). */
+export function hasMaskedNumber(text: string): boolean {
+  return /•{4,}/.test(text);
+}
+
 export const PRIORITY_LABEL: Record<string, string> = { P1: 'P1', P2: 'P2', P3: 'P3' };
 export function priorityTone(p: string): string {
   return p === 'P1' ? BAD : p === 'P2' ? WARN : N4;

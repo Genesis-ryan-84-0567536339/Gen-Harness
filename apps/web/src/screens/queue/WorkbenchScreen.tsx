@@ -11,6 +11,7 @@ import { ActionError, CardError, InlineError, Panel, SkeletonLines } from '../co
 import { WhyButton } from '../core/Evidence';
 import { qk3, useDraft, useDraftsPaged } from '../core/queries';
 import { DataEmptyState } from '../DataEmptyState';
+import { hasMaskedNumber } from './queueModel';
 
 const KIND_TONE: Record<DraftItem['kind'], Tone> = {
   quotation: 'bad',
@@ -431,17 +432,23 @@ function DraftDetailView({ d, onOpenDraft }: { d: DraftDetail; onOpenDraft: (id:
           />
           {d.versions.length > 0 && canApprove ? (
             <div>
-              <Button
-                variant="secondary"
-                className="btn-27"
-                icon="ph ph-arrow-u-up-left"
-                onClick={() => {
-                  setText(d.versions[d.versions.length - 1].text);
-                  setEditing(true);
-                }}
-              >
-                Khôi phục bản trước
-              </Button>
+              {hasMaskedNumber(d.versions[d.versions.length - 1].text) ? (
+                <p className="wb-notice" role="status">
+                  Bản trước có số đã che — chỉ Sếp khôi phục được (gửi đi sẽ mất số thật).
+                </p>
+              ) : (
+                <Button
+                  variant="secondary"
+                  className="btn-27"
+                  icon="ph ph-arrow-u-up-left"
+                  onClick={() => {
+                    setText(d.versions[d.versions.length - 1].text);
+                    setEditing(true);
+                  }}
+                >
+                  Khôi phục bản trước
+                </Button>
+              )}
             </div>
           ) : null}
         </div>

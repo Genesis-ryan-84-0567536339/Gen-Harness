@@ -125,6 +125,13 @@ describe('F081 — Soạn lại có ô yêu cầu và khôi phục bản trướ
     expect(within(document.body).getByLabelText('Sửa nội dung bản nháp')).toHaveValue('Bản cũ hơn');
   });
 
+  it('bản cũ có số đã che (vai dưới Owner) ⇒ KHÔNG hiện "Khôi phục bản trước" (review v0.1.67 P3)', async () => {
+    renderWb(detail({ id: 'd4', status: 'pending', text: 'Bản mới', paragraphs: ['Bản mới'], versions: [{ at: '2026-10-10T08:30:00Z', by: 'agent', text: 'STK •••••••678 ạ' }] }));
+    await screen.findByLabelText('Yêu cầu khi soạn lại (không bắt buộc)');
+    expect(screen.queryByRole('button', { name: /Khôi phục bản trước/ })).toBeNull();
+    expect(screen.getByText(/số đã che/)).toBeInTheDocument();
+  });
+
   it('chưa soạn lại lần nào ⇒ không có nút khôi phục', async () => {
     renderWb(detail({ id: 'd3', status: 'pending' }));
     await screen.findByLabelText('Yêu cầu khi soạn lại (không bắt buộc)');

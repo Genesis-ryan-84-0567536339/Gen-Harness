@@ -7,9 +7,9 @@ from typing import Any
 import orjson
 from sqlalchemy import text
 
-from tests.conftest import Api
+from tests.conftest import OWNER, Api
 from tests.phase2 import FakeRouter, org_id
-from tests.test_rbac_api import login_as
+from tests.test_rbac_api import PIN, login_as
 
 DRAFT = {"kind": "message", "title": "Trả lời chị Lan", "text": "Dạ em báo giá 3 container thép cuộn ạ."}
 
@@ -137,3 +137,24 @@ async def test_decisions_hide_proposal_text_of_drafts_outside_scope(owner_api: A
     owner_items = (await owner_api.get("/agents/decisions")).json()["items"]
     owner_by = {(i["draft"] or {}).get("id"): i["proposal_text"] for i in owner_items}
     assert owner_by[theirs["id"]] == "TOÀN VĂN NHÁP CỦA SẾP"
+
+
+async def test_non_owner_cannot_send_text_with_masked_numbers(owner_api: Api, db, client) -> None:  # type: ignore[no-untyped-def]
+    """Review v0.1.67 P3: vai dưới Owner thấy số ≥ 8 chữ số bị che (•••••678) — "Khôi phục bản trước" / "Sửa rồi gửi" /
+    dùng bản dịch đưa chuỗi đã che vào ô sửa; máy chủ không được gửi đi chuỗi che đó cho khách."""
+    manager = await login_as(client, db, "manager")
+    d = (await manager.send("POST", "/drafts", {**DRAFT, "text": "Dạ chị chuyển khoản vào STK 0912345678 ạ."})).json()
+    shown = (await manager.get(f"/drafts/{d['id']}")).json()["text"]
+    assert "0912345678" not in shown and "•••" in shown
+    pin = await manager.send("POST", "/auth/pin/verify", {"pin": PIN})
+    assert pin.status_code == 200, pin.text
+    r = await manager.send("POST", f"/drafts/{d['id']}/edit-send", {"text": shown})
+    assert r.status_code == 422 and r.json()["code"] == "MASKED_TEXT", r.text
+    assert (await manager.get(f"/drafts/{d['id']}")).json()["status"] == "pending"       # chưa quyết gì
+    r = await manager.send("POST", f"/drafts/{d['id']}/edit-send", {"text": "Dạ em báo giá lại cho chị ạ."})
+    assert r.status_code == 200, r.text
+    # Owner thấy nguyên văn nên không bị chặn
+    d2 = (await owner_api.send("POST", "/drafts", {**DRAFT, "text": "STK •••••678 là ký hiệu của em"})).json()
+    await owner_api.send("POST", "/auth/pin/verify", {"pin": OWNER["pin"]})
+    ok = await owner_api.send("POST", f"/drafts/{d2['id']}/edit-send", {"text": "STK •••••678 là ký hiệu của em"})
+    assert ok.status_code == 200, ok.text
