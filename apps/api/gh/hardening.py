@@ -8,7 +8,7 @@ CAP_SYS_PTRACE. Cờ được con cháu `fork` thừa hưởng nhưng `execve` (
 thường, chỉ tiến trình api/worker là không bị đọc.
 
 KHÔNG thay cho cô lập thật: từ v0.1.63 việc có người ngoài chạy agy trong hộp riêng (`agy-box`), nhưng vai core
-(Gen của Sếp, Bản tin, agent nội bộ) vẫn chạy agy trong tiến trình api/worker (Nợ #45) nên phần dưới vẫn còn với các
+(Gen của Sếp, agent nội bộ) vẫn chạy agy trong tiến trình api/worker (Nợ #45) nên phần dưới vẫn còn với các
 vai đó; đây chỉ thu hẹp mặt phơi bày. Phần CÒN HỞ (nói thật):
 - `/run/secrets/gh_*` đọc được bằng uid `gh` (quyền tệp theo uid) — agy cùng uid đọc được;
 - tiến trình con do api/worker sinh KHÔNG thừa hưởng cờ: `execve` đặt lại dumpable, nên HEALTHCHECK của api (15 giây)

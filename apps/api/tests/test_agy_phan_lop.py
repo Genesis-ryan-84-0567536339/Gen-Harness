@@ -46,12 +46,13 @@ def _calls(clis: dict[str, Any]) -> list[dict[str, Any]]:
 def test_decide_matrix() -> None:
     d = agy_policy.decide
     inner = f"agent:{uuid.uuid4()}"
-    for key in ("core.gen", "core.briefing", inner):                       # lớp core: trong tiến trình
+    for key in ("core.gen", inner):                                        # lớp core: trong tiến trình
         for state in ("ok", "down", "not_installed"):
             v = d(key, box=state)
             assert v.allowed and v.where == "inproc" and v.reason is None, (key, state)
     assert d("core.embedding", box="ok").where == "box"                         # khoá lạ: đóng an toàn
-    for key in ("core.reply", "core.refinery"):
+    # Review v0.1.63 (P2-3): Bản tin đưa tên hiển thị khách / tiêu đề việc / lý do giữ nháp vào prompt ⇒ qua hộp.
+    for key in ("core.reply", "core.refinery", "core.briefing"):
         assert d(key, box="ok").allowed and d(key, box="ok").where == "box"
         down, missing = d(key, box="down"), d(key, box="not_installed")
         assert not down.allowed and down.code == "box_down" and down.reason == agy_policy.REASON_BOX_DOWN
@@ -64,7 +65,7 @@ def test_decide_matrix() -> None:
     assert d("core.gen", owner=False, box="ok").allowed and d("core.gen", owner=False, box="ok").where == "box"
     assert d(inner, purpose="setup_agent_try", box="ok").where == "box"           # thử agent qua hộp
     # Người hỏi không phải Owner không ảnh hưởng các khoá khác (chỉ Gen có khái niệm người hỏi).
-    assert d("core.briefing", owner=False).where == "inproc" and d(inner, owner=False).where == "inproc"
+    assert d("core.briefing", owner=False).where == "box" and d(inner, owner=False).where == "inproc"
 
 
 def test_agy_policy_wording_is_not_the_old_rule() -> None:
@@ -165,10 +166,10 @@ async def test_bindings_list_and_set_binding_follow_the_decision(owner_api, db, 
 
     listing = (await owner_api.get("/agents/bindings")).json()
     items = {i["agent_key"]: i for i in listing["items"]}
-    for key in ("core.gen", "core.briefing", f"agent:{inner}"):
+    for key in ("core.gen", f"agent:{inner}"):
         assert items[key]["standard"]["provider_name"] == "Antigravity CLI", key
         assert items[key]["agy_blocked_reason"] is None and items[key]["standard_reason"] is None, key
-    for key in ("core.reply", "core.refinery", f"agent:{ext}"):
+    for key in ("core.reply", "core.refinery", "core.briefing", f"agent:{ext}"):
         it = items[key]
         assert it["standard"] is None and it["standard_reason"] == REASON, (key, it)
         assert it["agy_blocked_reason"] == REASON, key
@@ -176,14 +177,14 @@ async def test_bindings_list_and_set_binding_follow_the_decision(owner_api, db, 
     kinds = {m["model_name"]: m["kind"] for m in listing["models"]}
     assert kinds["gemini-3.1-pro"] == "antigravity_cli"
 
-    for key in ("core.reply", "core.refinery", f"agent:{ext}"):
+    for key in ("core.reply", "core.refinery", "core.briefing", f"agent:{ext}"):
         r = await owner_api.send("PUT", f"/agents/bindings/{key}", {"model_id": str(mid)})
         assert r.status_code == 422, (key, r.status_code, r.text)
         assert REASON in json.dumps(r.json(), ensure_ascii=False), r.text
     async with sessionmaker()() as s:
         n = (await s.execute(text("SELECT count(*) FROM agent.bindings WHERE org_id = :o"), {"o": org})).scalar_one()
     assert n == 0                                                  # không lưu dòng gán bị từ chối
-    for key in ("core.gen", "core.briefing", f"agent:{inner}"):
+    for key in ("core.gen", f"agent:{inner}"):
         assert (await owner_api.send("PUT", f"/agents/bindings/{key}", {"model_id": str(mid)})).status_code == 200, key
 
     # Gắn kênh cho agent nội bộ SAU khi đã gán agy ⇒ dòng gán hiện cờ chặn (web cảnh báo), gán lại bị từ chối.
@@ -280,10 +281,17 @@ async def test_generate_gen_for_non_owner_goes_through_the_box_only(owner_api, a
     out = await app.state.model_router.generate(org, agent_key="core.gen", purpose="gen.turn", messages=MSGS,
                                                 json_mode=False, owner=True)
     assert out.provider == "Antigravity CLI" and len(_calls(clis)) == n + 1
-    # Mặc định (không nói người hỏi) = Owner: các bên gọi nền (Bản tin) không phải khai báo.
-    out = await app.state.model_router.generate(org, agent_key="core.briefing", purpose="gen.briefing",
-                                                messages=MSGS, json_mode=False)
+    # Mặc định (không nói người hỏi) = Owner: bên gọi không phải khai báo.
+    out = await app.state.model_router.generate(org, agent_key="core.gen", purpose="gen.turn", messages=MSGS,
+                                                json_mode=False)
     assert out.provider == "Antigravity CLI"
+    # Bản tin (review v0.1.63, P2-3) qua hộp: hộp chưa cài + chỉ có agy ⇒ không có nguồn, KHÔNG chạy agy trong tiến
+    # trình (bản tin vẫn gửi đủ mục, chỉ không có đoạn tóm tắt bằng model — gh.gen.briefing).
+    n = len(_calls(clis))
+    with pytest.raises(ModelUnavailable) as ei:
+        await app.state.model_router.generate(org, agent_key="core.briefing", purpose="gen.briefing",
+                                              messages=MSGS, json_mode=False)
+    assert REASON in ei.value.reasons and len(_calls(clis)) == n
 
 
 # ─── Gen của nhân viên ────────────────────────────────────────────────────

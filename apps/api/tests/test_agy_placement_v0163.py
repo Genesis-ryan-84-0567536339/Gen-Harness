@@ -48,8 +48,9 @@ PLACEMENT_CASES: list[tuple[str, Any, bool, str | None, str]] = [
     # (vai, agent, owner, purpose, nơi chạy)
     (GEN, None, True, "gen.turn", "inproc"),
     (GEN, None, False, "gen.turn", "box"),                      # Gen của nhân viên
-    (BRIEFING, None, True, "gen.briefing", "inproc"),
-    (BRIEFING, None, False, "gen.briefing", "inproc"),          # chỉ core.gen phân biệt người hỏi
+    # Review v0.1.63 (P2-2/P2-3): Bản tin đưa tên hiển thị khách, tiêu đề việc, lý do giữ nháp vào prompt ⇒ qua hộp.
+    (BRIEFING, None, True, "gen.briefing", "box"),
+    (BRIEFING, None, False, "gen.briefing", "box"),             # chỉ core.gen phân biệt người hỏi
     (REPLY, None, True, "draft_translate", "box"),
     (REPLY, None, False, "draft_regenerate", "box"),
     (REFINERY, None, True, "refinery", "box"),                  # sàng lọc tin người lạ
@@ -79,7 +80,7 @@ def test_placement_matrix(role: str, agent: Any, owner: bool, purpose: str | Non
 def test_box_required_matches_the_b2_call_shape() -> None:
     """B2 (`readiness.SoftBoxGate`) gọi `box_required(profiles.role_of(key), key)` — chỉ hai tham số vị trí."""
     key = f"agent:{uuid.uuid4()}"
-    for k, expected in ((GEN, False), (BRIEFING, False), (REPLY, True), (REFINERY, True), (key, False)):
+    for k, expected in ((GEN, False), (BRIEFING, True), (REPLY, True), (REFINERY, True), (key, False)):
         role = profiles.role_of(k)
         assert role is not None
         assert placement.box_required(role, k if k.startswith("agent:") else None) is expected, k
@@ -88,7 +89,7 @@ def test_box_required_matches_the_b2_call_shape() -> None:
 
 
 def test_placement_table_is_the_single_source_and_read_only() -> None:
-    assert dict(placement.AGY_PLACEMENT) == {GEN: "inproc", BRIEFING: "inproc", "agent:*": "inproc",
+    assert dict(placement.AGY_PLACEMENT) == {GEN: "inproc", BRIEFING: "box", "agent:*": "inproc",
                                             REPLY: "box", REFINERY: "box"}
     with pytest.raises(TypeError):
         placement.AGY_PLACEMENT["core.reply"] = "inproc"  # type: ignore[index]
@@ -195,8 +196,8 @@ async def test_generate_matrix_role_by_box_by_asker(app, db, redis, boxctl, role
         key = f"agent:{await _seed_agent(db, w.org)}"
     elif role == "diplomatic":
         key = f"agent:{await _diplomatic_agent(db, w.org)}"
-    # Bảng kỳ vọng viết tay (không gọi `placement`): core.gen Owner / Bản tin / agent nội bộ ⇒ trong tiến trình.
-    inproc_case = (role == BRIEFING or (role == GEN and owner and purpose == "gen.turn")
+    # Bảng kỳ vọng viết tay (không gọi `placement`): core.gen Owner / agent nội bộ ⇒ trong tiến trình; Bản tin qua hộp.
+    inproc_case = ((role == GEN and owner and purpose == "gen.turn")
                    or (role == "internal" and purpose == "duty_decide"))
     expected = "inproc" if inproc_case else "box"
 
@@ -302,7 +303,7 @@ async def test_box_roles_do_not_trigger_the_inproc_self_heal(app, db, redis, box
         return False
 
     monkeypatch.setattr(w.router, "_heal_agy", fake_heal)
-    for key in (REPLY, REFINERY):
+    for key in (REPLY, REFINERY, BRIEFING):
         with pytest.raises(ModelUnavailable):
             await w.router.generate(w.org, agent_key=key, purpose="p", messages=MSGS, json_mode=False)
     assert healed == []
@@ -395,8 +396,8 @@ async def test_set_binding_follows_the_box_state(owner_api, db, clis, box) -> No
     org, mid = await _only_agy(owner_api)
     inner = await _seed_agent(db, org, name="Trợ lý nội bộ")
     ext = await _diplomatic_agent(db, org)
-    box_keys = (REPLY, REFINERY, f"agent:{ext}")
-    inproc_keys = (GEN, BRIEFING, f"agent:{inner}")
+    box_keys = (REPLY, REFINERY, BRIEFING, f"agent:{ext}")
+    inproc_keys = (GEN, f"agent:{inner}")
     for state in ("down", "not_installed"):
         box.state = state
         for key in box_keys:
@@ -431,8 +432,8 @@ async def test_standard_profile_and_choice_options_follow_the_box(owner_api, db,
         assert any(t["available"] for t in (await profiles.choice_options(s, org, owner=False))["tiers"])
         box.state = "down"
         std, why = (await profiles.standard_with_reasons(s, org, [GEN, REPLY, REFINERY, BRIEFING]))
-        assert std[GEN] and std[BRIEFING] and std[REPLY] is None and std[REFINERY] is None
-        assert why[REPLY] == why[REFINERY] == agy_policy.REASON_BOX_DOWN
+        assert std[GEN] and std[BRIEFING] is None and std[REPLY] is None and std[REFINERY] is None
+        assert why[REPLY] == why[REFINERY] == why[BRIEFING] == agy_policy.REASON_BOX_DOWN
         owner_tiers = (await profiles.choice_options(s, org, owner=True))["tiers"]
         staff_tiers = (await profiles.choice_options(s, org, owner=False))["tiers"]
         assert any(t["available"] for t in owner_tiers) and not any(t["available"] for t in staff_tiers)

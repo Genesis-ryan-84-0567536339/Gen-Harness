@@ -651,9 +651,10 @@ class AgyClient:
 
     Chính sách (Sếp chốt 16/10/2026, gói G v0.1.62 + H2 v0.1.63): agy mở cho các vai nhưng MỖI VAI MỘT CHỖ CHẠY
     (`gh.providers.placement`, quyết định ở `gh.providers.agy_policy.decide`). Lớp CORE — Gen
-    của Sếp, Bản tin Gen, agent
+    của Sếp, agent
     nội bộ không gắn kênh / nhóm / người — chạy `AgyClient` này TRONG TIẾN TRÌNH. Lớp ngoại giao / người ngoài —
-    `core.reply`, agent ngoại giao, sàng lọc tin người lạ `core.refinery`, Gen của nhân viên, lượt thử agent — chạy qua
+    `core.reply`, agent ngoại giao, sàng lọc tin người lạ `core.refinery`, Bản tin Gen (review v0.1.63 P2-3), Gen của
+    nhân viên, lượt thử agent — chạy qua
     HỘP RIÊNG (`gh.agybox.client.AgyBoxClient`; chính hộp dùng lại `AgyClient` này bên trong container không khoá);
     hộp chưa cài / tắt thì các vai đó dùng nguồn AI kế, không bao giờ rơi về `AgyClient` trong tiến trình.
     RỦI RO CÒN LẠI của lớp core trong tiến trình: agy có công cụ đọc tệp / chạy lệnh và chạy

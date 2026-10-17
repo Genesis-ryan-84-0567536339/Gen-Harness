@@ -336,12 +336,12 @@ async def test_heal_that_hangs_is_cut_and_gen_turn_goes_on(owner_api, app, needs
     assert started == [pid]
 
 
-@pytest.mark.parametrize("agent_key,purpose", [("core.briefing", "gen.briefing"), ("core.gen", "gen.briefing"),
-                                               ("agent:{id}", "duty_decide")])
+@pytest.mark.parametrize("agent_key,purpose", [("core.gen", "gen.briefing"), ("agent:{id}", "duty_decide")])
 async def test_background_and_other_roles_also_self_heal_agy(  # type: ignore[no-untyped-def]
         owner_api, app, needs_effort, box, agent_key, purpose) -> None:
     """Chuỗi rỗng ở việc nền / vai core cũng tự lành (gọi thử một lần rồi lưu model) và lượt gọi trả lời bằng agy. H2:
-    chỉ vai chạy agy TRONG TIẾN TRÌNH (Bản tin, Gen của Owner, agent nội bộ) — vai qua hộp không kích hoạt lượt thử."""
+    chỉ vai chạy agy TRONG TIẾN TRÌNH (Gen của Owner, agent nội bộ) — vai qua hộp (kể cả Bản tin, review v0.1.63 P2-3)
+    không kích hoạt lượt thử."""
     api = owner_api
     org, pid = await _boss_state(api)
     n0 = len(_calls(needs_effort))
@@ -357,9 +357,10 @@ async def test_box_roles_do_not_self_heal_agy_inproc(  # type: ignore[no-untyped
     """Sàng lọc tin người lạ (core.refinery) qua hộp: chuỗi rỗng ⇒ hết chuỗi, KHÔNG gọi thử agy trong tiến trình."""
     org, pid = await _boss_state(owner_api)
     n0 = len(_calls(needs_effort))
-    with pytest.raises(ModelUnavailable):
-        await app.state.model_router.generate(org, agent_key="core.refinery", purpose="refinery.extract",
-                                              messages=[Message("user", "tin của người lạ")], json_mode=False)
+    for key, purpose in (("core.refinery", "refinery.extract"), ("core.briefing", "gen.briefing")):
+        with pytest.raises(ModelUnavailable):
+            await app.state.model_router.generate(org, agent_key=key, purpose=purpose,
+                                                  messages=[Message("user", "tin của người lạ")], json_mode=False)
     assert len(_calls(needs_effort)) == n0 and box.calls == [] and await _models(pid) == []
 
 

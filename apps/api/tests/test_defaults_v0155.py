@@ -903,8 +903,9 @@ async def test_background_without_api_or_agy_source_keeps_old_behaviour(app: Any
 
 async def test_background_with_agy_runs_on_agy_with_profile_effort(app: Any, db: Any, redis: Any,
                                                                    boxctl: Any) -> None:  # noqa: F811
-    """Có Antigravity CLI ⇒ việc nền chạy bằng agy (hồ sơ: tầng gần "nhanh" nhất = flash, mức "low"): Bản tin và agent
-    nội bộ trong tiến trình, sàng lọc tin (người lạ) qua hộp riêng (H2); Claude CLI chưa được phép nên không bị gọi."""
+    """Có Antigravity CLI ⇒ việc nền chạy bằng agy (hồ sơ: tầng gần "nhanh" nhất = flash, mức "low"): agent nội bộ trong
+    tiến trình, sàng lọc tin (người lạ) và Bản tin (review v0.1.63 P2-3) qua hộp riêng; Claude CLI chưa được phép nên
+    không bị gọi."""
     org = await org_id(db)
     await add_source(db, org, CLAUDE, "Claude CLI", 1, ["sonnet", "haiku"])
     await add_source(db, org, AGY, "Agy", 2, ["gemini-3.8-flash", "gemini-3.1-pro"])
@@ -913,8 +914,8 @@ async def test_background_with_agy_runs_on_agy_with_profile_effort(app: Any, db:
     for key, purpose in (("core.briefing", "gen.briefing"), ("core.refinery", "refinery"), ("agent:1", "duty_decide")):
         out = await r.generate(org, agent_key=key, purpose=purpose, messages=MSGS, tier="fast")
         assert out.text == "cli-ok", key
-    assert cli.calls == [] and agy.calls == [("gemini-3.8-flash", "low")] * 2
-    assert boxed.calls == [("gemini-3.8-flash", "low")]
+    assert cli.calls == [] and agy.calls == [("gemini-3.8-flash", "low")]
+    assert boxed.calls == [("gemini-3.8-flash", "low")] * 2
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════════════

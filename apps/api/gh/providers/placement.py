@@ -11,7 +11,7 @@ Bảng (`AGY_PLACEMENT` + ba ngoại lệ bên dưới):
 | Vai | Nơi chạy |
 |---|---|
 | `core.gen` của Owner (Gen của Sếp) | inproc |
-| `core.briefing` (Bản tin Gen) | inproc |
+| `core.briefing` (Bản tin Gen — prompt có tên hiển thị khách, tiêu đề việc, lý do giữ nháp) | box |
 | `agent:<id>` nội bộ (không gắn kênh / nhóm / người) | inproc |
 | `core.reply` (soạn lại / dịch nháp tin khách) | box |
 | `core.refinery` (sàng lọc tin người lạ) | box |
@@ -46,7 +46,10 @@ ROLE_AGENT = "agent:*"
 #: Nguồn sự thật cho chỗ chạy mặc định của từng vai.
 AGY_PLACEMENT: Mapping[str, str] = MappingProxyType({
     "core.gen": INPROC,          # Gen của Owner; Gen của nhân viên ⇒ STAFF_GEN_PLACEMENT
-    "core.briefing": INPROC,
+    # Review v0.1.63 (P2-3): Bản tin đưa tên hiển thị do khách tự đặt, tiêu đề việc, lý do giữ nháp vào prompt
+    # (gh/gen/briefing.py) ⇒ có chữ người ngoài ⇒ qua hộp. Hộp tắt ⇒ nguồn kế / bản tin không có đoạn tóm tắt bằng
+    # model.
+    "core.briefing": BOX,
     ROLE_AGENT: INPROC,          # agent không gắn kênh / nhóm / người; ngoại giao ⇒ DIPLOMATIC_AGENT_PLACEMENT
     "core.reply": BOX,
     "core.refinery": BOX,
