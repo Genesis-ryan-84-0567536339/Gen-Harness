@@ -393,7 +393,12 @@ def token_expiry(raw: bytes) -> float | None:
         return None
     if not isinstance(data, dict):
         return None
+    # Định dạng THẬT của agy 1.2.9 (đã kiểm trên phiên đăng nhập thật): {"token": {access_token, token_type,
+    # refresh_token, expiry}, "auth_method", "id_token"} — `expiry` nằm trong `token`, không ở cấp đầu.
+    inner = data.get("token")
     exp: Any = data.get("expiry") or data.get("expires_at")
+    if exp is None and isinstance(inner, dict):
+        exp = inner.get("expiry") or inner.get("expires_at")
     if exp is None:
         tok = data.get("id_token")
         if isinstance(tok, str) and tok.count(".") >= 2:
@@ -421,7 +426,11 @@ def _has_refresh_token(raw: bytes) -> bool:
         data = orjson.loads(raw)
     except orjson.JSONDecodeError:
         return False
-    return isinstance(data, dict) and any(isinstance(data.get(k), str) and data.get(k) for k in _REFRESH_KEYS)
+    if not isinstance(data, dict):
+        return False
+    inner = data.get("token")  # định dạng thật của agy: refresh_token nằm trong `token`
+    return any(isinstance(src.get(k), str) and src.get(k) for src in (data, inner if isinstance(inner, dict) else {})
+               for k in _REFRESH_KEYS)
 
 
 def token_needs_refresh(raw: bytes, *, now: float | None = None, window: float = TOKEN_REFRESH_WINDOW_S) -> bool:
