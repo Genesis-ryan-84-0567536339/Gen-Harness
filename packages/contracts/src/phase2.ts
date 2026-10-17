@@ -409,6 +409,10 @@ export interface Channel {
   direct_mode?: DirectMode;
   /** v0.1.65: số nhóm mới phát hiện đang CHỜ Sếp chọn (`listen_mode = 'pending'`, chưa rời). Máy chủ cũ không gửi. */
   groups_pending?: number;
+  /** v0.1.65 (F1d): chế độ cho nhóm MỚI phát hiện sau này — `ask` (mặc định: chờ Sếp chọn) · `silent` (vào Im lặng ngay) · `off` (vào Không nghe). Máy chủ cũ không gửi. `PATCH /channels/{type}` 🔒 `policy.change`. */
+  new_group_mode?: NewGroupMode;
+  /** v0.1.65 (F1d): Sếp đã chọn ở hộp hỏi / thẻ kênh kể từ lần nối kênh gần nhất (false ⇒ hộp hỏi bật sẵn ô «Áp dụng cho các nhóm mới sau này»). */
+  new_group_asked?: boolean;
   session_id?: string | null;
   ended_at?: string | null;
   /** Last bridge error for this channel, if any. */
@@ -424,6 +428,8 @@ export type ListenMode = 'pending' | 'off' | 'tagged_only' | 'silent' | 'proacti
 /** Chế độ Sếp được CHỌN cho một nhóm (khớp `SETTABLE_LISTEN_MODES`). */
 export type SettableListenMode = Exclude<ListenMode, 'pending'>;
 export type DirectMode = 'off' | 'silent' | 'reply';
+/** Chế độ cho nhóm mới sau này (F1d). */
+export type NewGroupMode = 'ask' | 'silent' | 'off';
 export type ViewScope = 'owner' | 'manager' | 'all_members';
 export type GroupKind = 'internal' | 'market' | 'partner' | 'customer' | 'private';
 

@@ -14,6 +14,7 @@ import type {
   DirectMode,
   GroupKind,
   ListenMode,
+  NewGroupMode,
   PermScope,
   RetentionPolicy,
   SettableListenMode,
@@ -297,6 +298,16 @@ export const DIRECT_MODES: Array<{ value: DirectMode; label: string; hint: strin
 ];
 export const directModeOf = (c: Pick<Channel, 'direct_mode' | 'listen_direct'>): DirectMode =>
   c.direct_mode ?? (c.listen_direct === false ? 'off' : 'silent');
+
+/** Nhóm MỚI phát hiện sau này (v0.1.65, F1d; Sếp chốt 17/10): hỏi từng lần (mặc định) · vào Im lặng ngay · vào Không nghe ngay. */
+export const NEW_GROUP_MODES: Array<{ value: NewGroupMode; label: string; hint: string }> = [
+  { value: 'ask', label: 'Hỏi Sếp', hint: 'Nhóm mới chờ Sếp chọn Im lặng hay Không nghe — chưa lưu tin nào cho tới khi Sếp chọn. Mặc định.' },
+  { value: 'silent', label: 'Im lặng', hint: 'Nhóm mới tự vào Im lặng: lưu tin ngay, không tự trả lời.' },
+  { value: 'off', label: 'Không nghe', hint: 'Nhóm mới tự vào Không nghe: không lưu tin. Danh sách thành viên vẫn được ghi nhận.' },
+];
+/** Máy chủ cũ không gửi `new_group_mode` ⇒ `undefined` (không hiện ô chỉnh); có gửi thì giá trị lạ coi như `ask`. */
+export const newGroupModeOf = (c: Pick<Channel, 'new_group_mode'>): NewGroupMode | undefined =>
+  c.new_group_mode === undefined ? undefined : NEW_GROUP_MODES.some((m) => m.value === c.new_group_mode) ? c.new_group_mode : 'ask';
 
 export const VIEW_SCOPES: Array<{ value: ViewScope; label: string }> = [
   { value: 'owner', label: 'Chỉ Sếp' },

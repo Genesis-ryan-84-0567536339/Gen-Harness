@@ -390,14 +390,14 @@ export function createPhase2(opts: Phase2Options) {
       started_at: fresh ? null : iso(Date.now() - (14 * 86_400_000 + 6 * 3600_000 + 41 * 60_000)),
       groups_listening: 0, outbound_queued: 0, last_heartbeat_at: fresh ? null : iso(Date.now() - 20_000),
       stats: fresh ? null : { msgs_24h: 1244, tagged_24h: 31, latency_ms: 420, uptime_pct: 99.9 },
-      qr: null, listen_direct: true, direct_mode: 'silent',
+      qr: null, listen_direct: true, direct_mode: 'silent', new_group_mode: 'ask', new_group_asked: false,
     },
     {
       type: 'whatsapp', name: 'WhatsApp', installed: true, id: randomUUID(), state: fresh ? 'logged_out' : 'expired',
       account_label: fresh ? null : 'Android của Sếp', started_at: null,
       groups_listening: 0, outbound_queued: fresh ? 0 : 3, last_heartbeat_at: fresh ? null : iso(at('15:05:00')),
       stats: fresh ? null : { msgs_24h: 96, tagged_24h: 9, latency_ms: 510, uptime_pct: 71.2 },
-      qr: null, listen_direct: true, direct_mode: 'silent',
+      qr: null, listen_direct: true, direct_mode: 'silent', new_group_mode: 'ask', new_group_asked: false,
     },
     {
       type: 'telegram', name: 'Telegram', installed: false, id: null, state: 'not_installed', account_label: null,
@@ -420,9 +420,12 @@ export function createPhase2(opts: Phase2Options) {
     const sample: Array<[string, number]> = [['Khách sỉ Hà Nội — nhóm mới', 40], ['Đối tác kho Bình Dương', 9], ['Cựu sinh viên K12', 212]];
     for (const [name, members] of sample) {
       discoverSeq += 1;
-      const g = { id: randomUUID(), code: `GRP-${type === 'zalo' ? 'ZL' : 'WA'}-09${discoverSeq}0`, name, members, kind: 'internal', listen_mode: 'pending' as ListenMode, view_scope: 'owner' as ViewScope, channel: type, raw24h: 0 };
+      // F1d: như API thật — `new_group_mode` của kênh quyết định nhóm mới vào pending (ask) hay thẳng silent/off.
+      const mode = channelOf(type)?.new_group_mode;
+      const listen_mode: ListenMode = mode === 'silent' || mode === 'off' ? mode : 'pending';
+      const g = { id: randomUUID(), code: `GRP-${type === 'zalo' ? 'ZL' : 'WA'}-09${discoverSeq}0`, name, members, kind: 'internal', listen_mode, view_scope: 'owner' as ViewScope, channel: type, raw24h: 0 };
       groups.push(g);
-      if (announce) emit('group.discovered', { id: g.id, code: g.code, name: g.name, channel: type, listen_mode: 'pending' });
+      if (announce) emit('group.discovered', { id: g.id, code: g.code, name: g.name, channel: type, listen_mode });
     }
     return sample.length;
   };
@@ -1187,6 +1190,13 @@ export function createPhase2(opts: Phase2Options) {
         if (!need('system.manage')) return true;
         const g = groups.find((x) => x.id === seg[3] && x.channel === c.type);
         if (!g) return problem(404, 'NOT_FOUND', 'Không tìm thấy Nhóm');
+        // F1d: «Áp dụng cho các nhóm mới sau này» — chỉ silent/off, cần PIN (không đổi gì khi lỗi), lưu new_group_mode của kênh.
+        if (body.apply_to_new === true) {
+          if (body.mode !== 'silent' && body.mode !== 'off') return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { apply_to_new: 'Chỉ áp dụng cho nhóm mới được với Im lặng hoặc Không nghe' } });
+          if (!pin('policy.change')) return true;
+          c.new_group_mode = body.mode as Channel['new_group_mode'];
+        }
+        c.new_group_asked = true;
         g.listen_mode = body.mode as ListenMode;
         const { channel: _c, raw24h: _r, ...view } = g;
         return reply(200, view);
@@ -1197,6 +1207,7 @@ export function createPhase2(opts: Phase2Options) {
         if (c.type !== 'zalo' && c.type !== 'whatsapp') return problem(404, 'NOT_FOUND', 'Không tìm thấy Kênh');
         if (!bridgeOnline) return problem(503, 'BRIDGE_OFFLINE', 'Bộ nhận tin Zalo/WhatsApp đang tắt — thử lại sau ít phút; nếu vẫn lỗi, gửi Gói chẩn đoán cho người hỗ trợ');
         if (typeof body.account_label === 'string' && body.account_label.trim()) c.account_label = body.account_label.trim();
+        c.new_group_asked = false; // F1d: nối kênh = lần hỏi đầu lại bật sẵn «Áp dụng cho các nhóm mới sau này»
         const sessionId = randomUUID();
         qrSessions.set(sessionId, { type: c.type, refreshes: 0 });
         reply(202, { session_id: sessionId });
@@ -1208,11 +1219,16 @@ export function createPhase2(opts: Phase2Options) {
         if (!need('system.manage')) return true;
         if (c.type !== 'zalo' && c.type !== 'whatsapp') return problem(404, 'NOT_FOUND', 'Không tìm thấy Kênh');
         if (!pin('policy.change')) return true;
-        if (typeof body.listen_direct !== 'boolean' && !['off', 'silent', 'reply'].includes(String(body.direct_mode))) {
+        const hasNew = ['ask', 'silent', 'off'].includes(String(body.new_group_mode));
+        if (typeof body.listen_direct !== 'boolean' && !['off', 'silent', 'reply'].includes(String(body.direct_mode)) && !hasNew) {
           return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { direct_mode: 'Bắt buộc' } });
         }
+        if (hasNew) {
+          c.new_group_mode = body.new_group_mode as Channel['new_group_mode'];
+          c.new_group_asked = true;
+        }
         if (['off', 'silent', 'reply'].includes(String(body.direct_mode))) c.direct_mode = body.direct_mode as Channel['direct_mode'];
-        else c.direct_mode = body.listen_direct ? 'reply' : 'off';
+        else if (typeof body.listen_direct === 'boolean') c.direct_mode = body.listen_direct ? 'reply' : 'off';
         c.listen_direct = c.direct_mode !== 'off';
         return reply(200, channelView(c));
       }

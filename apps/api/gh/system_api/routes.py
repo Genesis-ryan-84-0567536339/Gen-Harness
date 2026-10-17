@@ -23,7 +23,18 @@ from gh.boss_checks import service as boss_service
 from gh.chassis import actionlog
 from gh.chassis.bus import BRIDGE_CONTROL
 from gh.chassis.mcp_client import McpBlockedNetwork, McpError, pin_endpoint
-from gh.data.common import ALL_LISTEN_MODES, CHANNEL_NAME, DIRECT_MODES, LISTENING_MODES, direct_mode, iso, org_settings
+from gh.data.common import (
+    ALL_LISTEN_MODES,
+    CHANNEL_NAME,
+    DIRECT_MODES,
+    LISTENING_MODES,
+    NEW_GROUP_MODES,
+    direct_mode,
+    iso,
+    new_group_mode,
+    org_settings,
+    set_channel_setting,
+)
 from gh.data.ingest import close_sessions, publish_resume, sync_listen_sets, uptime_pct
 from gh.db import DB
 from gh.errors import ApiError, conflict, field_errors, forbidden, not_found, pin_required
@@ -93,7 +104,8 @@ async def channel_card(db: AsyncSession, redis: Any, org_id: uuid.UUID, type_: s
         FROM core.groups WHERE channel_id = :c AND left_at IS NULL"""),
                                            {"c": ch.id, "m": list(LISTENING_MODES)})).one()
     state = s.state if s is not None else "logged_out"
-    dmode = direct_mode(await org_settings(db, org_id), type_)
+    settings = await org_settings(db, org_id)
+    dmode = direct_mode(settings, type_)
     meta = (s.meta or {}) if s is not None else {}
     qr = None
     if s is not None and state == "pending_qr":
@@ -121,8 +133,17 @@ async def channel_card(db: AsyncSession, redis: Any, org_id: uuid.UUID, type_: s
             "bridge_online": bool(await redis.get("gh:bridge:heartbeat")) if type_ in QR_CHANNELS else None,
             # v0.1.65: tin 1-1 ba mức (off | silent | reply), mặc định silent; `listen_direct` cho web cũ (khác off).
             "direct_mode": dmode, "listen_direct": dmode != "off",
+            # F1d: nhóm MỚI sau này (ask | silent | off, mặc định ask); `new_group_asked` = Sếp đã chọn ở hộp hỏi
+            # hoặc thẻ kênh kể từ lần nối kênh gần nhất (false ⇒ hộp hỏi bật sẵn ô «Áp dụng cho các nhóm mới sau này»).
+            "new_group_mode": new_group_mode(settings, type_),
+            "new_group_asked": _asked(settings, type_),
             "stats": {"msgs_24h": counts.msgs, "tagged_24h": counts.tagged, "latency_ms": meta.get("latency_ms"),
                       "uptime_pct": await uptime_pct(redis, type_, first_up) if first_up is not None else None}}
+
+
+def _asked(settings: dict[str, Any], type_: str) -> bool:
+    block = settings.get("new_group_asked")
+    return bool(isinstance(block, dict) and block.get(type_) is True)
 
 
 @router.get("/channels")
@@ -167,6 +188,8 @@ async def channel_login(type_: str, body: LoginIn, request: Request, user: servi
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id, action="channel.login",
                            target_type="channel", target_id=type_, target_label=body.account_label,
                            detail={"session_id": str(sid), "accept_risk": True}, ip=user.ip)
+    # F1d: nối kênh = bắt đầu lại — hộp hỏi nhóm mới lần đầu sau đó bật sẵn «Áp dụng cho các nhóm mới sau này».
+    await set_channel_setting(db, user.org_id, "new_group_asked", type_, False)
     await db.commit()
     # v0.1.62 (F067): phiên chờ QR cũ bị huỷ trong CSDL thì bridge cũng phải bỏ vòng xin QR của nó.
     await close_sessions(request.app.state.bus, user.org_id, type_, list(cancelled), actor=user.actor_id)
@@ -242,10 +265,12 @@ async def channel_logout(type_: str, request: Request, user: service.CurrentUser
 
 class ChannelPatch(BaseModel):
     """Tin riêng 1-1 của kênh: `direct_mode` (off | silent | reply). `listen_direct` là khoá cũ của web ≤ 0.1.64:
-    true ⇒ reply (như trước: agent trực được trả lời), false ⇒ off."""
+    true ⇒ reply (như trước: agent trực được trả lời), false ⇒ off. F1d: `new_group_mode` (ask | silent | off) = chế độ
+    cho nhóm MỚI phát hiện sau này (không đổi nhóm đã có). Đổi gì cũng cần mã PIN (`policy.change`)."""
 
     listen_direct: bool | None = None
     direct_mode: Literal["off", "silent", "reply"] | None = None
+    new_group_mode: Literal["ask", "silent", "off"] | None = None
 
 
 @router.patch("/channels/{type_}")
@@ -253,22 +278,33 @@ async def channel_patch(type_: str, body: ChannelPatch, request: Request, user: 
                         _pin: Any = Depends(require_pin("policy.change")),
                         db: AsyncSession = DB) -> dict[str, Any]:
     await _qr_channel(db, user.org_id, type_)
-    if body.direct_mode is None and body.listen_direct is None:
-        raise field_errors({"direct_mode": "Chọn một trong: off, silent, reply"})
-    mode = body.direct_mode or ("reply" if body.listen_direct else "off")
-    assert mode in DIRECT_MODES
-    before = direct_mode(await org_settings(db, user.org_id), type_)
-    await db.execute(text("""
-        UPDATE core.organizations SET settings = jsonb_set(
-          CASE WHEN jsonb_typeof(settings -> 'direct_mode') = 'object' THEN settings
-               ELSE settings || '{"direct_mode": {}}'::jsonb END,
-          ARRAY['direct_mode', :t], to_jsonb(CAST(:v AS text))) WHERE id = :o"""),
-        {"t": type_, "v": mode, "o": user.org_id})
+    if body.direct_mode is None and body.listen_direct is None and body.new_group_mode is None:
+        raise field_errors({"direct_mode": "Chọn một trong: off, silent, reply",
+                            "new_group_mode": "Hoặc chọn nhóm mới: ask, silent, off"})
+    if body.direct_mode is not None or body.listen_direct is not None:
+        mode = body.direct_mode or ("reply" if body.listen_direct else "off")
+        assert mode in DIRECT_MODES
+        before = direct_mode(await org_settings(db, user.org_id), type_)
+        await set_channel_setting(db, user.org_id, "direct_mode", type_, mode)
+        await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                               action="channel.listen_direct_changed", target_type="channel", target_id=type_,
+                               detail={"direct_mode": mode, "from": before, "listen_direct": mode != "off"},
+                               ip=user.ip)
+    if body.new_group_mode is not None:
+        await _save_new_group_mode(db, user, type_, body.new_group_mode)
     await sync_listen_sets(db, request.app.state.redis, user.org_id)
-    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
-                           action="channel.listen_direct_changed", target_type="channel", target_id=type_,
-                           detail={"direct_mode": mode, "from": before, "listen_direct": mode != "off"}, ip=user.ip)
     return await channel_card(db, request.app.state.redis, user.org_id, type_)
+
+
+async def _save_new_group_mode(db: AsyncSession, user: service.CurrentUser, type_: str, mode: str) -> None:
+    """Lưu `new_group_mode` của kênh (+ đánh dấu «Sếp đã chọn kể từ lần nối kênh này») và ghi Nhật ký hành động."""
+    assert mode in NEW_GROUP_MODES
+    before = new_group_mode(await org_settings(db, user.org_id), type_)
+    await set_channel_setting(db, user.org_id, "new_group_mode", type_, mode)
+    await set_channel_setting(db, user.org_id, "new_group_asked", type_, True)
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action="channel.new_group_mode_changed", target_type="channel", target_id=type_,
+                           detail={"new_group_mode": mode, "from": before}, ip=user.ip)
 
 
 def _group_out(r: Any) -> dict[str, Any]:
@@ -324,17 +360,30 @@ async def channel_groups_refresh(type_: str, request: Request, user: service.Cur
 
 class GroupModeIn(BaseModel):
     mode: Literal["off", "tagged_only", "silent", "proactive", "paused"]
+    # F1d — ô «Áp dụng cho các nhóm mới sau này» của hộp hỏi: chỉ với Im lặng / Không nghe, lưu `new_group_mode`
+    # của kênh cùng lúc. Đổi chính sách cho nhóm tương lai nên cần mã PIN như đổi ở thẻ kênh. None/False = chỉ nhóm này.
+    apply_to_new: bool = False
 
 
 @router.patch("/channels/{type_}/groups/{gid}/mode")
 async def channel_group_mode(type_: str, gid: uuid.UUID, body: GroupModeIn, request: Request,
                              user: service.CurrentUser = Depends(MANAGE), db: AsyncSession = DB) -> dict[str, Any]:
-    """v0.1.65: Sếp chọn chế độ cho một nhóm (hộp «Nhóm mới»). `pending` không phải lựa chọn."""
+    """v0.1.65: Sếp chọn chế độ cho một nhóm (hộp «Nhóm mới»). `pending` không phải lựa chọn. `apply_to_new` (F1d):
+    đồng thời đặt chế độ cho nhóm mới sau này (`silent`/`off`; 422 với chế độ khác, 423 PIN_REQUIRED khi chưa có PIN —
+    không đổi gì cả khi lỗi). Có chọn ở hộp hỏi (dù có tick hay không) ⇒ `new_group_asked` = true."""
     ok = (await db.execute(text("""SELECT 1 FROM core.groups g JOIN core.channels c ON c.id = g.channel_id
                                    WHERE g.id = :i AND c.type = :t AND c.org_id = :o"""),
                            {"i": gid, "t": type_, "o": user.org_id})).first()
     if ok is None:
         raise not_found("Nhóm")
+    if body.apply_to_new:
+        if body.mode not in ("silent", "off"):
+            raise field_errors({"apply_to_new": "Chỉ áp dụng cho nhóm mới được với Im lặng hoặc Không nghe"})
+        if not user.pin_active():
+            raise pin_required()
+        await _save_new_group_mode(db, user, type_, body.mode)
+    else:
+        await set_channel_setting(db, user.org_id, "new_group_asked", type_, True)
     return await update_group(db, request.app.state.redis, user, gid, GroupPatch(listen_mode=body.mode))
 
 

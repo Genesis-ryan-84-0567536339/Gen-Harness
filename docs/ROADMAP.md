@@ -101,7 +101,7 @@ Việc đã hứa hoặc đã biết mà chưa làm. Mỗi dòng ghi điều ki�
 | 45 | **Chuyển cả core vào hộp agy** (v0.1.62): Gen của Sếp vẫn chạy agy trong tiến trình api và đọc tin người ngoài khi đọc Hộp thư (rủi ro còn lại của "agy cho lớp core") | Chưa làm — khi hộp riêng ổn định |
 
 ### Câu hỏi mở — mặc định đã chọn (16/10/2026; Sếp sửa nếu muốn khác)
-- Tin riêng 1-1: lưu im lặng, không tự trả lời (làm cùng v0.1.65). Nhóm mới: Console hỏi khi kết nối kênh (Im lặng / Không nghe); chưa chọn = `pending` — không lưu tin, vẫn thu thành viên.
+- Tin riêng 1-1: lưu im lặng, không tự trả lời (làm cùng v0.1.65). Nhóm mới: Console hỏi khi kết nối kênh (Im lặng / Không nghe); chưa chọn = `pending` — không lưu tin, vẫn thu thành viên. Ô «Áp dụng cho các nhóm mới sau này» ở hộp hỏi + «Nhóm mới: Hỏi Sếp / Im lặng / Không nghe» ở thẻ kênh (`settings.new_group_mode.<kênh>`, mặc định `ask`, đổi cần PIN) — F1d.
 - Gen của nhân viên (không phải Owner): chưa dùng Antigravity tới khi có hộp riêng (v0.1.63), sau đó dùng qua hộp. Agent không gắn kênh/nhóm/người = nội bộ ⇒ agy trong tiến trình. Hộp tắt ⇒ chuyển nguồn AI kế, không quay về agy trong tiến trình.
 - Sàng lọc tin người lạ (`core.refinery`): đề xuất chuyển vào hộp riêng ở v0.1.63.
 - Nút "Nối lại" Zalo/WhatsApp: không đòi mã PIN; có bước hỏi lại khi phiên bị thay chỗ.

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { ApiError, type Channel, type ChannelGroup, type SettableListenMode } from '@gen-harness/contracts';
+import { ApiError, type Channel, type ChannelGroup, type NewGroupMode, type SettableListenMode } from '@gen-harness/contracts';
 import { Button, Icon } from '@gen-harness/ui';
 import { api } from '../../lib/api';
 import { qk2, usePendingGroups } from '../../lib/dataQueries';
@@ -9,7 +9,7 @@ import { fmtInt } from '../../lib/format';
 import { queryClient } from '../../lib/queryClient';
 import { toast } from '../../lib/toast';
 import { ErrorWithDetail } from '../../social/WriteProofDialog';
-import { BRIDGE_OFFLINE_TEXT, BRIDGE_OFFLINE_TITLE, isQrChannel } from './systemModel';
+import { BRIDGE_OFFLINE_TEXT, BRIDGE_OFFLINE_TITLE, NEW_GROUP_MODES, isQrChannel, newGroupModeOf } from './systemModel';
 
 /** Tối đa bấy nhiêu nhóm hiện thẳng trong thẻ; còn lại mở bảng nhóm đầy đủ. */
 const SHOW_MAX = 4;
@@ -29,15 +29,25 @@ export function NewGroupsBox({ channel, canManage, onOpenAll }: { channel: Chann
   const enabled = isQrChannel(channel) && channel.installed && channel.state === 'active' && (channel.groups_pending ?? 1) > 0;
   const pending = usePendingGroups(channel.type, enabled);
   const [failed, setFailed] = useState<unknown>(null);
+  // F1d — ô «Áp dụng cho các nhóm mới sau này»: chỉ hiện khi máy chủ có `new_group_mode`. Bật sẵn ở lần hỏi ĐẦU sau khi nối
+  // kênh (`new_group_asked` còn false); Sếp đã bấm tick/bỏ tick thì theo lựa chọn của Sếp.
+  const canApply = channel.new_group_mode !== undefined;
+  const [applyPick, setApplyPick] = useState<boolean | null>(null);
+  const apply = canApply && (applyPick ?? channel.new_group_asked !== true);
 
   const choose = useMutation({
-    mutationFn: async ({ ids, mode }: { ids: string[]; mode: SettableListenMode }) => {
-      for (const id of ids) await api.channels.setGroupMode(channel.type, id, mode);
+    mutationFn: async ({ ids, mode, applyToNew }: { ids: string[]; mode: SettableListenMode; applyToNew: boolean }) => {
+      for (const id of ids) await api.channels.setGroupMode(channel.type, id, mode, applyToNew);
       return ids.length;
     },
-    onMutate: () => setFailed(null),
+    onMutate: (v) => {
+      setFailed(null);
+      setApplyPick(v.applyToNew); // giữ nguyên lựa chọn cho các nhóm còn lại (máy chủ đánh dấu «đã hỏi» sau lượt đầu)
+    },
     onSuccess: (n, v) => {
-      toast(`${n === 1 ? 'Đã chọn' : `Đã chọn cho ${fmtInt(n)} nhóm`}: ${v.mode === 'silent' ? 'Im lặng — lưu tin, không tự trả lời' : 'Không nghe — không lưu tin'}`, 'neutral');
+      const what = v.mode === 'silent' ? 'Im lặng — lưu tin, không tự trả lời' : 'Không nghe — không lưu tin';
+      const later = v.applyToNew ? `. Nhóm mới sau này cũng vào ${v.mode === 'silent' ? 'Im lặng' : 'Không nghe'}` : '';
+      toast(`${n === 1 ? 'Đã chọn' : `Đã chọn cho ${fmtInt(n)} nhóm`}: ${what}${later}`, 'neutral');
     },
     onError: (e) => setFailed(e),
     onSettled: () => {
@@ -84,7 +94,7 @@ export function NewGroupsBox({ channel, canManage, onOpenAll }: { channel: Chann
                     icon={c.icon}
                     disabled={busy}
                     aria-label={`${c.label} — nhóm ${g.name}`}
-                    onClick={() => choose.mutate({ ids: [g.id], mode: c.mode })}
+                    onClick={() => choose.mutate({ ids: [g.id], mode: c.mode, applyToNew: apply })}
                   >
                     {c.label}
                   </Button>
@@ -94,6 +104,18 @@ export function NewGroupsBox({ channel, canManage, onOpenAll }: { channel: Chann
           </li>
         ))}
       </ul>
+      {canManage && canApply ? (
+        <label className="gh-check ch-newgroups__apply" data-testid={`newgroups-apply-${channel.type}`}>
+          <input type="checkbox" checked={apply} disabled={busy} onChange={(e) => setApplyPick(e.target.checked)} />
+          <span>
+            Áp dụng cho các nhóm mới sau này
+            <span className="ch-newgroups__count">
+              {' '}
+              — nhóm phát hiện sau sẽ tự vào đúng chế độ Sếp chọn bây giờ (Im lặng hoặc Không nghe), không hỏi lại. Cần mã PIN.
+            </span>
+          </span>
+        </label>
+      ) : null}
       {more > 0 || (canManage && rows.length > 1) ? (
         <div className="ch-newgroups__foot">
           {more > 0 ? (
@@ -111,7 +133,7 @@ export function NewGroupsBox({ channel, canManage, onOpenAll }: { channel: Chann
                   icon={c.icon}
                   disabled={busy}
                   loading={busy && choose.variables?.mode === c.mode && choose.variables.ids.length > 1}
-                  onClick={() => choose.mutate({ ids: rows.map((g) => g.id), mode: c.mode })}
+                  onClick={() => choose.mutate({ ids: rows.map((g) => g.id), mode: c.mode, applyToNew: apply })}
                 >
                   Tất cả {fmtInt(rows.length)} nhóm: {c.label}
                 </Button>
@@ -122,6 +144,57 @@ export function NewGroupsBox({ channel, canManage, onOpenAll }: { channel: Chann
       ) : null}
       {failed ? <ErrorWithDetail className="write-error" error={failed} /> : null}
     </section>
+  );
+}
+
+/**
+ * Ô chỉnh «Nhóm mới» trên thẻ kênh (F1d): Hỏi Sếp (mặc định) / Im lặng / Không nghe — áp cho nhóm phát hiện SAU này, không đổi
+ * nhóm đã có. Đổi cần mã PIN như đổi tin 1-1 (api client tự hỏi PIN rồi gửi lại). Máy chủ cũ không có `new_group_mode` ⇒ ẩn.
+ */
+export function NewGroupModeSelect({ channel, canManage }: { channel: Channel; canManage: boolean }) {
+  const mode = newGroupModeOf(channel);
+  const save = useMutation({
+    mutationFn: (v: NewGroupMode) => api.channels.update(channel.type, { new_group_mode: v }),
+    onSuccess: (next) => {
+      queryClient.setQueryData<Channel[]>(qk2.channels, (old) => old?.map((x) => (x.type === channel.type ? next : x)));
+      const m = newGroupModeOf(next);
+      toast(
+        m === 'silent'
+          ? `${channel.name}: nhóm mới tự vào Im lặng — lưu tin, không tự trả lời`
+          : m === 'off'
+            ? `${channel.name}: nhóm mới tự vào Không nghe — không lưu tin`
+            : `${channel.name}: nhóm mới chờ Sếp chọn`,
+        'neutral',
+      );
+    },
+    onError: (e) => {
+      void queryClient.invalidateQueries({ queryKey: qk2.channels });
+      toast(errorText(e), 'bad');
+    },
+  });
+  if (mode === undefined || !isQrChannel(channel) || !channel.installed) return null;
+  return (
+    <div className="ch-newmode" data-testid={`newmode-${channel.type}`}>
+      <span className="ch-direct__label">
+        Nhóm mới
+        <span className="ch-direct__hint" data-testid={`newmode-hint-${channel.type}`}>
+          {NEW_GROUP_MODES.find((d) => d.value === mode)?.hint} Chỉ áp cho nhóm phát hiện sau này. Đổi cần mã PIN.
+        </span>
+      </span>
+      <select
+        className="mini-select"
+        aria-label={`Nhóm mới trên ${channel.name}`}
+        value={mode}
+        disabled={!canManage || save.isPending}
+        onChange={(e) => save.mutate(e.target.value as NewGroupMode)}
+      >
+        {NEW_GROUP_MODES.map((d) => (
+          <option key={d.value} value={d.value}>
+            {d.label}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }
 

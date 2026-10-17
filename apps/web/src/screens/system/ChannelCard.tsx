@@ -15,7 +15,7 @@ import { Bar, CardError, InlineError, SkeletonLines } from '../common';
 import { ConnectionStatusPill } from '../connections/ConnectionStatusPill';
 import { useSystemHealth } from './queries';
 import { channelConnStatus } from '../connections/connectionsModel';
-import { NewGroupsBox, RefreshGroupsButton } from './NewGroupsBox';
+import { NewGroupModeSelect, NewGroupsBox, RefreshGroupsButton } from './NewGroupsBox';
 import {
   BRIDGE_OFFLINE_TEXT,
   BRIDGE_OFFLINE_TITLE,
@@ -254,6 +254,8 @@ export function ChannelCard({ channel, canManage, large }: { channel: Channel; c
       {!showQr && (c.state === 'expired' || c.state === 'error') && c.error ? (
         <ErrorWithDetail className="write-error ch-fail" text={channelErrorText(c.error, c.name, c.type, !!c.resumable)} detail={c.error} />
       ) : null}
+
+      {!showQr && isQrChannel(c) && c.installed && c.state === 'active' ? <NewGroupModeSelect channel={c} canManage={canManage} /> : null}
 
       {!showQr && canManage && isQrChannel(c) && c.installed && c.state === 'active' ? (
         <div className="ch-tools">

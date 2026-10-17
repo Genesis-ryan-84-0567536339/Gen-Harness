@@ -489,4 +489,6 @@
 .ch-newgroups__count { font-size: 10.5px; color: var(--color-neutral-500); }
 .ch-newgroups__btns { display: flex; gap: 6px; flex-wrap: wrap; }
 .ch-newgroups__foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.ch-newgroups__apply { padding-top: 2px; }
+.ch-newmode { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .ch-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 10.5px; color: var(--color-neutral-500); }

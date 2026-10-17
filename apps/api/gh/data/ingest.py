@@ -25,9 +25,9 @@ from gh.data.common import (
     CHANNEL_NAME,
     CHANNEL_PREFIX,
     LISTENING_MODES,
-    NEW_GROUP_MODE,
     direct_mode,
     fetch_raw,
+    initial_group_mode,
     iso,
     org_settings,
     raw_item,
@@ -107,15 +107,17 @@ async def upsert_group(db: AsyncSession, org_id: uuid.UUID, channel: Any, extern
     if row is None:
         # v0.1.65: nhóm mới vào trạng thái CHỜ (`pending`) — chưa lưu tin nào cho tới khi Sếp chọn "Im lặng" hay
         # "Không nghe" (Console hỏi ngay khi có nhóm mới); danh sách thành viên vẫn được thu (Q5=2).
+        # F1d: "Nhóm mới" theo thiết lập của kênh (`new_group_mode`): ask ⇒ pending; silent/off ⇒ vào thẳng chế độ đó.
+        mode = initial_group_mode(await org_settings(db, org_id), channel.type)
         code = (await db.execute(text("SELECT core.next_code(:p)"),
                                  {"p": f"GRP-{CHANNEL_PREFIX.get(channel.type, 'XX')}"})).scalar_one()
         row = (await db.execute(text("""
             INSERT INTO core.groups (org_id, code, channel_id, external_id, name, listen_mode, member_count)
-            VALUES (:o, :code, :c, :x, :n, :pending, :m)
+            VALUES (:o, :code, :c, :x, :n, :mode, :m)
             ON CONFLICT (channel_id, external_id) DO UPDATE SET name = core.groups.name
             RETURNING id, code, name, listen_mode"""),
             {"o": org_id, "code": code, "c": channel.id, "x": external_id, "n": name or external_id,
-             "m": member_count, "pending": NEW_GROUP_MODE})).one()
+             "m": member_count, "mode": mode})).one()
     elif (name and name != row.name) or member_count is not None:
         await db.execute(text("""UPDATE core.groups SET name = COALESCE(:n, name),
                                  member_count = COALESCE(:m, member_count) WHERE id = :i"""),
@@ -542,7 +544,8 @@ async def handle_directory(db: AsyncSession, redis: Redis, org_id: uuid.UUID, p:
 
 async def handle_group_discovered(db: AsyncSession, redis: Redis, org_id: uuid.UUID, p: dict[str, Any]) -> Any:
     """`group.discovered{group_id, name, member_count}`: bridge vừa thấy tin từ một nhóm chưa có trong danh bạ.
-    Tạo nhóm ở trạng thái `pending` (không lưu tin) để Console hỏi Sếp; nhóm đã có thì không đổi chế độ.
+    Tạo nhóm ở trạng thái `pending` (không lưu tin) để Console hỏi Sếp — hoặc vào thẳng `silent`/`off` nếu Sếp đã
+    đặt `new_group_mode` của kênh (F1d); nhóm đã có thì không đổi chế độ.
     Trả `(nhóm, mới?)` hoặc None nếu kênh/nhóm không hợp lệ."""
     channel = await channel_row(db, org_id, str(p.get("channel", "")))
     gid = str(p.get("group_id") or "")
@@ -596,7 +599,7 @@ class Ingest:
             async with self.sm() as db:
                 found = await handle_group_discovered(db, self.redis, self.org_id, event.payload)
                 await db.commit()
-            if found is not None and found[1]:   # nhóm MỚI ⇒ báo Console mở hộp "Nhóm mới — chọn Im lặng/Không nghe"
+            if found is not None and found[1]:   # nhóm MỚI ⇒ báo Console (nhóm `pending` mở hộp "Nhóm mới — chọn …")
                 row = found[0]
                 await realtime.publish(self.redis, "group.discovered",
                                        {"id": str(row.id), "code": row.code, "name": row.name,

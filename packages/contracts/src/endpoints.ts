@@ -47,6 +47,7 @@ import type {
   CliProfile,
   CliKind,
   DirectMode,
+  NewGroupMode,
   Credential,
   CursorPage,
   FirstRun,
@@ -229,7 +230,7 @@ export function createEndpoints(client: ApiClient) {
       /** v0.1.62 (F046): nối lại bằng phiên đã lưu, không quét QR. `system.manage`, không đòi PIN. 503 BRIDGE_OFFLINE khi bridge tắt. */
       resume: (type: string) => r<{ session_id: string }>(`/channels/${enc(type)}/resume`, { method: 'POST' }),
       /** 🔒 PIN `policy.change`. */
-      update: (type: string, body: { listen_direct?: boolean; direct_mode?: DirectMode }) =>
+      update: (type: string, body: { listen_direct?: boolean; direct_mode?: DirectMode; new_group_mode?: NewGroupMode }) =>
         r<Channel>(`/channels/${enc(type)}`, { method: 'PATCH', body }),
       groups: (type: string, signal?: AbortSignal) => r<ChannelGroup[]>(`/channels/${enc(type)}/groups`, { signal }),
       /** v0.1.65: chỉ nhóm mới đang CHỜ chọn (`listen_mode = pending`). */
@@ -238,9 +239,12 @@ export function createEndpoints(client: ApiClient) {
       /** v0.1.65: "Cập nhật danh sách nhóm" — bảo bridge quét lại ngay. `system.manage`, không đòi PIN. 503 BRIDGE_OFFLINE khi bridge tắt, 409 khi kênh chưa đăng nhập, 429 khi vừa làm mới. */
       refreshGroups: (type: string) =>
         r<{ session_id: string; requested: boolean }>(`/channels/${enc(type)}/groups/refresh`, { method: 'POST' }),
-      /** v0.1.65: chọn chế độ cho MỘT nhóm (dùng cho hộp "Nhóm mới"). `system.manage`. */
-      setGroupMode: (type: string, id: string, mode: SettableListenMode) =>
-        r<ChannelGroup>(`/channels/${enc(type)}/groups/${enc(id)}/mode`, { method: 'PATCH', body: { mode } }),
+      /** v0.1.65: chọn chế độ cho MỘT nhóm (dùng cho hộp "Nhóm mới"). `system.manage`. `applyToNew` (F1d, chỉ `silent`/`off`): đồng thời đặt chế độ cho nhóm mới sau này — 🔒 PIN, 423 PIN_REQUIRED khi chưa có. */
+      setGroupMode: (type: string, id: string, mode: SettableListenMode, applyToNew?: boolean) =>
+        r<ChannelGroup>(`/channels/${enc(type)}/groups/${enc(id)}/mode`, {
+          method: 'PATCH',
+          body: applyToNew ? { mode, apply_to_new: true } : { mode },
+        }),
     },
     groups: {
       update: (id: string, body: { listen_mode?: ListenMode; view_scope?: ViewScope; kind?: GroupKind | string }) =>
