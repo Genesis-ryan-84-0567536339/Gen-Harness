@@ -82,7 +82,7 @@ const PERMISSIONS_PAGE: PermissionsPage = {
 };
 
 const BOUNDARIES: Boundary[] = [
-  { code: 'listen_authorized_only', label: 'Chỉ lắng nghe nhóm Owner đã bật', enabled: true, locked: true, params: {} },
+  { code: 'listen_authorized_only', label: 'Chỉ lưu tin của nhóm Sếp đã chọn nghe', enabled: true, locked: true, params: {} },
   { code: 'auto_personnel_decisions', label: 'Hệ thống tự ra quyết định nhân sự', enabled: false, locked: true, params: {} },
   { code: 'approval_gate', label: 'Gửi ra ngoài / vượt ngưỡng tiền / liên quan nhân sự luôn chờ duyệt', enabled: true, locked: true, params: { approval_threshold_vnd: 50_000_000 } },
   { code: 'observe_external_market', label: 'Quan sát nhóm thị trường bên ngoài', enabled: true, locked: false, params: {} },
@@ -161,10 +161,10 @@ describe('Điều khiển hệ thống › Quyền hạn', () => {
     });
     renderScreen(<SystemScreen />, FULL_PERMS, 'roles');
     await screen.findByText('Ranh giới có trách nhiệm');
-    await screen.findByText('Chỉ lắng nghe nhóm Owner đã bật');
+    await screen.findByText('Chỉ lưu tin của nhóm Sếp đã chọn nghe');
     // 2 khoá cứng không có dòng ops.policy_boundaries (STATIC_HARD_BOUNDARIES) — hiện tĩnh, "Không có công tắc".
     expect(screen.getAllByText('Không có công tắc')).toHaveLength(2);
-    const lockedRow = screen.getByText('Chỉ lắng nghe nhóm Owner đã bật').closest('.boundary-row') as HTMLElement;
+    const lockedRow = screen.getByText('Chỉ lưu tin của nhóm Sếp đã chọn nghe').closest('.boundary-row') as HTMLElement;
     expect(within(lockedRow).getByRole('switch')).toHaveAttribute('aria-disabled', 'true');
   });
 });

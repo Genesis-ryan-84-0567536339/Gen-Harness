@@ -141,6 +141,9 @@ describe('Nhóm & Con người', () => {
     const row = (await screen.findByText('Trịnh Mỹ Duyên')).closest('tr')!;
     await user.click(within(row).getByRole('button', { name: 'Đổi' }));
     const dlg = await screen.findByRole('dialog', { name: 'Thiết lập BOT + tự trị' });
+    // v0.1.65 (B8, F080): gán BOT cho một người có tác dụng thật với tin nhắn riêng của người đó — hộp nói rõ điều này.
+    expect(within(dlg).getByTestId('person-bot-hint')).toHaveTextContent(/phụ trách tin nhắn riêng \(1-1\) của người này/);
+    expect(within(dlg).getByTestId('person-bot-hint')).toHaveTextContent(/kể cả khi kênh đang ở chế độ “Lưu im lặng”/);
     await user.click(within(dlg).getByText('Key Account junior'));
     await user.click(within(dlg).getByRole('button', { name: 'Lưu' }));
 

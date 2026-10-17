@@ -1,5 +1,6 @@
 /** Pure logic for setup steps 4–7 and 12 (unit-tested). */
-import type { ChannelGroup, CliKind, FirstRun, ListenMode, Provider, ProviderTestResult, RefineryProgress, SetupState, ViewScope } from '@gen-harness/contracts';
+import { isListeningMode } from '../screens/system/systemModel';
+import type { ChannelGroup, CliKind, FirstRun, ListenMode, Provider, ProviderTestResult, RefineryProgress, SetupState, SettableListenMode, ViewScope } from '@gen-harness/contracts';
 
 /**
  * Bước 4: a provider can go into the chain when it tested OK here, is already healthy, or is a CLI with an active
@@ -23,8 +24,14 @@ export function applyGroupDraft(groups: ChannelGroup[], draft: GroupDraft): Chan
   return groups.map((g) => (draft[g.id] ? { ...g, ...draft[g.id] } : g));
 }
 
-/** Bước 6 completes when at least one group listens (≠ off). */
-export const anyListening = (groups: Array<Pick<ChannelGroup, 'listen_mode'>>) => groups.some((g) => g.listen_mode !== 'off');
+/** Bước 6 completes when at least one group listens — tagged_only / silent / proactive (F066: không tính `off`, `paused`, `pending`). */
+export const anyListening = (groups: Array<Pick<ChannelGroup, 'listen_mode'>>) => groups.some((g) => isListeningMode(g.listen_mode));
+
+/** Nhóm gửi lên bước 6: bỏ nhóm còn CHỜ chọn (`pending` — máy chủ không nhận, và Sếp chưa quyết gì cho nhóm đó). */
+export const step6Payload = (groups: ChannelGroup[]) =>
+  groups
+    .filter((g) => g.listen_mode !== 'pending')
+    .map((g) => ({ id: g.id, listen_mode: g.listen_mode as SettableListenMode, view_scope: g.view_scope }));
 
 // ── Bước 7 ────────────────────────────────────────────────────────────────
 export const INTERVAL_OPTIONS = [5, 15, 30, 60];

@@ -498,6 +498,10 @@ function PersonBotDialog({ person, onClose }: { person: DirPerson; onClose: () =
       }
     >
       <div className="dlg-fields">
+        <p className="risk-box__text" data-testid="person-bot-hint">
+          BOT được gán sẽ phụ trách tin nhắn riêng (1-1) của người này: trợ lý được kích hoạt để soạn trả lời (vẫn qua duyệt theo mức tự trị),
+          kể cả khi kênh đang ở chế độ “Lưu im lặng”. Muốn trợ lý thôi phụ trách, chọn “Chưa gán”.
+        </p>
         <AgentChoices value={agentId} onChange={setAgentId} current={person.bot} />
         <AutonomySelect current={person.autonomy_level} value={picked} onChange={setPicked} />
         {setBot.isError ? <InlineError detail={errorDetail(setBot.error)}>{errorText(setBot.error)}</InlineError> : null}

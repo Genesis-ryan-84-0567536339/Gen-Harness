@@ -11,10 +11,12 @@ import type {
   CliLoginStatus,
   CliProfile,
   Credential,
+  DirectMode,
   GroupKind,
   ListenMode,
   PermScope,
   RetentionPolicy,
+  SettableListenMode,
   ViewScope,
 } from '@gen-harness/contracts';
 import { ALL_ONLY_PERMS, ApiError, PinCancelledError } from '@gen-harness/contracts';
@@ -268,13 +270,33 @@ export function channelErrorText(code: string, name: string, type?: Channel['typ
 }
 
 // ── groups ────────────────────────────────────────────────────────────────
-export const LISTEN_MODES: Array<{ value: ListenMode; label: string }> = [
+/** Chế độ Sếp được CHỌN cho một nhóm (khớp `SETTABLE_LISTEN_MODES` ở api/gh/data/common.py). */
+export const LISTEN_MODES: Array<{ value: SettableListenMode; label: string }> = [
   { value: 'off', label: 'Không nghe' },
-  { value: 'tagged_only', label: 'Chỉ khi được tag' },
+  // v0.1.65 (Q6=1, F065): chế độ này VẪN lưu mọi tin của nhóm — chỉ việc TRẢ LỜI mới cần được tag.
+  { value: 'tagged_only', label: 'Nghe hết, chỉ trả lời khi được tag' },
   { value: 'silent', label: 'Lắng nghe im lặng' },
   { value: 'proactive', label: 'Chủ động bắt tín hiệu' },
   { value: 'paused', label: 'Tạm dừng' },
 ];
+/** Nhãn của nhóm mới đang chờ Sếp chọn (`pending`) — không phải lựa chọn, chỉ để hiển thị. */
+export const PENDING_MODE_LABEL = 'Chờ Sếp chọn';
+
+/**
+ * Các chế độ ĐANG nghe (lưu tin vào Kho thô) — khớp `LISTENING_MODES` ở api/gh/data/common.py. Một nguồn cho web: `off`,
+ * `paused` và `pending` KHÔNG nghe (F066: trước đây mỗi nơi đếm một kiểu).
+ */
+export const LISTENING_MODE_VALUES: readonly ListenMode[] = ['tagged_only', 'silent', 'proactive'];
+export const isListeningMode = (m: ListenMode): boolean => LISTENING_MODE_VALUES.includes(m);
+
+/** Tin riêng 1-1 theo kênh (v0.1.65): mặc định lưu im lặng. */
+export const DIRECT_MODES: Array<{ value: DirectMode; label: string; hint: string }> = [
+  { value: 'silent', label: 'Lưu im lặng', hint: 'Lưu tin riêng vào Kho thô, không tự trả lời, không đưa cho trợ lý trực. Mặc định.' },
+  { value: 'reply', label: 'Lưu và cho trợ lý trả lời', hint: 'Trợ lý trực được phép soạn trả lời tin riêng (vẫn qua duyệt theo mức tự trị).' },
+  { value: 'off', label: 'Không lưu', hint: 'Bỏ hẳn tin riêng gửi tới tài khoản.' },
+];
+export const directModeOf = (c: Pick<Channel, 'direct_mode' | 'listen_direct'>): DirectMode =>
+  c.direct_mode ?? (c.listen_direct === false ? 'off' : 'silent');
 
 export const VIEW_SCOPES: Array<{ value: ViewScope; label: string }> = [
   { value: 'owner', label: 'Chỉ Sếp' },

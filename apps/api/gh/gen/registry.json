@@ -923,14 +923,14 @@
     {
       "n": 6,
       "title": "Chọn nhóm cho agent lắng nghe",
-      "why": "Mọi nhóm mới đều ở chế độ Không nghe để bảo vệ riêng tư — Sếp chọn nhóm nào agent được nghe.",
+      "why": "Mọi nhóm mới đều “Chờ Sếp chọn” (chưa lưu tin nào) để bảo vệ riêng tư — Sếp chọn nhóm nào agent được nghe.",
       "steps": [
         "Bấm \"Làm bước này\".",
-        "Trong bảng nhóm, ở cột \"Chế độ lắng nghe\" của nhóm muốn theo dõi, chọn một chế độ: \"Chỉ khi được tag\" (an toàn nhất), \"Lắng nghe im lặng\" (ghi nhận, không trả lời) hoặc \"Chủ động bắt tín hiệu\".",
+        "Trong bảng nhóm, ở cột \"Chế độ lắng nghe\" của nhóm muốn theo dõi, chọn một chế độ: \"Nghe hết, chỉ trả lời khi được tag\" (an toàn nhất: vẫn lưu mọi tin của nhóm, chỉ trả lời khi được gọi tên), \"Lắng nghe im lặng\" (ghi nhận, không trả lời) hoặc \"Chủ động bắt tín hiệu\". Thiếu nhóm vừa vào? Bấm \"Cập nhật danh sách nhóm\".",
         "Ở cột \"Phạm vi xem\", chọn ai được xem dữ liệu nhóm đó (mặc định \"Chỉ Sếp\").",
         "Bấm \"Tiếp tục\"."
       ],
-      "done_when": "Có ít nhất một nhóm không còn ở chế độ Không nghe.",
+      "done_when": "Có ít nhất một nhóm đã được bật nghe (không còn ở “Chờ Sếp chọn”, “Không nghe” hay “Tạm dừng”).",
       "console": {
         "label": "Khách & Cơ hội › Khách & Nhóm",
         "to": "/directory"
