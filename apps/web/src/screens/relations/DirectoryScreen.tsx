@@ -279,6 +279,12 @@ function GroupBotDialog({ group, onClose }: { group: DirGroup; onClose: () => vo
       }
     >
       <AgentChoices value={agentId} onChange={setAgentId} current={group.bot} />
+      {group.listen_mode === 'silent' && agentId ? (
+        <p className="risk-box__text" role="note" data-testid="group-bot-silent-warning">
+          <b>BOT sẽ không trả lời trong nhóm Lắng nghe im lặng</b> — nhóm này chỉ được lưu và sàng lọc tin, không đưa cho agent trực, kể cả khi
+          được tag. Muốn BOT trả lời khi được tag, đặt nhóm sang «Nghe hết, chỉ trả lời khi được tag».
+        </p>
+      ) : null}
       {setBot.isError ? <InlineError detail={errorDetail(setBot.error)}>{errorText(setBot.error)}</InlineError> : null}
     </Dialog>
   );

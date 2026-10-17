@@ -361,6 +361,48 @@ describe('Nhóm & Con người › Gán BOT trực nhóm', () => {
     expect(call.body).toEqual({ agent_id: AGENT_IDS.hc });
   });
 
+  it('nhóm «Lắng nghe im lặng» (review v0.1.65): chọn BOT thì cảnh báo BOT sẽ không trả lời; bỏ chọn / nhóm khác thì không cảnh báo', async () => {
+    const me = meWith(DIR_WRITER);
+    const silentGroups: DirCursorPage<DirGroup> = { ...GROUPS, items: [{ ...GROUPS.items[0]!, listen_mode: 'silent' }] };
+    mockFetch((c) => {
+      if (c.url.includes('/auth/me')) return json(200, me);
+      if (c.url.includes('/pickers/agents')) return json(200, AGENTS);
+      if (c.url.includes('/directory/channels')) return json(200, CHANNELS);
+      if (c.url.includes('/directory/groups')) return json(200, silentGroups);
+      return json(404);
+    });
+    const user = userEvent.setup();
+    renderScreen(<DirectoryScreen />);
+    const row = (await screen.findByText('GRP-ZL-0114')).closest('tr') as HTMLElement;
+    await user.click(within(row).getByRole('button', { name: /Đổi|Gán/ }));
+    const dlg = await screen.findByRole('dialog', { name: 'Gán BOT trực nhóm' });
+    const warn = await within(dlg).findByTestId('group-bot-silent-warning');
+    expect(warn).toHaveTextContent('BOT sẽ không trả lời trong nhóm Lắng nghe im lặng');
+    expect(warn).toHaveTextContent('Nghe hết, chỉ trả lời khi được tag');
+    await user.click(within(dlg).getByText('Chưa gán'));
+    expect(within(dlg).queryByTestId('group-bot-silent-warning')).toBeNull();
+    await user.click(within(dlg).getByText('Admin hậu cần'));
+    expect(within(dlg).getByTestId('group-bot-silent-warning')).toBeInTheDocument();
+  });
+
+  it('nhóm «Nghe hết, chỉ trả lời khi được tag»: không cảnh báo', async () => {
+    const me = meWith(DIR_WRITER);
+    mockFetch((c) => {
+      if (c.url.includes('/auth/me')) return json(200, me);
+      if (c.url.includes('/pickers/agents')) return json(200, AGENTS);
+      if (c.url.includes('/directory/channels')) return json(200, CHANNELS);
+      if (c.url.includes('/directory/groups')) return json(200, GROUPS);
+      return json(404);
+    });
+    const user = userEvent.setup();
+    renderScreen(<DirectoryScreen />);
+    const row = (await screen.findByText('GRP-ZL-0114')).closest('tr') as HTMLElement;
+    await user.click(within(row).getByRole('button', { name: /Đổi|Gán/ }));
+    const dlg = await screen.findByRole('dialog', { name: 'Gán BOT trực nhóm' });
+    await within(dlg).findByText('Key Account junior (đã tắt)');
+    expect(within(dlg).queryByTestId('group-bot-silent-warning')).toBeNull();
+  });
+
   it.each([
     ['có system.manage → chỉ đường Agent & Model › Danh tính Agent', { 'profile.write': 'all', 'system.manage': 'all' }, EMPTY_AGENTS_TEXT],
     ['không system.manage → nhờ Owner tạo', { 'profile.write': 'team' }, EMPTY_AGENTS_TEXT_ASK],
