@@ -147,7 +147,8 @@ class AgyBoxClient:
         except httpx.HTTPError as e:
             raise BoxUnavailable("Hộp riêng Antigravity chưa chạy") from e
         sig = r.headers.get(P.SIG_HEADER)
-        signed_ok = sig is not None and sig == P.response_signature(key, req_sig, r.status_code, r.content)
+        signed_ok = sig is not None and P.signature_equal(P.response_signature(key, req_sig, r.status_code, r.content),
+                                                          sig)
         if r.status_code == 200:
             if not signed_ok:
                 raise ProviderError("Trả lời của hộp riêng Antigravity sai chữ ký — bỏ qua")
