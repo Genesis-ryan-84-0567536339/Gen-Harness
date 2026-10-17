@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import text
 
 from gh.db import sessionmaker
-from tests.conftest import Api
+from tests.conftest import Api, verify_pin
 from tests.phase2 import listen, msg, org_id, put
 from tests.test_rbac_api import add_user, login_as
 
@@ -183,6 +183,7 @@ async def test_group_bot_foreign_agent_404_real_agent_200(world, owner_api: Api,
 
 
 async def test_person_bot_foreign_agent_404(world, owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    await verify_pin(owner_api)   # review v0.1.65 P2-3: gán BOT cho người cần Owner + PIN policy.change
     r = await owner_api.send("POST", f"/directory/people/{world['person']}/bot", {"agent_id": str(uuid.uuid4())})
     assert r.status_code == 404 and r.json()["code"] == "NOT_FOUND", r.text
     r = await owner_api.send("POST", f"/directory/people/{world['person']}/bot", {"agent_id": str(world["agent"])})

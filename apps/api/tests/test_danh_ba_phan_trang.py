@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlalchemy import text
 
-from tests.conftest import Api
+from tests.conftest import Api, verify_pin
 from tests.phase2 import org_id
 from tests.test_rbac_api import login_as
 
@@ -179,6 +179,7 @@ async def test_people_search_cannot_probe_masked_digits_for_non_owner(owner_api:
 # ═══ Thao tác BOT hàng loạt theo bộ lọc ═════════════════════════════════════
 
 async def test_bulk_bot_applies_to_every_match_not_only_first_page(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    await verify_pin(owner_api)   # review v0.1.65 P2-3: gán BOT cho người cần Owner + PIN policy.change
     org = await org_id(db)
     zalo = await _channel(db, org, "zalo")
     ids = await _persons(db, org, 130, prefix="Khách", channel=zalo)
@@ -213,6 +214,7 @@ async def test_bulk_bot_applies_to_every_match_not_only_first_page(owner_api: Ap
 
 
 async def test_bulk_bot_guards(owner_api: Api, db, client) -> None:  # type: ignore[no-untyped-def]
+    await verify_pin(owner_api)
     org = await org_id(db)
     ids = await _persons(db, org, 4)
     agent = await _agent(db, org)
@@ -233,15 +235,16 @@ async def test_bulk_bot_guards(owner_api: Api, db, client) -> None:  # type: ign
     auditor = await login_as(client, db, "auditor")
     r = await auditor.send("POST", "/directory/people/bulk-bot", {"filter": {}, "agent_id": str(agent)})
     assert r.status_code == 403, r.text
-    # vai bị giới hạn phạm vi chỉ đổi được người trong phạm vi của mình
+    # review v0.1.65 P2-3: vai dưới Owner (kể cả nhân viên có người được giao) không gán BOT cho người, dù có PIN
     staff = await login_as(client, db, "agent_staff")
     await db.execute(text("""INSERT INTO core.assignments (org_id, user_id, subject_type, subject_id)
                              SELECT org_id, id, 'person', :s FROM core.users WHERE email = 'agent_staff@example.vn'"""),
                      {"s": ids[0]})
     await db.commit()
+    await verify_pin(staff, "112233")
     r = await staff.send("POST", "/directory/people/bulk-bot", {"filter": {}, "agent_id": str(agent)})
-    assert r.status_code == 200 and r.json()["updated"] == 1, r.text
-    assert (await db.execute(text("SELECT count(*) FROM core.persons WHERE attrs ? 'agent_id'"))).scalar_one() == 1
+    assert r.status_code == 403, r.text
+    assert (await db.execute(text("SELECT count(*) FROM core.persons WHERE attrs ? 'agent_id'"))).scalar_one() == 0
 
 
 # ═══ Hồ sơ đã gộp ═══════════════════════════════════════════════════════════

@@ -11,7 +11,7 @@ from sqlalchemy import text
 from gh.biz.duty.context import candidates, reach
 from gh.biz.relations import service as rsvc
 from gh.db import sessionmaker
-from tests.conftest import Api
+from tests.conftest import Api, verify_pin
 from tests.phase2 import msg, put
 from tests.test_p3_duty import BUY, agent_drafts, decide, decisions, hook, make_agent, refine, w  # noqa: F401
 
@@ -103,6 +103,7 @@ async def test_reach_includes_assigned_persons_direct_units(w, db, redis) -> Non
 
 async def test_person_bot_api_assignment_is_what_the_duty_agent_reads(w, db, redis) -> None:  # type: ignore[no-untyped-def]
     api: Api = w["api"]
+    await verify_pin(api)   # review v0.1.65 P2-3: gán BOT cho người cần Owner + PIN policy.change
     lan = await make_agent(db, w, [], name="Trợ lý Lan")
     [ua] = await refine(w, redis, msg(BUY, group=None, sender="khachA", name="Khách A"))
     pa = await person_of(db, "khachA")

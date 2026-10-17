@@ -23,7 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.auth import rbac, service
-from gh.auth.deps import require
+from gh.auth.deps import require, require_owner, require_pin
 from gh.biz.core import explain
 from gh.biz.core.scope import (
     Scope,
@@ -295,11 +295,14 @@ class BulkBotIn(BaseModel):
 
 
 @router.post("/directory/people/bulk-bot")
-async def set_people_bot_bulk(body: BulkBotIn, user: service.CurrentUser = Depends(WRITE),
+async def set_people_bot_bulk(body: BulkBotIn, user: service.CurrentUser = Depends(require_owner),
+                              _pin: Any = Depends(require_pin("policy.change")),
                               db: AsyncSession = DB) -> dict[str, Any]:
     """Gán BOT / mức tự trị cho MỌI người khớp bộ lọc (trong phạm vi ghi của người gọi) — một câu lệnh, một giao
-    dịch (đủ hoặc không gì cả). `expected_total` là số giao diện đã hiện cho Sếp: lệch (có người mới vào/ra khỏi bộ
-    lọc) ⇒ 409, không đổi gì — Sếp thấy số mới rồi quyết lại."""
+    dịch (đủ hoặc không gì cả). Chỉ Owner + mã PIN `policy.change` (review v0.1.65 P2-3): gán BOT cho một người làm
+    tin 1-1 của họ đi thẳng tới BOT dù kênh để im lặng — là đổi mức tự trị, không phải sửa hồ sơ thường.
+    `expected_total` là số giao diện đã hiện cho Sếp: lệch (có người mới vào/ra khỏi bộ lọc) ⇒ 409, không đổi gì —
+    Sếp thấy số mới rồi quyết lại."""
     fields = body.model_fields_set
     set_agent, set_autonomy = "agent_id" in fields, "autonomy_level" in fields
     if not set_agent and not set_autonomy:
@@ -354,8 +357,11 @@ class PersonBotIn(BaseModel):
 
 
 @router.post("/directory/people/{person_id}/bot")
-async def set_person_bot(person_id: uuid.UUID, body: PersonBotIn, user: service.CurrentUser = Depends(WRITE),
+async def set_person_bot(person_id: uuid.UUID, body: PersonBotIn, user: service.CurrentUser = Depends(require_owner),
+                         _pin: Any = Depends(require_pin("policy.change")),
                          db: AsyncSession = DB) -> dict[str, Any]:
+    """Gán/bỏ BOT hoặc đổi mức tự trị cho MỘT người — chỉ Owner + mã PIN `policy.change` (review v0.1.65 P2-3), cùng
+    lý do với bulk-bot: gán BOT bỏ qua chế độ im lặng của tin 1-1."""
     sc = await scope_for(db, user, "profile.write")
     await ensure_person(db, sc, person_id)
     await rsvc.set_person_bot(db, person_id, agent_id=body.agent_id, set_agent="agent_id" in body.model_fields_set,
