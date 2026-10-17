@@ -55,6 +55,15 @@ test('publish: envelope chuẩn + MAXLEN ~', async () => {
   assert.deepEqual(opts, { TRIM: { strategy: 'MAXLEN', strategyModifier: '~', threshold: 500 } });
 });
 
+test('newGroupMode: đọc cờ gh:bridge:new_group_mode:<kênh>; chưa có khoá ⇒ null (lõi cũ chưa ghi cờ)', async () => {
+  const redis = fakeRedis();
+  const bus = new RedisBus({ redis });
+  assert.equal(await bus.newGroupMode('zalo'), null);
+  redis.kv.set('gh:bridge:new_group_mode:zalo', 'ask');
+  assert.equal(await bus.newGroupMode('zalo'), 'ask');
+  assert.equal(await bus.newGroupMode('whatsapp'), null);
+});
+
 test('tập nghe, listen_direct, nonce NX EX 600, khoá heartbeat TTL 45', async () => {
   const redis = fakeRedis();
   const bus = new RedisBus({ redis });

@@ -95,13 +95,40 @@ describe('hằng «Nhóm mới»', () => {
   });
 });
 
-describe('hộp hỏi chỉ hiện khi Sếp chọn «Hỏi Sếp» (QD 17/10)', () => {
-  it('mặc định silent (hoặc off) mà còn nhóm pending cũ: KHÔNG hiện hộp và không gọi máy chủ lấy nhóm chờ', async () => {
-    const calls = mockFetch((c) => (c.url.includes('pending=1') ? json(200, PENDING) : fallback(c, { new_group_mode: 'silent' })));
-    renderCard(zalo({ new_group_mode: 'silent' }));
+describe('hộp hỏi hiện khi còn nhóm chờ chọn (QD 17/10 + review v0.1.65)', () => {
+  it('đổi «Nhóm mới» sang silent/off khi còn nhóm pending: VẪN hiện hộp cho tới khi hết nhóm chờ (không để nhóm kẹt pending, không lưu tin)', async () => {
+    for (const mode of ['silent', 'off'] as const) {
+      queryClient.clear();
+      const calls = mockFetch((c) => (c.url.includes('pending=1') ? json(200, PENDING) : fallback(c, { new_group_mode: mode })));
+      const view = renderCard(zalo({ new_group_mode: mode }));
+      const box = await screen.findByTestId('newgroups-zalo');
+      expect(box).toHaveTextContent('Nhóm mới — chọn Lắng nghe im lặng hay Không nghe (2)');
+      expect(calls.some((c) => c.url.includes('pending=1'))).toBe(true);
+      view.unmount();
+    }
+  });
+
+  it('mặc định silent và KHÔNG còn nhóm pending: không hiện hộp và không gọi máy chủ lấy nhóm chờ', async () => {
+    const calls = mockFetch((c) => (c.url.includes('pending=1') ? json(200, PENDING) : fallback(c, { new_group_mode: 'silent', groups_pending: 0 })));
+    renderCard(zalo({ new_group_mode: 'silent', groups_pending: 0 }));
     await screen.findByLabelText('Nhóm mới trên Zalo');
     expect(screen.queryByTestId('newgroups-zalo')).not.toBeInTheDocument();
     expect(calls.some((c) => c.url.includes('pending=1'))).toBe(false);
+  });
+
+  it('máy chủ cũ (không có groups_pending, không có new_group_mode): hộp hiện như trước; có new_group_mode ≠ ask mà không có groups_pending: không hiện', async () => {
+    mockFetch((c) => (c.url.includes('pending=1') ? json(200, PENDING) : fallback(c)));
+    const { groups_pending: _drop, ...legacy } = zalo({ new_group_mode: undefined });
+    void _drop;
+    const v = renderCard(legacy as Channel);
+    await screen.findByTestId('newgroups-zalo');
+    v.unmount();
+    queryClient.clear();
+    const { groups_pending: _drop2, ...silentNoCount } = zalo({ new_group_mode: 'silent' });
+    void _drop2;
+    renderCard(silentNoCount as Channel);
+    await screen.findByLabelText('Nhóm mới trên Zalo');
+    expect(screen.queryByTestId('newgroups-zalo')).not.toBeInTheDocument();
   });
 
   it('chọn «Hỏi Sếp» ⇒ hộp hiện như cũ, nút ghi «Lắng nghe im lặng»', async () => {
