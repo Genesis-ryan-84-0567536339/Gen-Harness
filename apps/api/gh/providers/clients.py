@@ -553,7 +553,10 @@ def sync_token_back(cli_home: str, injected: bytes, new: bytes, *, locked: bool 
     """Chép tệp token agy đã làm mới trong HOME tạm (`new`) về kho phiên — CHỈ khi: khác bản đã đưa vào, đúng khuôn
     (`valid_token_json`), cùng email với bản đã đưa vào (nếu cả hai có id_token), và tệp trong kho VẪN là đúng bản
     đã đưa vào (so-và-đổi: Sếp đổi tài khoản / lượt khác đã ghi giữa chừng thì không đè). Giữ flock độc quyền
-    (`locked=True` khi bên gọi đang giữ sẵn). Trả True nếu đã ghi. Không bao giờ chép tệp nào khác từ HOME tạm."""
+    (`locked=True` khi bên gọi đang giữ sẵn); không lấy được khoá trong `wait` giây ⇒ KHÔNG ghi (review lần 2 v0.1.63,
+    P3-1 — trước đây đi tiếp ghi không khoá, có thể đè lên người ghi đang giữ khoá; lượt agy sau tự làm mới lại).
+    Có thể chờ khoá (time.sleep) ⇒ từ mã async gọi qua luồng phụ. Trả True nếu đã ghi. Không bao giờ chép tệp nào
+    khác từ HOME tạm."""
     if new == injected:
         return False
     if not valid_token_json(new):
@@ -565,7 +568,10 @@ def sync_token_back(cli_home: str, injected: bytes, new: bytes, *, locked: bool 
         return False
     path = cli_home_dir(cli_home) / TOKEN_FILE
     guard = contextlib.nullcontext(True) if locked else token_flock(cli_home, exclusive=True, wait=wait)
-    with guard:
+    with guard as held:
+        if not held:
+            log.warning("Không lấy được khoá tệp phiên Antigravity — bỏ chép token làm mới về kho phiên")
+            return False
         if read_regular_nofollow(path, TOKEN_MAX_BYTES) != injected:
             log.info("Tệp phiên Antigravity đã đổi trong lúc chạy lượt — không chép token làm mới đè lên")
             return False
@@ -743,19 +749,26 @@ class AgyClient:
             self._kill_group(proc.pid)
             return proc.returncode or 0, out, err
         finally:
-            # Kể cả hết giờ / huỷ: token agy đã làm mới (refresh token có thể xoay vòng) không được mất. Đồng bộ, nhanh:
-            # chỉ đọc một tệp ≤ 64 KiB; chờ khoá tối đa 2 giây khi chưa giữ sẵn (hiếm — token đổi ngoài cửa sổ làm mới).
-            if self.session is None and token is not None:
-                new = read_regular_nofollow(turn_token_path(home), TOKEN_MAX_BYTES)
-                if new is not None and new != token:
-                    sync_token_back(self.cli_home, token, new, locked=locked, wait=2.0)
-                elif new is None and os.path.lexists(turn_token_path(home)):  # noqa: ASYNC240 — finally, một lstat
-                    log.warning("agy để lại tệp token không đọc được trong HOME tạm — không chép về kho phiên")
-            if self.on_home is not None:
-                with contextlib.suppress(Exception):
-                    self.on_home(home)
-            shutil.rmtree(work, ignore_errors=True)
-            shutil.rmtree(home, ignore_errors=True)
+            try:
+                # Kể cả hết giờ / huỷ: token agy đã làm mới (refresh token có thể xoay vòng) không được mất. Đọc một tệp
+                # ≤ 64 KiB; đang giữ khoá ⇒ ghi ngay; chưa giữ ⇒ chờ khoá tối đa 2 giây TRONG LUỒNG PHỤ (review lần 2,
+                # P3-1: `_try_flock` ngủ `time.sleep` — trước đây chặn vòng lặp sự kiện), không có khoá thì bỏ ghi.
+                if self.session is None and token is not None:
+                    new = read_regular_nofollow(turn_token_path(home), TOKEN_MAX_BYTES)
+                    if new is not None and new != token:
+                        if locked:
+                            sync_token_back(self.cli_home, token, new, locked=True)
+                        else:
+                            await asyncio.to_thread(sync_token_back, self.cli_home, token, new, wait=2.0)
+                    elif new is None and os.path.lexists(turn_token_path(home)):  # noqa: ASYNC240 — một lstat
+                        log.warning("agy để lại tệp token không đọc được trong HOME tạm — không chép về kho phiên")
+                if self.on_home is not None:
+                    with contextlib.suppress(Exception):
+                        self.on_home(home)
+            finally:
+                # Huỷ giữa lúc chờ luồng phụ vẫn xoá HOME tạm (luồng phụ chỉ dùng `new` đã đọc vào bộ nhớ).
+                shutil.rmtree(work, ignore_errors=True)
+                shutil.rmtree(home, ignore_errors=True)
 
     @staticmethod
     def _kill_group(pgid: int) -> None:
