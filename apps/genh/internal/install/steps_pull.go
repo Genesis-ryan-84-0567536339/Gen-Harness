@@ -14,7 +14,10 @@ import (
 // còn trong compose.yaml, xem docs/reports/HANDOFF-v0.1.1.md), theo đúng
 // thứ tự liệt kê trong docs/handoff/05-installer.md Bước 3 — thứ tự này
 // cũng là thứ tự hiển thị SubLines khi nhiều image đang tải cùng lúc.
-var pullServiceOrder = []string{"db", "redis", "proxy", "api", "web", "bridge", "browser"}
+//
+// v0.1.63 (H3): thêm agy-box (hộp riêng Antigravity). Bản phát hành ghim nó CÙNG digest với api
+// (chung deploy/images/api.Dockerfile) nên resolveImages gộp ảnh trùng — chỉ tải một lần.
+var pullServiceOrder = []string{"db", "redis", "proxy", "api", "agy-box", "web", "bridge", "browser"}
 
 // pullStep cài Bước 3 — Tải image (50%, trọng số lớn nhất): tải song song
 // image của 7 service compose.yaml có sẵn "image:" (build: cục bộ chưa có
@@ -150,12 +153,17 @@ func (s pullStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 // cục bộ nên KHÔNG có gì để Bước 3 tải cho tới khi bản phát hành thật ghim
 // digest ảnh đã build sẵn vào compose.yaml (đúng như tài liệu mô tả).
 func resolveImages(cf compose.File) (images, skipped []string) {
+	seen := map[string]bool{}
 	for _, name := range pullServiceOrder {
 		svc, ok := cf.Services[name]
 		if !ok || svc.Image == "" {
 			skipped = append(skipped, name)
 			continue
 		}
+		if seen[svc.Image] { // nhiều service chung một ảnh (api + agy-box): tải một lần
+			continue
+		}
+		seen[svc.Image] = true
 		images = append(images, svc.Image)
 	}
 	return images, skipped

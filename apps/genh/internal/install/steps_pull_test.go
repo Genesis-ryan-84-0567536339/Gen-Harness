@@ -177,3 +177,46 @@ func TestShortImageName(t *testing.T) {
 		}
 	}
 }
+
+// v0.1.63 (H3): agy-box nằm trong danh sách tải. Bản phát hành ghim agy-box CÙNG digest với
+// api (chung api.Dockerfile) ⇒ một ảnh chỉ được tải MỘT lần (tải đôi làm % tiến độ sai).
+func TestPullStep_AgyBoxCungAnhVoiApi_TaiMotLan(t *testing.T) {
+	const apiImg = "ghcr.io/o/gen-harness-api@sha256:" +
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	dir := t.TempDir()
+	path := filepath.Join(dir, "compose.yaml")
+	yaml := "services:\n  api:\n    image: " + apiImg + "\n  agy-box:\n    image: " + apiImg + "\n  redis:\n    image: redis:7-alpine\n"
+	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fp := &fakePuller{}
+	step := pullStep{puller: fp, locate: func(string) (string, error) { return path, nil }}
+	if err := step.Run(context.Background(), &Env{}, ReporterFunc(func(Progress) {})); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	n := 0
+	for _, img := range fp.called {
+		if img == apiImg {
+			n++
+		}
+	}
+	if n != 1 || len(fp.called) != 2 {
+		t.Fatalf("ảnh api phải tải đúng 1 lần, tổng 2 ảnh; gọi: %v", fp.called)
+	}
+}
+
+func TestPullStep_AgyBoxAnhRieng_DuocTai(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "compose.yaml")
+	if err := os.WriteFile(path, []byte("services:\n  agy-box:\n    image: ghcr.io/o/box:1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fp := &fakePuller{}
+	step := pullStep{puller: fp, locate: func(string) (string, error) { return path, nil }}
+	if err := step.Run(context.Background(), &Env{}, ReporterFunc(func(Progress) {})); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(fp.called) != 1 || fp.called[0] != "ghcr.io/o/box:1" {
+		t.Fatalf("agy-box phải nằm trong pullServiceOrder; gọi: %v", fp.called)
+	}
+}
