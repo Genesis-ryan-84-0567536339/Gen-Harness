@@ -29,8 +29,10 @@ from gh.data.common import (
     fetch_raw,
     initial_group_mode,
     iso,
+    new_group_mode,
     org_settings,
     raw_item,
+    set_channel_setting,
 )
 
 log = logging.getLogger("gh.ingest")
@@ -340,6 +342,29 @@ async def close_sessions(bus: EventBus, org_id: uuid.UUID, type: str, session_id
                           org_id=org_id)
 
 
+async def _reset_new_group_mode_if_account_changed(db: AsyncSession, org_id: uuid.UUID, s: Any,
+                                                   account_id: str | None) -> None:
+    """Quét QR một tài khoản KHÁC tài khoản trước đó của kênh ⇒ «Nhóm mới» về lại `ask` và hộp hỏi nhóm mới hỏi lại từ
+    đầu: lựa chọn Im lặng / Không nghe là của tài khoản cũ, không mang sang tài khoản mới (review v0.1.65 P3). Lần nối
+    đầu tiên (chưa có tài khoản nào trước) và nối lại CÙNG tài khoản thì giữ nguyên."""
+    if not account_id:
+        return
+    prev = (await db.execute(text("""
+        SELECT external_account FROM core.channel_sessions
+        WHERE channel_id = :c AND id <> :i AND external_account IS NOT NULL
+        ORDER BY COALESCE(started_at, qr_issued_at) DESC NULLS LAST LIMIT 1"""),
+        {"c": s.channel_id, "i": s.id})).scalar_one_or_none()
+    if prev is None or prev == account_id:
+        return
+    before = new_group_mode(await org_settings(db, org_id), s.type)
+    await set_channel_setting(db, org_id, "new_group_mode", s.type, "ask")
+    await set_channel_setting(db, org_id, "new_group_asked", s.type, False)
+    if before != "ask":
+        await actionlog.record(db, org_id=org_id, actor_type="system", actor_id=f"bridge:{s.type}",
+                               action="channel.new_group_mode_reset", target_type="channel", target_id=s.type,
+                               detail={"from": before, "reason": "account_changed"})
+
+
 async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: uuid.UUID, type: str,
                         p: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
     """Xử lý một sự kiện gh.bridge.status. Trả các sự kiện WebSocket cần phát sau commit."""
@@ -391,6 +416,7 @@ async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: u
             return out
         account = p.get("account") or {}
         cred = _reencrypt(p.get("credential"), s)
+        await _reset_new_group_mode_if_account_changed(db, org_id, s, str(account.get("id") or "") or None)
         # Một kênh chỉ một phiên hoạt động: phiên cũ kết thúc
         # — và (v0.1.62, F067) bridge được bảo đóng kết nối của chúng.
         old = (await db.execute(text("""UPDATE core.channel_sessions SET state = 'logged_out', ended_at = now()
