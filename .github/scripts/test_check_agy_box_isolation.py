@@ -44,6 +44,7 @@ GOOD = {
                 "GH_AGYBOX_MAX_JOBS": "1",
                 "HTTPS_PROXY": "http://agy-egress:3128",
                 "HTTP_PROXY": "http://agy-egress:3128",
+                "NO_PROXY": "127.0.0.1,localhost",
             },
             "secrets": ["gh_agy_key"],
             "networks": ["agy-bus"],

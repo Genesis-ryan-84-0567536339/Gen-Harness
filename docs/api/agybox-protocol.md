@@ -84,8 +84,9 @@ st = await box_status()          # cache 10 giây; không tham số = đọc GH_
 ## Nợ / ghi chú vận hành
 
 - **Lối ra (gói sửa review, P2-2)**: hộp CHỈ ở `agy-bus` (internal). Đường ra duy nhất là dịch vụ `agy-egress` (`python -m gh.agybox.egress`, cùng ảnh
-  api, không khoá, không volume, mạng `agy-bus` + `agy-out`); hộp đặt `HTTPS_PROXY`/`HTTP_PROXY=http://agy-egress:3128`, `AgyClient` chuyển hai biến này
-  vào môi trường sạch của agy. Proxy chỉ nhận `CONNECT host:443`, phân giải tên MỘT lần, mọi IP phải định tuyến toàn cầu (chặn loopback, RFC1918, link-local,
+  api, không khoá, không volume, mạng `agy-bus` + `agy-out`); hộp đặt `HTTPS_PROXY`/`HTTP_PROXY=http://agy-egress:3128` và `NO_PROXY=127.0.0.1,localhost`
+  (healthcheck gọi 127.0.0.1:8090 phải đi thẳng — thiếu thì hộp "unhealthy", phát hiện khi kiểm thật), `AgyClient` chuyển các biến này vào môi trường
+  sạch của agy. Proxy chỉ nhận `CONNECT host:443`, phân giải tên MỘT lần, mọi IP phải định tuyến toàn cầu (chặn loopback, RFC1918, link-local,
   CGNAT 100.64/10, gateway Docker, IPv6 nội bộ/ULA, IPv4-mapped, 6to4/NAT64 nhúng IP nội bộ) rồi nối THẲNG IP đã kiểm (chống DNS rebinding). Trước đây hộp ở
   `agy-out` (bridge thường) nên tới được gateway và mọi dịch vụ trong LAN của máy chủ.
 - Allowlist tên miền: `GH_AGY_EGRESS_ALLOW` (trong `.env`, phân cách dấu phẩy, tên miền con tính theo) — **mặc định rỗng = mọi tên miền công khai**

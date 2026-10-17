@@ -179,6 +179,8 @@ services:
       # agy theo HTTPS_PROXY (đã đo: CONNECT qua proxy); AgyClient chuyển hai biến này vào môi trường sạch của agy.
       HTTPS_PROXY: http://agy-egress:3128
       HTTP_PROXY: http://agy-egress:3128
+      # Healthcheck (urllib) gọi 127.0.0.1:8090 — phải đi thẳng, không qua proxy (proxy chỉ nhận CONNECT ⇒ 405).
+      NO_PROXY: 127.0.0.1,localhost
     secrets: [gh_agy_key]
     networks: [agy-bus]
     depends_on:

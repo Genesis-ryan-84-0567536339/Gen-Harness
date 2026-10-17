@@ -13,7 +13,7 @@ COMPOSE = yaml.safe_load((REPO / "deploy" / "compose.yaml").read_text(encoding="
 SERVICES: dict[str, Any] = COMPOSE["services"]
 BOX: dict[str, Any] = SERVICES["agy-box"]
 ENV_ALLOWED = {"GH_AGYBOX_KEY_FILE", "GH_CLI_BINARY", "AGY_CLI_DISABLE_AUTO_UPDATE", "GH_AGYBOX_MAX_JOBS",
-               "HTTPS_PROXY", "HTTP_PROXY"}
+               "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"}
 
 
 def _nets(svc: dict[str, Any]) -> set[str]:

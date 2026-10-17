@@ -162,6 +162,10 @@ def test_compose_box_only_internal_and_egress_wired() -> None:
     assert set(eg["networks"]) == {"agy-bus", "agy-out"} and not nets["agy-out"].get("internal")
     assert box["environment"]["HTTPS_PROXY"] == "http://agy-egress:3128"
     assert box["environment"]["HTTP_PROXY"] == "http://agy-egress:3128"
+    # Kiểm thật (project ghboxfix): thiếu NO_PROXY thì healthcheck urllib tới 127.0.0.1:8090 cũng đi qua proxy ⇒ 405
+    # ⇒ hộp "unhealthy". Địa chỉ nội bộ của chính hộp phải đi thẳng.
+    no_proxy = {x.strip() for x in str(box["environment"]["NO_PROXY"]).split(",")}
+    assert {"127.0.0.1", "localhost"} <= no_proxy
     assert eg["command"] == ["python", "-m", "gh.agybox.egress"]
     assert eg["build"]["dockerfile"] == "deploy/images/api.Dockerfile"            # cùng ảnh api — không thêm ảnh
     assert "secrets" not in eg and "volumes" not in eg and eg["read_only"] is True and eg["cap_drop"] == ["ALL"]
