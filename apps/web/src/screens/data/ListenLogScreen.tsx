@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { ApiError, SCREEN_BY_KEY, type ListenLogDecision, type ListenLogEvent, type ListenLogItem, type ListenLogMessage } from '@gen-harness/contracts';
 import { Button, EmptyState, ErrorState, FilterSelect, Icon, Segmented, Skeleton, Switch, TextField, type FilterOption } from '@gen-harness/ui';
 import { fmtHM, fmtInt } from '../../lib/format';
@@ -61,10 +62,14 @@ export function ListenLogScreen() {
   const query = useMemo(() => toQuery(filters), [filters]);
 
   const [live, setLive] = useState(true);
-  useEffect(() => {
-    setListenLogLive(live);
-    return () => setListenLogLive(true);
-  }, [live]);
+  const qc = useQueryClient();
+  // Rời màn thì trả công tắc về bật (lần mở sau không bị kẹt tạm dừng).
+  useEffect(() => () => setListenLogLive(true), []);
+  // Bật lại sau lúc tạm dừng ⇒ tải bù ngay một lần để tin đến lúc tạm dừng hiện ra.
+  const toggleLive = (on: boolean) => {
+    setLive(on);
+    setListenLogLive(on, qc);
+  };
 
   const list = useListenLog(query);
   const stats = useListenLogStats();
@@ -120,7 +125,7 @@ export function ListenLogScreen() {
           actions={
             <>
               <span className="ll-live">
-                <Switch checked={live} onChange={setLive} label="Cập nhật trực tiếp" />
+                <Switch checked={live} onChange={toggleLive} label="Cập nhật trực tiếp" />
                 <span>{live ? 'Đang cập nhật trực tiếp' : 'Tạm dừng cập nhật'}</span>
               </span>
               <Button

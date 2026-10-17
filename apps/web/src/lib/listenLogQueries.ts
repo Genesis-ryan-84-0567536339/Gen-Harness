@@ -35,9 +35,15 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 let firstAt = 0;
 let live = true;
 
-/** Công tắc "Cập nhật trực tiếp" của màn (tắt ⇒ tín hiệu bị bỏ, người dùng bấm Làm mới). */
-export function setListenLogLive(on: boolean): void {
+/**
+ * Công tắc "Cập nhật trực tiếp" của màn (tắt ⇒ tín hiệu bị bỏ, người dùng bấm Làm mới).
+ * Truyền `qc` khi người dùng BẬT LẠI sau lúc tạm dừng ⇒ tải bù ngay một lần để tin đến lúc tạm dừng hiện ra
+ * (không tải khi đã bật sẵn, hay khi màn đóng — lúc đó không có `qc`).
+ */
+export function setListenLogLive(on: boolean, qc?: QueryClient): void {
+  const resumed = on && !live;
   live = on;
+  if (resumed && qc) void qc.invalidateQueries({ queryKey: qkLog.listRoot });
 }
 export function isListenLogLive(): boolean {
   return live;

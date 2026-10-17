@@ -304,6 +304,35 @@ describe('cập nhật trực tiếp qua WebSocket', () => {
     setListenLogLive(true);
   });
 
+  it('bật lại "Cập nhật trực tiếp" sau lúc tạm dừng ⇒ tải bù ngay một lần (tin đến lúc dừng hiện ra)', async () => {
+    const urls = await mounted();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const sw = screen.getByRole('switch', { name: 'Cập nhật trực tiếp' });
+    await user.click(sw);
+    const paused = urls.length;
+    act(() => ping('raw.new', { id: 'z' }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(urls.length).toBe(paused); // đang dừng: không tải
+    await user.click(sw);
+    await waitFor(() => expect(urls.length).toBe(paused + 1)); // bật lại: tải bù ngay, không đợi tín hiệu
+  });
+
+  it('setListenLogLive: chỉ tải bù khi chuyển tắt → bật và có qc; bật sẵn / thiếu qc thì không', () => {
+    const qc = new QueryClient();
+    const spy = vi.spyOn(qc, 'invalidateQueries');
+    setListenLogLive(true, qc); // đang bật sẵn
+    expect(spy).not.toHaveBeenCalled();
+    setListenLogLive(false, qc);
+    setListenLogLive(true); // thiếu qc (rời màn)
+    expect(spy).not.toHaveBeenCalled();
+    setListenLogLive(false);
+    setListenLogLive(true, qc);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith({ queryKey: qkLog.listRoot });
+  });
+
   it('tín hiệu WebSocket chỉ làm mới danh sách, không làm mới số liệu 24 giờ (review Opus P3)', async () => {
     const qc = new QueryClient();
     qc.setQueryData([...qkLog.listRoot, {}], { pages: [], pageParams: [] });
