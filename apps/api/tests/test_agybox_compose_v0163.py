@@ -12,7 +12,8 @@ REPO = Path(__file__).resolve().parents[3]
 COMPOSE = yaml.safe_load((REPO / "deploy" / "compose.yaml").read_text(encoding="utf-8"))
 SERVICES: dict[str, Any] = COMPOSE["services"]
 BOX: dict[str, Any] = SERVICES["agy-box"]
-ENV_ALLOWED = {"GH_AGYBOX_KEY_FILE", "GH_CLI_BINARY", "AGY_CLI_DISABLE_AUTO_UPDATE", "GH_AGYBOX_MAX_JOBS"}
+ENV_ALLOWED = {"GH_AGYBOX_KEY_FILE", "GH_CLI_BINARY", "AGY_CLI_DISABLE_AUTO_UPDATE", "GH_AGYBOX_MAX_JOBS",
+               "HTTPS_PROXY", "HTTP_PROXY"}
 
 
 def _nets(svc: dict[str, Any]) -> set[str]:
@@ -34,8 +35,9 @@ def test_box_env_is_exactly_the_allowlist_no_db_redis_or_keys() -> None:
         assert bad not in flat, bad
 
 
-def test_box_networks_are_agy_bus_and_agy_out_only() -> None:
-    assert _nets(BOX) == {"agy-bus", "agy-out"}
+def test_box_network_is_internal_agy_bus_only() -> None:
+    """Review v0.1.63 (P2-2): hộp chỉ ở agy-bus (internal); ra ngoài qua proxy agy-egress (chặn IP nội bộ)."""
+    assert _nets(BOX) == {"agy-bus"}
     nets = COMPOSE["networks"]
     assert nets["agy-bus"].get("internal") is True
     assert not nets["agy-out"].get("internal")
@@ -66,8 +68,8 @@ def test_box_mounts_no_volume_at_all() -> None:
 
 def test_only_api_and_worker_reach_the_box() -> None:
     on_bus = {n for n, s in SERVICES.items() if "agy-bus" in _nets(s)}
-    assert on_bus == {"api", "worker", "agy-box"}
-    assert {n for n, s in SERVICES.items() if "agy-out" in _nets(s)} == {"agy-box"}
+    assert on_bus == {"api", "worker", "agy-box", "agy-egress"}
+    assert {n for n, s in SERVICES.items() if "agy-out" in _nets(s)} == {"agy-egress"}
     holders = {n for n, s in SERVICES.items() if "gh_agy_key" in (s.get("secrets") or [])}
     assert holders == {"api", "worker", "agy-box"}
     for n in ("api", "worker"):

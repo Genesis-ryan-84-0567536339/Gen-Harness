@@ -42,14 +42,25 @@ GOOD = {
                 "GH_CLI_BINARY": "agy",
                 "AGY_CLI_DISABLE_AUTO_UPDATE": "1",
                 "GH_AGYBOX_MAX_JOBS": "2",
+                "HTTPS_PROXY": "http://agy-egress:3128",
+                "HTTP_PROXY": "http://agy-egress:3128",
             },
             "secrets": ["gh_agy_key"],
-            "networks": ["agy-bus", "agy-out"],
+            "networks": ["agy-bus"],
             "read_only": True,
             "tmpfs": ["/tmp:size=256m"],
             "cap_drop": ["ALL"],
             "security_opt": ["no-new-privileges:true"],
             "init": True,
+        },
+        "agy-egress": {
+            "image": API_IMG,
+            "command": ["python", "-m", "gh.agybox.egress"],
+            "environment": {"GH_AGY_EGRESS_ALLOW": "", "GH_AGY_EGRESS_PORTS": "443"},
+            "networks": ["agy-bus", "agy-out"],
+            "read_only": True,
+            "cap_drop": ["ALL"],
+            "security_opt": ["no-new-privileges:true"],
         },
     },
     "networks": {"default": {}, "browser-bus": {"internal": True}, "agy-bus": {"internal": True}, "agy-out": {}},
@@ -77,7 +88,7 @@ class IsolationRules(unittest.TestCase):
     def test_good_compose_passes_both_modes(self) -> None:
         self.assertEqual(chk.check(GOOD, release=True), [])
         d = copy.deepcopy(GOOD)
-        for s in ("api", "worker", "agy-box"):
+        for s in ("api", "worker", "agy-box", "agy-egress"):
             d["services"][s].pop("image")
             d["services"][s]["build"] = {"context": "..", "dockerfile": "deploy/images/api.Dockerfile"}
         self.assertEqual(chk.check(d, release=False), [])
@@ -97,7 +108,7 @@ class IsolationRules(unittest.TestCase):
         self.assertFlags(mutated(lambda d: box(d).update(secrets=["gh_agy_key", {"source": "gh_bridge_key"}])), "gh_bridge_key")
 
     def test_default_network_explicit(self) -> None:
-        self.assertFlags(mutated(lambda d: box(d).update(networks=["agy-bus", "agy-out", "default"])), "default")
+        self.assertFlags(mutated(lambda d: box(d).update(networks=["agy-bus", "default"])), "default")
 
     def test_default_network_implicit(self) -> None:
         self.assertFlags(mutated(lambda d: box(d).pop("networks")), "default")
@@ -113,6 +124,30 @@ class IsolationRules(unittest.TestCase):
 
     def test_agy_out_shared_with_other_service(self) -> None:
         self.assertFlags(mutated(lambda d: d["services"]["api"]["networks"].append("agy-out")), "agy-out")
+
+    def test_box_on_agy_out_is_refused(self) -> None:
+        """Review v0.1.63 (P2-2): hộp ở agy-out (bridge thường) tới được gateway + LAN — chỉ proxy được ở đó."""
+        self.assertFlags(mutated(lambda d: box(d).update(networks=["agy-bus", "agy-out"])), "agy-out")
+
+    def test_box_without_proxy_env(self) -> None:
+        self.assertFlags(mutated(lambda d: box(d)["environment"].pop("HTTPS_PROXY")), "HTTPS_PROXY")
+        self.assertFlags(mutated(lambda d: box(d)["environment"].update(HTTPS_PROXY="http://evil:3128")),
+                         "HTTPS_PROXY")
+
+    def test_egress_missing(self) -> None:
+        self.assertFlags(mutated(lambda d: d["services"].pop("agy-egress")), "agy-egress")
+
+    def test_egress_rules(self) -> None:
+        eg = lambda d: d["services"]["agy-egress"]  # noqa: E731
+        self.assertFlags(mutated(lambda d: eg(d).update(secrets=["gh_agy_key"])), "agy-egress")
+        self.assertFlags(mutated(lambda d: eg(d).update(volumes=["agy_state:/x"])), "volume")
+        self.assertFlags(mutated(lambda d: eg(d).update(networks=["default", "agy-bus", "agy-out"])), "agy-egress")
+        self.assertFlags(mutated(lambda d: eg(d).pop("cap_drop")), "cap_drop")
+        self.assertFlags(mutated(lambda d: eg(d).pop("read_only")), "read_only")
+        self.assertFlags(mutated(lambda d: eg(d).update(privileged=True)), "privileged")
+        self.assertFlags(mutated(lambda d: eg(d)["environment"].update(GH_DATABASE_URL="x")), "GH_DATABASE_URL")
+        self.assertFlags(mutated(lambda d: eg(d).update(image="ghcr.io/o/x@sha256:" + "c" * 64)), "agy-egress")
+        self.assertFlags(mutated(lambda d: eg(d).update(command=["sh"])), "gh.agybox.egress")
 
     def test_cap_drop_missing(self) -> None:
         self.assertFlags(mutated(lambda d: box(d).pop("cap_drop")), "cap_drop")

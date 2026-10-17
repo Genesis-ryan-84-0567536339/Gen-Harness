@@ -21,8 +21,9 @@ import (
 // deploy/compose.yaml (api, worker, bridge, web, proxy đều là tên service
 // thật, không cần đổi). v0.1.29 thêm browser-egress + browser (Gen đọc mạng
 // xã hội — container riêng, không DB, không khoá master). v0.1.63 thêm agy-box (hộp
-// riêng Antigravity cho agent ngoại giao: không DB, không khoá master, chỉ gh_agy_key).
-var startupServices = []string{"api", "worker", "agy-box", "bridge", "browser-egress", "browser", "web", "proxy"}
+// riêng Antigravity cho agent ngoại giao: không DB, không khoá master, chỉ gh_agy_key). Gói sửa review v0.1.63 (P2-2)
+// thêm agy-egress — proxy lối ra của hộp (cùng ảnh api; hộp chỉ ra Internet qua nó), lên trước hộp.
+var startupServices = []string{"api", "worker", "agy-egress", "agy-box", "bridge", "browser-egress", "browser", "web", "proxy"}
 
 // readyPath là endpoint readiness thật của apps/api — xem
 // apps/api/gh/shell/routes.py (@router.get("/ready"), mount ở
@@ -168,7 +169,7 @@ func (s servicesStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 		return se
 	}
 
-	rep.Report(Progress{Status: StatusRunning, Percent: 5, Detail: "khởi động api, worker, agy-box, bridge, web, proxy"})
+	rep.Report(Progress{Status: StatusRunning, Percent: 5, Detail: "khởi động api, worker, agy-egress, agy-box, bridge, web, proxy"})
 
 	upArgs := compose.BaseArgs(composePath, append([]string{"up", "-d"}, startupServices...)...)
 	if _, err := runner.Output(ctx, dockercli.Cmd{
@@ -176,7 +177,7 @@ func (s servicesStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 	}); err != nil {
 		se := &StepError{
 			Code: ErrCodeServicesUpFailed,
-			What: "`docker compose up -d` cho api/worker/agy-box/bridge/web/proxy thất bại",
+			What: "`docker compose up -d` cho api/worker/agy-egress/agy-box/bridge/web/proxy thất bại",
 			Why:  err.Error(),
 			Next: "Xem log ở trên rồi bấm r để thử lại — dữ liệu đã có không bị mất.",
 			Err:  err,
@@ -227,7 +228,7 @@ func (s servicesStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 			Code: ErrCodeServiceNotReady,
 			What: readyPath + " không trả 200 trước khi hết thời gian chờ",
 			Why:  waitErr.Error(),
-			Next: "Xem `docker compose logs api worker agy-box bridge web proxy` rồi bấm r để thử lại.",
+			Next: "Xem `docker compose logs api worker agy-egress agy-box bridge web proxy` rồi bấm r để thử lại.",
 			Err:  waitErr,
 		}
 		rep.Report(Progress{Status: StatusError, Percent: 100, Err: se})

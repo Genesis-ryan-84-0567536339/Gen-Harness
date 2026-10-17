@@ -82,9 +82,19 @@ st = await box_status()          # cache 10 giây; không tham số = đọc GH_
 
 ## Nợ / ghi chú vận hành
 
-- Lối ra `agy-out` hiện KHÔNG có allowlist tên miền. Đã đo (agy 1.2.9, token giả, mạng chỉ có proxy ghi CONNECT): agy **có** theo
-  `HTTPS_PROXY` — thấy CONNECT tới `antigravity-unleash.goog:443` và `play.googleapis.com:443` (hai tên miền chưa có trong danh sách đoán ban đầu). Chưa
-  đo được đường gọi model/OAuth thật (cần đăng nhập thật nên chưa làm), vì vậy chưa dựng proxy allowlist: làm khi có phiên đăng nhập để ghi đủ tên miền.
+- **Lối ra (gói sửa review, P2-2)**: hộp CHỈ ở `agy-bus` (internal). Đường ra duy nhất là dịch vụ `agy-egress` (`python -m gh.agybox.egress`, cùng ảnh
+  api, không khoá, không volume, mạng `agy-bus` + `agy-out`); hộp đặt `HTTPS_PROXY`/`HTTP_PROXY=http://agy-egress:3128`, `AgyClient` chuyển hai biến này
+  vào môi trường sạch của agy. Proxy chỉ nhận `CONNECT host:443`, phân giải tên MỘT lần, mọi IP phải định tuyến toàn cầu (chặn loopback, RFC1918, link-local,
+  CGNAT 100.64/10, gateway Docker, IPv6 nội bộ/ULA, IPv4-mapped, 6to4/NAT64 nhúng IP nội bộ) rồi nối THẲNG IP đã kiểm (chống DNS rebinding). Trước đây hộp ở
+  `agy-out` (bridge thường) nên tới được gateway và mọi dịch vụ trong LAN của máy chủ.
+- Allowlist tên miền: `GH_AGY_EGRESS_ALLOW` (trong `.env`, phân cách dấu phẩy, tên miền con tính theo) — **mặc định rỗng = mọi tên miền công khai**
+  (chỉ chặn IP nội bộ). Đã đo (agy 1.2.9, token giả): agy có theo `HTTPS_PROXY`, thấy CONNECT tới `antigravity-unleash.goog:443`, `play.googleapis.com:443`.
+  Danh sách theo quan sát + đoán cho phiên thật: `googleapis.com, accounts.google.com, antigravity-unleash.goog` — chưa đo đường gọi model/OAuth thật nên
+  chưa bật mặc định (bật sai thì agy trong hộp hỏng). Nợ #44: bật allowlist chặt khi có phiên đăng nhập để ghi đủ tên miền.
+- **Rủi ro còn lại — token Google của Sếp nằm trong hộp**: mỗi lượt hộp nhận tệp token OAuth (access + refresh token) của tài khoản Google đang đăng nhập
+  Antigravity. Tin khách lừa được agy trong hộp chạy lệnh thì đọc được token đó và gửi ra ngoài qua proxy tới bất kỳ tên miền công khai nào (allowlist
+  chưa bật) — token có quyền của tài khoản Google đó trong phạm vi OAuth agy xin. Gợi ý: dùng **một tài khoản Google riêng** cho Antigravity (không phải
+  tài khoản Gmail/Drive chính của Sếp), và thu hồi phiên ở myaccount.google.com › Bảo mật nếu nghi lộ.
 - **HOME tạm mỗi lượt (gói sửa review, P1-1)**: mọi lượt agy — trong hộp lẫn trong tiến trình api/worker — chạy với HOME là thư mục mới 0700
   (`clients.make_turn_home`, xoá sau lượt) chỉ chứa tệp token; không chép `settings.json`/`mcp`/`customizations`/lịch sử. Cấu hình agy là mặc
   định của bản cài (chưa sinh `settings.json` an toàn từ mã: tên/giá trị khoá chưa kiểm được trên phiên thật — Nợ). Trong tiến trình, token agy
