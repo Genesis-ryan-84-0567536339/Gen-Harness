@@ -127,7 +127,7 @@ function OrgForm({ org }: { org: OrgSettings }) {
           {addressingPreview(v.self_name, v.bot_calls_me)}
         </div>
       </div>
-      <p className="muted-note">Múi giờ dùng cho lịch sao lưu, nhắc hẹn và giờ hiển thị trên Console. Đổi xưng hô áp dụng cho các câu agent soạn từ giờ trở đi.</p>
+      <p className="muted-note">Múi giờ dùng cho lịch sao lưu, nhắc hẹn và giờ hiển thị trên Console. Bản tin Gen, chi phí AI trong ngày và các việc dọn dữ liệu ban đêm luôn tính theo giờ Việt Nam, không đổi theo múi giờ này. Đổi xưng hô áp dụng cho các câu agent soạn từ giờ trở đi.</p>
       <div className="acct-form__error" role="alert">
         {formError}
       </div>

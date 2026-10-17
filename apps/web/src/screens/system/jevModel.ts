@@ -17,7 +17,7 @@ export function jevKeyValid(key: string): boolean {
   return key.trim().length >= JEV_KEY_MIN;
 }
 
-/** Nguồn OpenRouter đang có (không phải Jev) và còn ít nhất một khoá — để hiện nút "Dùng khóa OpenRouter đang có". */
+/** Nguồn OpenRouter đang có (không phải Jev) và còn ít nhất một khoá — để hiện nút "Dùng khoá OpenRouter đang có". */
 export function findOpenRouterSource(providers: readonly Provider[] | undefined): Provider | undefined {
   return (providers ?? []).find((p) => {
     if (p.kind === 'system_one' || p.kind === 'antigravity_cli' || p.kind === 'claude_code_cli') return false;

@@ -176,7 +176,7 @@ test.describe('v0.1.36 — Cần Sếp xử lý & Sức khoẻ hệ thống', ()
     await expect(logRow.getByRole('button', { name: /Sửa/ })).toHaveCount(0);
     await expect(panel.locator('tr', { has: page.getByText('agent.browser_jobs.result') }).getByText('14 ngày (cố định)')).toBeVisible();
 
-    const rawRow = panel.locator('tr', { has: page.getByText('Kho thô') });
+    const rawRow = panel.locator('tr', { has: page.getByText('Tin gốc') });
     await expect(rawRow.getByText(/Lần dọn gần nhất: .* · đã xoá 0/)).toBeVisible();
     const edit = rawRow.getByRole('button', { name: /Sửa/ });
     await expect(edit).toBeEnabled();

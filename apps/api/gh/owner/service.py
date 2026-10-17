@@ -60,17 +60,12 @@ CARE_EXCLUDED_TYPES = ("staff", "candidate", "learner")
 #: Chỉ xét người có tin trong cửa sổ này (ngày) cho luật "im lặng" — không dò cả nghìn người ngoài lề và cắt được
 #: phân vùng `raw.events`. Người im lặng quá lâu vẫn hiện nếu rủi ro rời bỏ ≥ CARE_CHURN_MIN.
 CARE_WINDOW_DAYS = 180
-#: Kênh KHÔNG tính là "kênh nhận tin" (Facebook/Telegram không đưa tin khách về Thông tin).
-NON_INTAKE_CHANNELS = ("facebook", "telegram")
+#: Kênh KHÔNG tính là "kênh nhận tin" (Facebook/Telegram không đưa tin khách về Thông tin; LinkedIn chỉ đọc danh tính).
+NON_INTAKE_CHANNELS = ("facebook", "telegram", "linkedin")
 
 BG_ALERT_KEY = "ai.background_no_source"
-BG_SUGGESTION = {
-    "key": "background_key_missing",
-    "title": "Việc nền chưa có khoá để chạy",
-    "body": ("Gen chưa có khoá AI riêng cho việc chạy ngầm (lọc tin, bản tin). "
-             "Sếp thêm khoá ở Bộ não AI để em làm giúp."),
-    "to": "/system?tab=brain",
-}
+#: Dùng chung MỘT bản chữ với registry mặc định (F024: trước đây hai tiêu đề khác nhau cho cùng một gợi ý).
+BG_SUGGESTION = defaults_registry.BACKGROUND_KEY_SUGGESTION
 
 DRAFT_LABELS = {"message": "Tin nhắn chờ duyệt", "quotation": "Báo giá chờ duyệt", "contract": "Hợp đồng chờ duyệt",
                 "reminder": "Nhắc việc chờ duyệt", "report": "Báo cáo chờ duyệt",
@@ -110,12 +105,15 @@ async def _count(db: AsyncSession, sql: str, params: dict[str, Any]) -> int:
 
 
 async def channels_connected(db: AsyncSession, org_id: uuid.UUID) -> int:
-    """Số kênh NHẬN TIN (Zalo, WhatsApp…) đang có phiên đăng nhập hoạt động. KHÔNG tính Facebook/Telegram (không đưa
-    tin khách về Thông tin). 0 ⇒ "ngày đầu": Mặt tiền hiện một thẻ "Nối Zalo" thay các khối số. Dùng chung cho
-    brief / feed / insights."""
+    """Số kênh NHẬN TIN (Zalo, WhatsApp…) đang có phiên hoạt động HOẶC đã từng đăng nhập thành công (cùng nghĩa với
+    `GET /header` › `channels_connected`, v0.1.43). KHÔNG tính Facebook/Telegram/LinkedIn (không đưa tin khách về Thông
+    tin). 0 ⇒ "ngày đầu": Mặt tiền hiện một thẻ "Nối Zalo" thay các khối số. Kênh đã nối mà mất phiên (cần quét lại QR)
+    vẫn tính — nếu không Mặt tiền ẩn hết tin cũ trong khi huy hiệu vẫn đếm (P3 v0.1.61). Dùng chung cho brief / feed /
+    insights."""
     n = (await db.execute(text("""
         SELECT count(DISTINCT c.id) FROM core.channels c JOIN core.channel_sessions s ON s.channel_id = c.id
-        WHERE c.org_id = :o AND s.state = 'active' AND s.ended_at IS NULL AND NOT (c.type = ANY(:skip))"""),
+        WHERE c.org_id = :o AND NOT (c.type = ANY(:skip))
+          AND ((s.state = 'active' AND s.ended_at IS NULL) OR s.started_at IS NOT NULL)"""),
                           {"o": org_id, "skip": list(NON_INTAKE_CHANNELS)})).scalar_one()
     return int(n or 0)
 

@@ -4,7 +4,7 @@ import type { KpiItem, QueueWidgetItem, SpotlightItem } from '@gen-harness/contr
 import { EmptyState, Icon, Skeleton } from '@gen-harness/ui';
 import { fmtAgo, fmtDMClock, fmtDec, fmtInt, fmtPct } from '../../lib/format';
 import { CardError, Panel, SkeletonLines } from '../common';
-import { N5, OK, SPOTLIGHT_DIMENSION_LABEL, WARN, initialsOf, queueKindIcon, queueKindTone, QUEUE_ACTION_LABEL, QUEUE_KIND_LABEL } from './queueModel';
+import { N5, OK, SPOTLIGHT_DIMENSION_LABEL, WARN, initialsOf, queueKindIcon, queueKindTone, QUEUE_ACTION_LABEL, QUEUE_KIND_LABEL, healthChannelRows } from './queueModel';
 import { useOverview } from './queries';
 import { UpdateNotice } from '../../update/UpdateNotice';
 import { useNavigation } from '../../lib/queries';
@@ -256,10 +256,10 @@ export function OverviewScreen() {
                 />
               </>
             ) : null}
-            {d.health.channels.map((c) => (
+            {healthChannelRows(d.health.channels).map((c) => (
               <div className="ov-health__row" key={c.type}>
                 <span className="ov-health__dot" style={{ background: c.active > 0 ? OK : N5 }} aria-hidden />
-                <span className="ov-health__name">Kênh {c.type === 'zalo' ? 'Zalo' : c.type === 'whatsapp' ? 'WhatsApp' : c.type}</span>
+                <span className="ov-health__name">{c.name}</span>
                 <span className="ov-health__metric">{c.active > 0 ? `${fmtInt(c.active)} đang sống` : 'chưa kết nối'}</span>
               </div>
             ))}

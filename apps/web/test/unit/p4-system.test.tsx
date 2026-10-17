@@ -249,7 +249,12 @@ describe('Điều khiển hệ thống › Dữ liệu & lưu trữ', () => {
     expect(screen.queryByText(/Chưa tự xoá/)).toBeNull();
     expect(screen.queryByText(/CHƯA tự xoá/)).toBeNull();
     // Không còn cột/ô "Ẩn danh sau" (hệ thống chưa thi hành ẩn danh — không hứa điều chưa làm).
-    await within(panel).findByText(/Kho thô/);
+    await within(panel).findByText(/Tin gốc/);
+    // v0.1.70 (F111): mã bảng kỹ thuật (raw.events…) chỉ nằm trong "Chi tiết kỹ thuật", không in thẳng dưới tên tập dữ liệu.
+    const tech = panel.querySelectorAll('details.retention-table__tech');
+    expect(tech.length).toBeGreaterThan(0);
+    expect(tech[0].querySelector('summary')?.textContent).toBe('Chi tiết kỹ thuật');
+    expect(panel.querySelector('td > .retention-table__code')).toBeNull();
     expect(within(panel).queryByText('Ẩn danh sau')).toBeNull();
     expect(within(panel).queryAllByRole('columnheader').map((h) => h.textContent)).not.toContain('Ẩn danh sau');
 
@@ -304,7 +309,7 @@ describe('Điều khiển hệ thống › Dữ liệu & lưu trữ', () => {
     expect(within(jobsRow).queryByRole('button', { name: /Sửa/ })).toBeNull();
     expect(within(jobsRow).getByText(/Lần dọn gần nhất: .* · đã xoá 7 dòng$/)).toBeInTheDocument();
 
-    const rawRow = within(panel).getByText(/Kho thô/).closest('tr') as HTMLElement;
+    const rawRow = within(panel).getByText(/Tin gốc/).closest('tr') as HTMLElement;
     expect(within(rawRow).getByText('Xoá theo cả tháng khi cả tháng đã quá hạn')).toBeInTheDocument();
     await user.click(within(rawRow).getByRole('button', { name: /Sửa/ }));
     const input = within(rawRow).getByLabelText(/Giữ trong \(ngày\)/);
@@ -353,7 +358,7 @@ describe('Điều khiển hệ thống › Dữ liệu & lưu trữ', () => {
     });
     renderScreen(<SystemScreen />, { 'system.read': 'all', 'system.manage': 'all' }, 'storage', 'manager');
     const panel = await screen.findByRole('region', { name: 'Hạn lưu dữ liệu' });
-    const rawRow = (await within(panel).findByText(/Kho thô/)).closest('tr') as HTMLElement;
+    const rawRow = (await within(panel).findByText(/Tin gốc/)).closest('tr') as HTMLElement;
     const rawEdit = within(rawRow).getByRole('button', { name: /Sửa/ });
     expect(rawEdit).toBeDisabled();
     expect(rawEdit).toHaveAttribute('title', 'Chỉ Owner đổi được hạn lưu của dữ liệu xoá theo tháng');
@@ -385,7 +390,7 @@ describe('Điều khiển hệ thống › Dữ liệu & lưu trữ', () => {
     });
     renderScreen(<SystemScreen />, { 'system.read': 'all', 'system.manage': 'all' }, 'storage', 'manager');
     const panel = await screen.findByRole('region', { name: 'Hạn lưu dữ liệu' });
-    const rawRow = (await within(panel).findByText(/Kho thô/)).closest('tr') as HTMLElement;
+    const rawRow = (await within(panel).findByText(/Tin gốc/)).closest('tr') as HTMLElement;
     expect(within(rawRow).getByText('Chưa áp dụng — hạn này đặt trước bản v0.1.40. Nhờ Owner xác nhận lại hạn này.')).toBeInTheDocument();
     expect(within(rawRow).queryByText(/Bấm Sửa/)).toBeNull();
     expect(within(rawRow).getByTestId('retention-locked-raw.events')).toHaveTextContent('Chỉ Owner đổi được hạn lưu của dữ liệu xoá theo tháng');

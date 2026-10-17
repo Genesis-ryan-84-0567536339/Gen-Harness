@@ -362,7 +362,7 @@ describe('Nhóm & Con người › Gán BOT trực nhóm', () => {
   });
 
   it.each([
-    ['có system.manage → chỉ đường Agent & Model › Danh tính Agent', { 'profile.write': 'all', 'system.manage': 'all' }, EMPTY_AGENTS_TEXT],
+    ['có system.manage → chỉ đường màn Danh tính Agent', { 'profile.write': 'all', 'system.manage': 'all' }, EMPTY_AGENTS_TEXT],
     ['không system.manage → nhờ Owner tạo', { 'profile.write': 'team' }, EMPTY_AGENTS_TEXT_ASK],
   ])('không có trợ lý nào đang bật → %s', async (_name, perms, text) => {
     const me = meWith(perms);

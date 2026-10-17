@@ -186,7 +186,7 @@ function JevOneTap({ providers, test }: { providers: Provider[]; test: TestMutat
     >
       <strong>Bật Jev 1 chạm</strong>
       <p className="muted-note">
-        Em điền sẵn {JEV_PRESET.endpointLabel} · <span className="mono">{JEV_PRESET.model}</span> — Sếp chỉ cần chọn khóa.
+        Em điền sẵn {JEV_PRESET.endpointLabel} · <span className="mono">{JEV_PRESET.model}</span> — Sếp chỉ cần chọn khoá.
       </p>
       {openRouter ? (
         <div className="jev-actions">
@@ -199,13 +199,13 @@ function JevOneTap({ providers, test }: { providers: Provider[]; test: TestMutat
             data-gen-target="system.brain.jev.enable"
             onClick={() => run({ use_existing_openrouter: true })}
           >
-            Dùng khóa OpenRouter đang có
+            Dùng khoá OpenRouter đang có
           </Button>
           <PinHint />
         </div>
       ) : null}
       <TextField
-        label={openRouter ? 'Hoặc dán khóa OpenRouter khác' : 'Khóa OpenRouter'}
+        label={openRouter ? 'Hoặc dán khoá OpenRouter khác' : 'Khoá OpenRouter'}
         type="password"
         autoComplete="off"
         value={key}

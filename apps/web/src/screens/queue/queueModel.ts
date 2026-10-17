@@ -13,6 +13,16 @@ export const N4 = 'var(--color-neutral-400)';
 export const N5 = 'var(--color-neutral-500)';
 export const N8 = 'var(--color-neutral-800)';
 
+/** Tên hiển thị của kênh ở dòng Sức khoẻ hệ thống (Hôm nay). Kênh chỉ đọc danh tính (LinkedIn) không nhận tin nên không có dòng. */
+const HEALTH_CHANNEL_NAME: Record<string, string> = { zalo: 'Zalo', whatsapp: 'WhatsApp', telegram: 'Telegram', facebook: 'Facebook' };
+const HEALTH_CHANNEL_HIDDEN = new Set(['linkedin']);
+
+export function healthChannelRows(channels: { type: string; active: number }[]): { type: string; name: string; active: number }[] {
+  return channels
+    .filter((c) => !HEALTH_CHANNEL_HIDDEN.has(c.type))
+    .map((c) => ({ type: c.type, active: c.active, name: `Kênh ${HEALTH_CHANNEL_NAME[c.type] ?? c.type.charAt(0).toUpperCase() + c.type.slice(1)}` }));
+}
+
 export const PRIORITY_LABEL: Record<string, string> = { P1: 'P1', P2: 'P2', P3: 'P3' };
 export function priorityTone(p: string): string {
   return p === 'P1' ? BAD : p === 'P2' ? WARN : N4;

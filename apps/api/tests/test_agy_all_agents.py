@@ -401,7 +401,7 @@ async def test_health_does_not_raise_background_no_source_when_agy_runs(app, db,
     await db.commit()
     assert await _incident(db, org) is None
     assert await router_mod.has_agy_source(db, org) is True
-    # Gợi ý "Cần 1 khóa API để chạy lọc tin và bản tin" cũng biến mất khi có agy chạy được.
+    # Gợi ý "Cần 1 khoá API để chạy lọc tin và bản tin" cũng biến mất khi có agy chạy được.
     assert "background_key_missing" not in {s["key"] for s in await registry.suggestions(db, org)}
 
 
@@ -412,4 +412,4 @@ async def test_health_suggestion_appears_without_any_background_source(app, db, 
     keys = {s["key"] for s in await registry.suggestions(db, org)}
     assert "background_key_missing" in keys
     s = next(x for x in await registry.suggestions(db, org) if x["key"] == "background_key_missing")
-    assert "Antigravity CLI" in s["body"] and "Chỉ dùng khóa API" not in s["body"]
+    assert "Antigravity CLI" in s["body"] and "Chỉ dùng khoá API" not in s["body"]

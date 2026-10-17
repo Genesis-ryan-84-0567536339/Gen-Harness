@@ -116,7 +116,7 @@ describe('v0.1.55 — "Bật Jev 1 chạm" và cảnh báo QD-12', () => {
     expect(await screen.findByText('Bật Jev 1 chạm')).toBeInTheDocument();
     expect(screen.getByText('typesafe/jev-1.13')).toBeInTheDocument();
     expect(screen.getByText(WARNING)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Dùng khóa OpenRouter đang có/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Dùng khoá OpenRouter đang có/ })).not.toBeInTheDocument();
     const bat = screen.getByRole('button', { name: /Bật Jev$/ });
     expect(bat).toBeDisabled();
     // vẫn giữ rào PIN của việc tạo nguồn: báo trước ngay cạnh nút
@@ -136,9 +136,9 @@ describe('v0.1.55 — "Bật Jev 1 chạm" và cảnh báo QD-12', () => {
     expect(screen.getAllByText('Địa chỉ')).toHaveLength(1);
   });
 
-  it('có nguồn OpenRouter: một nút "Dùng khóa OpenRouter đang có" — gửi use_existing_openrouter, KHÔNG gửi khoá, rồi kiểm tra', async () => {
+  it('có nguồn OpenRouter: một nút "Dùng khoá OpenRouter đang có" — gửi use_existing_openrouter, KHÔNG gửi khoá, rồi kiểm tra', async () => {
     const { sent, view } = setup({ providers: [OPENROUTER] });
-    await userEvent.setup().click(await screen.findByRole('button', { name: /Dùng khóa OpenRouter đang có/ }));
+    await userEvent.setup().click(await screen.findByRole('button', { name: /Dùng khoá OpenRouter đang có/ }));
     await waitFor(() => expect(sent('/jev/enable')).toHaveLength(1));
     expect(sent('/jev/enable')[0].body).toEqual({ use_existing_openrouter: true });
     await waitFor(() => expect(sent('/providers/jev1/test')).toHaveLength(1));    // dùng provider_id máy chủ trả về
@@ -148,7 +148,7 @@ describe('v0.1.55 — "Bật Jev 1 chạm" và cảnh báo QD-12', () => {
   it('dán khoá: nút "Bật Jev" chỉ mở khi đủ dài; gửi {use_existing_openrouter:false, key}; ô khoá được xoá sau khi bật', async () => {
     const { sent } = setup({ providers: [] });
     const user = userEvent.setup();
-    const field = await screen.findByLabelText('Khóa OpenRouter');
+    const field = await screen.findByLabelText('Khoá OpenRouter');
     const bat = screen.getByRole('button', { name: /Bật Jev$/ });
     await user.type(field, 'ngan');
     expect(bat).toBeDisabled();
@@ -165,11 +165,11 @@ describe('v0.1.55 — "Bật Jev 1 chạm" và cảnh báo QD-12', () => {
   it('bật lỗi (thiếu khoá): hiện chuỗi thân thiện + "Chi tiết kỹ thuật", không render object', async () => {
     const { view } = setup({
       providers: [OPENROUTER],
-      enable: () => problem(409, 'JEV_KEY_MISSING', 'Chưa có khóa OpenRouter cho Jev', { reasons: ['Không có nguồn kind=system_one'] }),
+      enable: () => problem(409, 'JEV_KEY_MISSING', 'Chưa có khoá OpenRouter cho Jev', { reasons: ['Không có nguồn kind=system_one'] }),
     });
-    await userEvent.setup().click(await screen.findByRole('button', { name: /Dùng khóa OpenRouter đang có/ }));
+    await userEvent.setup().click(await screen.findByRole('button', { name: /Dùng khoá OpenRouter đang có/ }));
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('Chưa có khóa OpenRouter cho Jev');
+    expect(alert).toHaveTextContent('Chưa có khoá OpenRouter cho Jev');
     expect(within(alert).getByText('Chi tiết kỹ thuật')).toBeInTheDocument();
     expect(alert).toHaveTextContent('JEV_KEY_MISSING');
     expect(view.container.textContent).not.toContain('[object Object]');
@@ -211,11 +211,11 @@ describe('v0.1.55 — "Thử 12 câu mẫu"', () => {
   it('thiếu khoá (409): chuỗi thân thiện + "Chi tiết kỹ thuật", không render object', async () => {
     const { view } = setup({
       providers: [JEV],
-      benchmark: () => problem(409, 'JEV_KEY_MISSING', 'Chưa có khóa OpenRouter cho Jev', { reasons: ['Không có nguồn model kind=system_one đang bật kèm khóa'] }),
+      benchmark: () => problem(409, 'JEV_KEY_MISSING', 'Chưa có khoá OpenRouter cho Jev', { reasons: ['Không có nguồn model kind=system_one đang bật kèm khoá'] }),
     });
     await userEvent.setup().click(await screen.findByRole('button', { name: 'Thử 12 câu mẫu' }));
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('Chưa có khóa OpenRouter cho Jev');
+    expect(alert).toHaveTextContent('Chưa có khoá OpenRouter cho Jev');
     const tech = within(alert).getByText('Chi tiết kỹ thuật');
     expect(tech.closest('details')).not.toHaveAttribute('open');
     expect(alert).toHaveTextContent('JEV_KEY_MISSING');

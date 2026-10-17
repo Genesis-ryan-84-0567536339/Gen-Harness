@@ -3,7 +3,7 @@ import { MANAGER, OWNER, apiCall, enterPin, loginAs, loginAsOwner, mockHook, p3H
 
 /**
  * v0.1.55 (G4, mock, tất định) — thẻ Jev ở Cài đặt › Bộ não AI, đúng đường Sếp đi (việc Sếp phải làm duy nhất của bản này):
- *   "Dùng khóa OpenRouter đang có" → mã PIN → thẻ chuyển sang trạng thái + tự kiểm tra → "Thử 12 câu mẫu" (bảng 12 dòng + dòng
+ *   "Dùng khoá OpenRouter đang có" → mã PIN → thẻ chuyển sang trạng thái + tự kiểm tra → "Thử 12 câu mẫu" (bảng 12 dòng + dòng
  *   tóm tắt) → "Tin đã bỏ qua" → công tắc "Lọc trước khi trích xuất". Lỗi 409 JEV_KEY_MISSING = câu thân thiện + "Chi tiết kỹ thuật"
  *   (không bao giờ object). Nhân viên không thấy "Thử 12 câu mẫu" / dòng số đo, công tắc bị khoá.
  */
@@ -30,7 +30,7 @@ test.describe('v0.1.55 — thẻ Jev: Bật 1 chạm, 12 câu mẫu, Tin đã b�
     await resetMock(page.request, 'finished');
   });
 
-  test('Owner: Dùng khóa OpenRouter đang có → PIN → trạng thái → Thử 12 câu mẫu → Tin đã bỏ qua → công tắc lọc trước', async ({ page }) => {
+  test('Owner: Dùng khoá OpenRouter đang có → PIN → trạng thái → Thử 12 câu mẫu → Tin đã bỏ qua → công tắc lọc trước', async ({ page }) => {
     await loginAsOwner(page);
     await seedOpenRouter(page);
     await page.goto('/system?tab=brain#jev'); // thẻ Jev nằm trong «Nâng cao» — #jev mở sẵn
@@ -39,7 +39,7 @@ test.describe('v0.1.55 — thẻ Jev: Bật 1 chạm, 12 câu mẫu, Tin đã b�
     await expect(card(page)).toBeVisible();
     await expect(card(page).getByTestId('jev-privacy-warning')).toContainText('Tin đã che số điện thoại/email được gửi sang OpenRouter');
     await expect(card(page).getByRole('button', { name: 'Thử 12 câu mẫu' })).toHaveCount(0);
-    const enable = card(page).getByRole('button', { name: 'Dùng khóa OpenRouter đang có' });
+    const enable = card(page).getByRole('button', { name: 'Dùng khoá OpenRouter đang có' });
     await expect(enable).toBeVisible();
 
     // Bật: cần mã PIN → nhập → thẻ chuyển sang trạng thái (khoá, trạng thái) và tự kiểm tra 1 lần.
@@ -48,7 +48,7 @@ test.describe('v0.1.55 — thẻ Jev: Bật 1 chạm, 12 câu mẫu, Tin đã b�
     await enterPin(page);
     await post;
     await expect(card(page).getByText('Trạng thái')).toBeVisible();
-    await expect(card(page).getByRole('button', { name: 'Dùng khóa OpenRouter đang có' })).toHaveCount(0);
+    await expect(card(page).getByRole('button', { name: 'Dùng khoá OpenRouter đang có' })).toHaveCount(0);
     await expect(card(page).getByText(/Jev trả lời được/)).toBeVisible();
 
     // Thử 12 câu mẫu: bảng 12 dòng + dòng tóm tắt "Đúng N/12 · trung bình … ms".
@@ -86,7 +86,7 @@ test.describe('v0.1.55 — thẻ Jev: Bật 1 chạm, 12 câu mẫu, Tin đã b�
     await seedOpenRouter(page);
     await page.goto('/system?tab=brain#jev'); // thẻ Jev nằm trong «Nâng cao» — #jev mở sẵn
     const post = page.waitForResponse((r) => r.url().includes('/jev/enable') && r.request().method() === 'POST' && r.ok());
-    await card(page).getByRole('button', { name: 'Dùng khóa OpenRouter đang có' }).click();
+    await card(page).getByRole('button', { name: 'Dùng khoá OpenRouter đang có' }).click();
     await enterPin(page);
     await post;
     await expect(card(page).getByRole('button', { name: 'Thử 12 câu mẫu' })).toBeVisible();
@@ -96,7 +96,7 @@ test.describe('v0.1.55 — thẻ Jev: Bật 1 chạm, 12 câu mẫu, Tin đã b�
     await card(page).getByRole('button', { name: 'Thử 12 câu mẫu' }).click();
     const alert = card(page).getByRole('alert');
     await expect(alert).toBeVisible();
-    await expect(alert).toContainText('Chưa có khóa OpenRouter cho Jev');
+    await expect(alert).toContainText('Chưa có khoá OpenRouter cho Jev');
     await expect(alert.getByText('Chi tiết kỹ thuật')).toBeVisible();
     await expect(card(page).getByTestId('jev-bench').locator('tbody tr')).toHaveCount(0);
     await noObjectText(page);
@@ -109,7 +109,7 @@ test.describe('v0.1.55 — thẻ Jev: Bật 1 chạm, 12 câu mẫu, Tin đã b�
     await seedOpenRouter(page);
     await page.goto('/system?tab=brain#jev'); // thẻ Jev nằm trong «Nâng cao» — #jev mở sẵn
     const post = page.waitForResponse((r) => r.url().includes('/jev/enable') && r.request().method() === 'POST' && r.ok());
-    await card(page).getByRole('button', { name: 'Dùng khóa OpenRouter đang có' }).click();
+    await card(page).getByRole('button', { name: 'Dùng khoá OpenRouter đang có' }).click();
     await enterPin(page);
     await post;
     await expect(card(page).getByRole('button', { name: 'Thử 12 câu mẫu' })).toBeVisible();

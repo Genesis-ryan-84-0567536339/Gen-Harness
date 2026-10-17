@@ -213,7 +213,7 @@ async def test_suggestions_apply_standard_and_background_key(dapi: Api, db: Any)
     org = await org_id(db)
     sug = {s["key"]: s for s in (await dapi.get("/defaults")).json()["suggestions"]}
     assert set(sug) == {"background_key_missing"}                 # chưa có nguồn nào
-    assert sug["background_key_missing"]["title"] == "Cần 1 khóa API để chạy lọc tin và bản tin"
+    assert sug["background_key_missing"]["title"] == "Cần 1 khoá API để chạy lọc tin và bản tin"
     _, ids = await add_source(db, org, "openai_compat", "alpha", 1, ["alpha-flash"])
     await bind(db, org, "core.gen", ids["alpha-flash"])
     sug = (await dapi.get("/defaults")).json()["suggestions"]
