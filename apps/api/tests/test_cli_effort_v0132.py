@@ -153,7 +153,8 @@ async def test_choose_model_and_effort_validated_with_real_flags(owner_api, app,
     r = await api.send("POST", f"/providers/{p['id']}/models", {"model_name": "gemini-3.8-flash-medium"})
     assert r.status_code == 201, r.text
     saved = {m["model_name"]: m["effort"] for m in r.json()["models"]}
-    assert saved == {"gemini-3.1-pro": "low", "gemini-3.8-flash": "medium"}
+    # (v0.1.66, F132: Kiểm tra xanh đầu tiên đã lưu sẵn cả model Claude qua Antigravity mà agy liệt kê.)
+    assert saved == {"gemini-3.1-pro": "low", "gemini-3.8-flash": "medium", "claude-sonnet-4-6-thinking": None}
     # Chỉ sửa hạn mức (không gửi effort) → giữ mức, không gọi thử lại.
     n = len(_calls(clis))
     r = await api.send("POST", f"/providers/{p['id']}/models", {"model_name": "gemini-3.1-pro", "daily_quota": 50})

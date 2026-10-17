@@ -90,6 +90,15 @@ async def test_profiles_resolve_agy_for_every_role(owner_api, db, clis) -> None:
         c = std[k]
         assert c is not None and why[k] is None, (k, why[k])
         assert c["provider_kind"] == "antigravity_cli", k
+    # v0.1.66 (F005): Sếp đã bấm "Dùng model này" cho gemini-3.1-pro ⇒ "Chuẩn: …" hiện đúng model chạy thật (pro).
+    for k in keys:
+        assert std[k]["model_name"] == "gemini-3.1-pro" and std[k]["source"] == "default", k
+    # Bỏ ghim ⇒ hồ sơ chuẩn chọn theo vai.
+    async with sessionmaker()() as s:
+        await s.execute(text("UPDATE agent.models SET is_default = false WHERE provider_id = :p"), {"p": _pid})
+        await s.commit()
+    async with sessionmaker()() as s:
+        std, _why = await profiles.standard_with_reasons(s, org, keys)
     # Tầng theo vai: sàng lọc / Bản tin = nhanh (agy chỉ có flash = cân bằng ⇒ tầng gần nhất, mức thấp); Gen = cân bằng.
     assert (std["core.gen"]["model_name"], std["core.gen"]["effort"]) == ("gemini-3.8-flash", "medium")
     for k in ("core.refinery", "core.briefing", f"agent:{aid}"):
@@ -259,7 +268,8 @@ async def test_bindings_have_no_api_key_reason_and_agy_assignable_to_every_key(o
     assert reply["standard"] is None and "người ngoài" in reply["standard_reason"]
     for k, it in items.items():                                              # (d)
         assert it["source"] == "standard" and it["standard_reason"] is None, k
-        assert it["standard"]["model_name"] == "gemini-3.8-flash", k       # "Chuẩn: <model agy>" cho mọi dòng
+        # v0.1.66 (F005): fixture đã chốt gemini-3.1-pro ("Dùng model này") ⇒ "Chuẩn" nói đúng model chạy thật.
+        assert it["standard"]["model_name"] == "gemini-3.1-pro", k         # "Chuẩn: <model agy>" cho mọi dòng
         assert "blocked_reason" not in (it["binding"] or {}), k
     assert "cần khoá API" not in json.dumps(items, ensure_ascii=False)
     assert "chỉ dùng cho Gen" not in json.dumps(items, ensure_ascii=False)

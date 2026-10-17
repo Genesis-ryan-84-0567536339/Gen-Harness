@@ -239,10 +239,15 @@ async def test_test_button_green_saves_one_model_and_gen_answers(owner_api, app,
     assert (t["probe_model"], t["probe_effort"]) == ("gemini-3.8-flash", "medium")
     assert "“”" not in json.dumps(t, ensure_ascii=False)
     rows = await _models(pid)
-    assert [(m.model_name, m.effort, m.is_default) for m in rows] == [("gemini-3.8-flash", "medium", False)]
+    # v0.1.66 (F132): lưu SẴN mọi model `agy models` liệt kê (xếp theo tên); model thăm dò giữ mức đã chạy được.
+    assert [(m.model_name, m.effort, m.is_default) for m in rows] == [
+        ("claude-sonnet-4-6-thinking", None, False),
+        ("gemini-3.1-pro", None, False),
+        ("gemini-3.8-flash", "medium", False),
+    ]
     # Gọi lần 2 không thêm dòng, không ghi thêm nhật ký tự thêm.
     assert (await api.send("POST", f"/providers/{pid}/test")).json()["ok"] is True
-    assert len(await _models(pid)) == 1
+    assert len(await _models(pid)) == 3
     async with sessionmaker()() as db:
         n = (await db.execute(text("""SELECT count(*) FROM ops.action_log WHERE org_id = :o
                                       AND action = 'provider.model_auto'"""), {"o": org})).scalar_one()
@@ -270,7 +275,11 @@ async def test_gen_turn_self_heals_when_test_button_never_pressed(owner_api, app
     out = await _gen(app, org)                       # Boss chưa bấm Kiểm tra: lượt Gen tự lành
     assert out.text == "whoami:an@example.vn"
     rows = await _models(pid)
-    assert [(m.model_name, m.effort, m.is_default) for m in rows] == [("gemini-3.8-flash", "medium", False)]
+    assert [(m.model_name, m.effort, m.is_default) for m in rows] == [
+        ("claude-sonnet-4-6-thinking", None, False),
+        ("gemini-3.1-pro", None, False),
+        ("gemini-3.8-flash", "medium", False),
+    ]
     healed = len(_calls(needs_effort)) - n0
     assert healed == 3                               # gọi thử (không mức → bị từ chối, rồi 'medium') + chính lượt Gen
     await _gen(app, org)
@@ -348,7 +357,9 @@ async def test_background_and_other_roles_also_self_heal_agy(owner_api, app, nee
                                                 messages=[Message("user", "nội dung của khách")], json_mode=False)
     assert out.text == "whoami:an@example.vn"
     assert len(_calls(needs_effort)) > n0            # agy được gọi
-    assert [m.model_name for m in await _models(pid)] == ["gemini-3.8-flash"]    # và lưu đúng một model
+    # và lưu sẵn mọi model agy liệt kê (v0.1.66, F132)
+    names = [m.model_name for m in await _models(pid)]
+    assert names == ["claude-sonnet-4-6-thinking", "gemini-3.1-pro", "gemini-3.8-flash"]
 
 
 async def test_bindings_show_agy_model_for_every_role(owner_api, needs_effort) -> None:  # type: ignore[no-untyped-def]

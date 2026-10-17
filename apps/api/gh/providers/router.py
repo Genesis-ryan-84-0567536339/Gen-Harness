@@ -267,7 +267,12 @@ async def adopt_probed_model(db: AsyncSession, org_id: uuid.UUID, provider_id: u
     """v0.1.58 — nguồn CLI gọi thử THẬT thành công mà CHƯA có dòng model nào ⇒ lưu cặp (model, mức) vừa chạy được.
 
     Chỉ khi `result.ok` + có `probe_model` + nguồn có 0 dòng `agent.models` (không đụng lựa chọn của Sếp). KHÔNG đặt
-    `is_default` (Sếp chưa chốt — hồ sơ tiêu chuẩn tự phủ). Ghi Action Log `provider.model_auto`. Trả True khi thêm."""
+    `is_default` (Sếp chưa chốt — hồ sơ tiêu chuẩn tự phủ). Ghi Action Log `provider.model_auto`. Trả True khi thêm.
+
+    v0.1.66 (F132): với Antigravity CLI, lưu SẴN cả các model mà `agy models` liệt kê thật (`source == "cli"` trong
+    `model_groups` — mục dự phòng chưa xác minh KHÔNG thêm) để các tầng Cân bằng / Kỹ hơn của khung Gen có nguồn phục vụ
+    ngay sau Kiểm tra xanh. Model thăm dò đứng đầu (giữ mức đã chạy được). Chỉ làm lần đầu (nguồn 0 model): Sếp xoá
+    bớt model rồi Kiểm tra lại thì KHÔNG bị thêm lại."""
     from gh.chassis import actionlog
 
     model = str(result.get("probe_model") or "").strip()
@@ -279,16 +284,40 @@ async def adopt_probed_model(db: AsyncSession, org_id: uuid.UUID, provider_id: u
         return False
     effort = result.get("probe_effort")
     effort = effort if isinstance(effort, str) and effort in catalog.EFFORT_LABEL else None
-    added = (await db.execute(text("""INSERT INTO agent.models (provider_id, model_name, effort)
-                                      VALUES (:p, :m, :e) ON CONFLICT (provider_id, model_name) DO NOTHING
-                                      RETURNING id"""),
-                              {"p": provider_id, "m": model, "e": effort})).first()
-    if added is None:
+    kind = (await db.execute(text("SELECT kind FROM agent.providers WHERE id = :p"), {"p": provider_id})).scalar_one()
+    wanted: list[tuple[str, str | None]] = [(model, effort)]
+    if kind == "antigravity_cli":
+        for g in result.get("model_groups") or []:
+            for m in (g.get("models") or []) if isinstance(g, dict) else []:
+                mid = str(m.get("id") or "").strip() if isinstance(m, dict) else ""
+                if not mid or m.get("source") != "cli" or any(mid == w[0] for w in wanted):
+                    continue
+                eff = m.get("default_effort")
+                wanted.append((mid, eff if isinstance(eff, str) and eff in catalog.EFFORT_LABEL else None))
+    added_models: list[str] = []
+    for i, (name, eff) in enumerate(wanted):
+        if i:
+            # `agent.models.id` = core.uuid_v7(): hai dòng chèn cùng một mili-giây có thứ tự id NGẪU NHIÊN, mà chuỗi /
+            # hồ sơ chọn model theo thứ tự id ⇒ chờ để model thăm dò (chèn trước) luôn đứng trước.
+            await db.execute(text("SELECT pg_sleep(0.003)"))
+        row = (await db.execute(text("""INSERT INTO agent.models (provider_id, model_name, effort)
+                                        VALUES (:p, :m, :e) ON CONFLICT (provider_id, model_name) DO NOTHING
+                                        RETURNING id"""),
+                                {"p": provider_id, "m": name, "e": eff})).first()
+        if row is not None:
+            added_models.append(name)
+    if not added_models:
         return False
     await actionlog.record(db, org_id=org_id, actor_type=actor_type, actor_id=actor_id, action="provider.model_auto",
                            target_type="provider", target_id=str(provider_id), target_label=provider_name,
-                           detail={"model_name": model, "effort": effort, "make_default": False}, ip=ip)
+                           detail={"model_name": model, "effort": effort, "make_default": False,
+                                   "models": added_models}, ip=ip)
     return True
+
+
+#: Lý do một nguồn khoá API bị bỏ qua vì không còn khoá nào dùng được (đã xoá / tắt / chưa giải mã được). Gen đọc nó
+#: để nói "thêm khoá" thay vì "thử lại sau" (v0.1.66, F010).
+REASON_NO_KEY = "không còn khoá khả dụng"
 
 
 class ModelUnavailable(Exception):  # noqa: N818
@@ -368,8 +397,8 @@ class ModelRouter:
         1. dòng `agent.bindings` Owner đã đổi — luôn đứng đầu (kèm `bindings.effort`); lượt gọi ép `tier` (chat chọn
            tầng) thì dòng gán xuống sau các nguồn đã chọn theo tầng;
         2. mỗi nguồn đang bật theo `failover_rank` với model do HỒ SƠ TIÊU CHUẨN chọn theo tầng của vai
-           (`profiles.resolve`); nguồn Owner đã chốt model ("Dùng model này" = `is_default`) giữ model đó như trước, trừ
-           khi lượt gọi ép tầng;
+           (`profiles.resolve` — cũng là hàm quyết định "Chuẩn: …" Sếp thấy); nguồn Owner đã chốt model ("Dùng model
+           này" = `is_default`) giữ model đó, trừ khi lượt gọi ép tầng;
         3. phần đuôi như cũ: model mặc định theo hạng của các nguồn còn lại/chưa dùng (để lỗi tầng đã chọn vẫn còn đường
            lui).
         Gói G: `agy` (quyết định `agy_policy.decide` của khoá này; bỏ trống ⇒ tự tra, người hỏi mặc định Owner) không
@@ -434,10 +463,12 @@ class ModelRouter:
             ms = by_provider.get(p.id)
             if not ms:
                 continue
-            if ms[0].is_default and not forced:
-                lk = await link(p, ms[0], "default")          # Owner đã chốt model của nguồn này
-            elif p.id in picked:
-                lk = await link(p, model_by_id[picked[p.id]["model_id"]], "profile")
+            if p.id in picked:
+                # `profiles.resolve` là MỘT bộ chọn cho cả "Chuẩn: …" hiển thị lẫn chuỗi chạy: nguồn Owner đã chốt model
+                # giữ model đó (source "default"), còn lại chọn theo tầng (source "profile").
+                lk = await link(p, model_by_id[picked[p.id]["model_id"]], picked[p.id]["source"])
+            elif ms[0].is_default and not forced:
+                lk = await link(p, ms[0], "default")          # nguồn hồ sơ không phủ (vd khoá API chưa có khoá)
             else:
                 lk = await link(p, ms[0], "rank")
             if lk is not None:
@@ -605,7 +636,7 @@ class ModelRouter:
                 except Exception:  # noqa: BLE001 — khoá master đổi / dữ liệu hỏng: bỏ khoá này
                     log.error("Không giải mã được khoá %s", k.label)
             if not slots:
-                reasons.append(f"{p.name}: không còn khoá khả dụng")
+                reasons.append(f"{p.name}: {REASON_NO_KEY}")
                 continue
             for key, secret in slots:
                 started = time.monotonic()
