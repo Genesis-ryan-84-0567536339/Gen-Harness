@@ -191,7 +191,15 @@ export interface AgentDecision {
   rationale: string | null;
   trigger: EvidenceRef;
   context_refs: EvidenceRef[];
-  draft: { id: string; code: string } | null;
+  /** `status` = trạng thái nháp thật (v0.1.67, F076): chỉ khi `sent` mới là "Đã gửi". Máy chủ cũ không gửi thì thiếu. */
+  draft: { id: string; code: string; status?: DraftStatus } | null;
+  /**
+   * v0.1.67 (F076): kết cục sau chính sách tự trị — `held` (nháp chờ Sếp duyệt), `suggested`, `noted`, `blocked`,
+   * `rejected`, `none`. Máy chủ cũ không gửi thì thiếu.
+   */
+  outcome?: 'none' | 'noted' | 'suggested' | 'held' | 'blocked' | 'rejected' | null;
+  /** v0.1.67 (F075): nội dung agent gợi ý / soạn (đã che số nhạy cảm cho vai dưới Owner); null khi không có. */
+  proposal_text?: string | null;
 }
 
 type Q = Record<string, string | number | boolean | null | undefined>;

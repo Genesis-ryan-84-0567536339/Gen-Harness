@@ -34,6 +34,9 @@ const TECHNICAL = /[[\]{}]|errno|exception|traceback|error:|http\s?\d{3}|\b[a-z]
 
 export const MODEL_UNAVAILABLE_TEXT = 'Chưa có model AI hoạt động — chọn hoặc sửa model ở Agent & Model (Hướng dẫn bước 4).';
 
+/** v0.1.67 (F011): ĐÃ có model nhưng lượt gọi lỗi (hết hạn mức, mạng) — không bảo Sếp chọn lại model. */
+export const MODEL_DOWN_TEXT = 'Nguồn AI đang lỗi hoặc hết hạn mức — thử lại sau ít phút (không cần chọn lại model).';
+
 // v0.1.62: luật v0.1.38 (F-22) "Antigravity CLI chỉ dùng cho Gen của Sếp" đã gỡ (Owner chọn mở cho mọi vai ngày 16/10/2026)
 // — máy chủ không còn trả câu/lý do riêng cho "chuỗi chỉ có agy" nên web bỏ luôn các dấu nhận diện (AGY_ONLY_*).
 

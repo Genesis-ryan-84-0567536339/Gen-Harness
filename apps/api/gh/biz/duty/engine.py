@@ -60,6 +60,12 @@ def _identity(agent: Any) -> str:
             f"Cấm:\n{forbidden}")
 
 
+def identity_block(agent: Any) -> str:
+    """Khối "bạn là ai" của agent (tên, vai, xưng hô, giọng, lúc được nói, điều cấm) — dùng chung với "Soạn lại" nháp
+    (v0.1.67, F081) để cùng một giọng và cùng điều cấm."""
+    return _identity(agent)
+
+
 def allowed_decisions(level: int) -> list[str]:
     if level <= 2:
         return ["silent", "note"]

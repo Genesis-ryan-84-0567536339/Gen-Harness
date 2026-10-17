@@ -589,7 +589,9 @@ test.describe('giai đoạn 4: Agent + API & Model', () => {
     await expect(mascotCard).toHaveAttribute('data-off', '');
 
     // "Agent đã nói gì, nhân danh gì" — GET /agents/decisions.
-    await expect(page.locator('.ag-log-row', { hasText: 'Trợ lý thương mại' }).first()).toContainText('Soạn nháp');
+    // v0.1.67 (F076): quyết định soạn nháp có nháp đang chờ Sếp duyệt ⇒ nhãn "Soạn sẵn chờ duyệt", không bao giờ "Đã gửi".
+    await expect(page.locator('.ag-log-row', { hasText: 'Trợ lý thương mại' }).first()).toContainText('Soạn sẵn chờ duyệt');
+    await expect(page.locator('.ag-log-row', { hasText: 'Trợ lý thương mại' }).first()).not.toContainText('Đã gửi');
 
     // Tạo agent mới — cần PIN (agent.manage). Phiên PIN có hiệu lực 30 phút (mock, cùng khuôn backend) nên
     // chỉ lần thao tác nhạy cảm ĐẦU TIÊN trong bài test mới hiện hộp thoại — các lượt sau trong cùng phiên

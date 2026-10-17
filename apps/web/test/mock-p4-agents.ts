@@ -117,17 +117,19 @@ interface DecisionRow {
   rationale: string | null;
   trigger: { type: string; id: string; code?: string | null; label?: string | null };
   context_refs: { type: string; id: string; code?: string | null; label?: string | null }[];
-  draft: { id: string; code: string } | null;
+  draft: { id: string; code: string; status?: string } | null;
+  outcome?: string | null;
+  proposal_text?: string | null;
 }
 
 function seedDecisions(agents: AgentIdentity[]): DecisionRow[] {
   const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? id;
   return [
-    { id: 'adec-1', at: ago(4), agent: { id: AGENT_IDS.tls, name: nameOf(AGENT_IDS.tls) }, decision: 'draft', rationale: 'Khách hỏi giá lần hai, có đủ thông tin để soạn báo giá theo bảng giá đã duyệt.', trigger: { type: 'meaning_unit', id: 'mu-901', code: 'OPP-1842', label: 'Hỏi giá MDF E1' }, context_refs: [], draft: { id: 'draft-ACT-0231', code: 'ACT-0231' } },
-    { id: 'adec-2', at: ago(18), agent: { id: AGENT_IDS.tls, name: nameOf(AGENT_IDS.tls) }, decision: 'send', rationale: 'Trả lời câu hỏi thường gặp về thời gian giao hàng, không vượt phạm vi cho phép.', trigger: { type: 'raw', id: 'raw-4471', code: null, label: `Tin nhắn của ${BAO.name}` }, context_refs: [{ type: 'person', id: BAO.id, code: BAO.code, label: BAO.name }], draft: null },
+    { id: 'adec-1', at: ago(4), agent: { id: AGENT_IDS.tls, name: nameOf(AGENT_IDS.tls) }, decision: 'draft', rationale: 'Khách hỏi giá lần hai, có đủ thông tin để soạn báo giá theo bảng giá đã duyệt.', trigger: { type: 'meaning_unit', id: 'mu-901', code: 'OPP-1842', label: 'Hỏi giá MDF E1' }, context_refs: [], draft: { id: 'draft-ACT-0231', code: 'ACT-0231', status: 'pending' }, outcome: 'held', proposal_text: 'Dạ em gửi anh báo giá MDF E1 theo bảng giá đã duyệt ạ.' },
+    { id: 'adec-2', at: ago(18), agent: { id: AGENT_IDS.tls, name: nameOf(AGENT_IDS.tls) }, decision: 'send', rationale: 'Trả lời câu hỏi thường gặp về thời gian giao hàng, không vượt phạm vi cho phép.', trigger: { type: 'raw', id: 'raw-4471', code: null, label: `Tin nhắn của ${BAO.name}` }, context_refs: [{ type: 'person', id: BAO.id, code: BAO.code, label: BAO.name }], draft: null, outcome: 'held' },
     { id: 'adec-3', at: ago(47), agent: { id: AGENT_IDS.hc, name: nameOf(AGENT_IDS.hc) }, decision: 'draft', rationale: 'Đối tác yêu cầu hợp đồng vòng ba, đã có đủ điều khoản đã thống nhất trong nhóm.', trigger: { type: 'meaning_unit', id: 'mu-877', code: 'ACT-0234', label: 'Yêu cầu hợp đồng vòng ba' }, context_refs: [{ type: 'group', id: GROUP_TP.id, code: GROUP_TP.code, label: GROUP_TP.name }], draft: { id: 'draft-ACT-0234', code: 'ACT-0234' } },
     { id: 'adec-4', at: ago(90), agent: { id: AGENT_IDS.hc, name: nameOf(AGENT_IDS.hc) }, decision: 'note', rationale: 'Ghi nhận yêu cầu hậu cần mới, chưa đủ thông tin để hành động ngay.', trigger: { type: 'raw', id: 'raw-4402', code: null, label: 'Yêu cầu đổi lịch giao hàng' }, context_refs: [], draft: null },
-    { id: 'adec-5', at: ago(134), agent: { id: AGENT_IDS.tls, name: nameOf(AGENT_IDS.tls) }, decision: 'suggest', rationale: 'Khách có dấu hiệu lạnh dần, đề xuất Sếp chủ động liên hệ thay vì tự trả lời.', trigger: { type: 'alert', id: 'iq-alert-1', code: 'ALR-0233', label: 'Khách đang lạnh / sắp mất' }, context_refs: [{ type: 'person', id: BAO.id, code: BAO.code, label: BAO.name }], draft: null },
+    { id: 'adec-5', at: ago(134), agent: { id: AGENT_IDS.tls, name: nameOf(AGENT_IDS.tls) }, decision: 'suggest', rationale: 'Khách có dấu hiệu lạnh dần, đề xuất Sếp chủ động liên hệ thay vì tự trả lời.', trigger: { type: 'alert', id: 'iq-alert-1', code: 'ALR-0233', label: 'Khách đang lạnh / sắp mất' }, context_refs: [{ type: 'person', id: BAO.id, code: BAO.code, label: BAO.name }], draft: null, outcome: 'suggested', proposal_text: 'Anh nên gọi chủ động cho khách trong chiều nay, nhắc lại báo giá hôm qua.' },
     { id: 'adec-6', at: ago(300), agent: { id: AGENT_IDS.cs, name: nameOf(AGENT_IDS.cs) }, decision: 'silent', rationale: 'Câu hỏi ngoài phạm vi CSKH (giá hợp đồng), im lặng chờ nhân viên phụ trách.', trigger: { type: 'raw', id: 'raw-4390', code: null, label: 'Câu hỏi ngoài phạm vi' }, context_refs: [], draft: null },
   ];
 }

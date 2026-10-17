@@ -47,20 +47,47 @@ export function scopeSummary(scopes: AgentChannelScope[]): string {
     .join(', ');
 }
 
+/**
+ * v0.1.67 (F076): `send` KHÔNG có nghĩa tin đã đi — agent không bao giờ tự gửi, quyết định `send` chỉ tạo nháp chờ Sếp
+ * duyệt. Nhãn thô vì thế là "Soạn nháp"; "Đã gửi" chỉ hiện khi nháp đi kèm thật sự đã `sent` (xem `decisionLabel`).
+ */
 export const DECISION_LABEL: Record<AgentDecision['decision'], string> = {
   silent: 'Im lặng',
   note: 'Ghi chú',
   suggest: 'Đề xuất',
   draft: 'Soạn nháp',
-  send: 'Đã gửi',
+  send: 'Soạn nháp',
 };
-export function decisionTone(d: AgentDecision['decision']): string {
-  return d === 'send' ? OK : d === 'draft' || d === 'suggest' ? WARN : d === 'silent' ? N5 : N4;
+
+const DRAFT_STATUS_LABEL: Record<string, string> = {
+  pending: 'Soạn sẵn chờ duyệt',
+  approved: 'Đã duyệt, đang gửi',
+  edited: 'Đã duyệt (bản Sếp sửa)',
+  sent: 'Đã gửi',
+  failed: 'Gửi lỗi',
+  rejected: 'Sếp đã huỷ nháp',
+};
+
+/** Nhãn đúng với số phận thật của nháp (F076): nháp chờ duyệt / đã gửi / gửi lỗi / bị huỷ; không có nháp ⇒ nhãn thô. */
+export function decisionLabel(d: AgentDecision): string {
+  if ((d.decision === 'draft' || d.decision === 'send') && d.draft) {
+    const byStatus = d.draft.status ? DRAFT_STATUS_LABEL[d.draft.status] : undefined;
+    if (byStatus) return byStatus;
+    if (d.outcome === 'held') return DRAFT_STATUS_LABEL.pending;
+  }
+  return DECISION_LABEL[d.decision];
+}
+
+export function decisionTone(d: AgentDecision): string {
+  const label = decisionLabel(d);
+  if (label === DRAFT_STATUS_LABEL.sent) return OK;
+  if (label === DRAFT_STATUS_LABEL.failed) return BAD;
+  return d.decision === 'draft' || d.decision === 'send' || d.decision === 'suggest' ? WARN : d.decision === 'silent' ? N5 : N4;
 }
 
 export function decisionWhat(d: AgentDecision): string {
   const trigger = d.trigger.label ?? d.trigger.code ?? d.trigger.type;
-  const prefix = DECISION_LABEL[d.decision];
+  const prefix = decisionLabel(d);
   return d.draft ? `${prefix} ${d.draft.code} · ${trigger}` : `${prefix} · ${trigger}`;
 }
 

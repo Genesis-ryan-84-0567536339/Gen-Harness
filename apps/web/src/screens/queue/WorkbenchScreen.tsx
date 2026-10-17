@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { DraftCreate, DraftDetail, DraftItem, DraftStatus, GroupRef, PersonRef, SendResult } from '@gen-harness/contracts';
-import { Button, Card, EmptyState, Icon, Segmented, Skeleton, Switch, Tag, type Tone } from '@gen-harness/ui';
+import { Button, Card, EmptyState, Icon, Segmented, Skeleton, Switch, Tag, TextField, type Tone } from '@gen-harness/ui';
 import { api } from '../../lib/api';
 import { errorText } from '../../lib/errorText';
 import { fmtDMClock, fmtInt } from '../../lib/format';
@@ -334,11 +334,14 @@ function DraftDetailView({ d, onOpenDraft }: { d: DraftDetail; onOpenDraft: (id:
   const [sides, setSides] = useState<Record<string, boolean>>(() => Object.fromEntries(d.side_actions.map((s) => [s.key, s.on])));
   const [translating, setTranslating] = useState(false);
   const [translated, setTranslated] = useState<{ lang: string; text: string } | null>(null);
+  // v0.1.67 (F081): ô "Yêu cầu soạn lại" (mềm hơn / ngắn hơn…) — trước đây nút Soạn lại luôn gửi instruction = null.
+  const [instruction, setInstruction] = useState('');
 
   useEffect(() => {
     setText(d.text);
     setEditing(false);
     setTranslated(null);
+    setInstruction('');
     setSides(Object.fromEntries(d.side_actions.map((s) => [s.key, s.on])));
   }, [d.id, d.text, d.side_actions]);
 
@@ -362,8 +365,11 @@ function DraftDetailView({ d, onOpenDraft }: { d: DraftDetail; onOpenDraft: (id:
     onSuccess: invalidate,
   });
   const regenerate = useMutation({
-    mutationFn: (instruction: string | null) => api.drafts.regenerate(d.id, instruction),
-    onSuccess: invalidate,
+    mutationFn: (ask: string | null) => api.drafts.regenerate(d.id, ask),
+    onSuccess: () => {
+      setInstruction('');
+      invalidate();
+    },
   });
   const translate = useMutation({
     mutationFn: (lang: (typeof LANGS)[number]['value']) => api.drafts.translate(d.id, lang),
@@ -407,12 +413,39 @@ function DraftDetailView({ d, onOpenDraft }: { d: DraftDetail; onOpenDraft: (id:
             icon="ph ph-arrow-clockwise"
             loading={regenerate.isPending}
             disabled={decided}
-            onClick={() => regenerate.mutate(null)}
+            onClick={() => regenerate.mutate(instruction.trim() || null)}
           >
             Soạn lại
           </Button>
         </div>
       </div>
+
+      {!decided && canDraft && !isMcpWrite ? (
+        <div className="wb-regen">
+          <TextField
+            label="Yêu cầu khi soạn lại (không bắt buộc)"
+            placeholder="vd: mềm hơn, ngắn hơn, nhắc lại hạn giao hàng"
+            value={instruction}
+            onChange={(e) => setInstruction(e.target.value)}
+            maxLength={1000}
+          />
+          {d.versions.length > 0 && canApprove ? (
+            <div>
+              <Button
+                variant="secondary"
+                className="btn-27"
+                icon="ph ph-arrow-u-up-left"
+                onClick={() => {
+                  setText(d.versions[d.versions.length - 1].text);
+                  setEditing(true);
+                }}
+              >
+                Khôi phục bản trước
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {translating ? (
         <div className="wb-translate">

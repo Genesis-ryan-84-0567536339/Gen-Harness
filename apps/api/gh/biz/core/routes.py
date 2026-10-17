@@ -375,7 +375,8 @@ async def translate(draft_id: uuid.UUID, body: TranslateIn, request: Request,
                                         "định dạng đoạn. Chỉ trả bản dịch, không thêm lời."),
                       Message("user", src)])
     except ModelUnavailable as e:
-        raise model_unavailable("Chưa có model nào chạy được để dịch", _owner_reasons(user, e.reasons)) from e
+        raise model_unavailable("Chưa có model nào chạy được để dịch", _owner_reasons(user, e.reasons),
+                                no_chain=e.no_chain) from e
     owner = user.role_code == rbac.OWNER
     return {"lang": body.lang, "text": mask_text(routed.text.strip(), owner)}
 
@@ -394,19 +395,42 @@ async def regenerate(draft_id: uuid.UUID, request: Request, body: RegenerateIn |
     cur = r.body or {}
     ask = (body.instruction if body else None) or "Viết lại gọn hơn, giữ nguyên mọi số liệu và cam kết."
     ctx = "\n".join(f"- {s.get('label')}" for s in (r.sources or []))
+    system = ("Bạn soạn lại bản nháp tin nhắn công việc. Chỉ dùng dữ kiện có trong bản "
+              "nháp và danh sách nguồn; không bịa số liệu. Chỉ trả nội dung mới.")
+    if r.agent_id:
+        # v0.1.67 (F081): nháp của agent phải soạn lại ĐÚNG xưng hô, giọng và điều cấm của agent đó (cùng khối như lúc
+        # agent soạn — `engine.identity_block`), không chỉ chọn model theo agent.
+        from gh.biz.duty import engine
+
+        agent = (await db.execute(text("""SELECT name, role_desc, addressing, voice, speak_when, forbidden
+                                          FROM agent.identities WHERE id = :a AND org_id = :o"""),
+                                  {"a": r.agent_id, "o": user.org_id})).one_or_none()
+        if agent is not None:
+            system += ("\n\nBản nháp này do agent sau soạn. Giữ đúng xưng hô, giọng điệu; TUYỆT ĐỐI không vi phạm "
+                       f"điều cấm:\n{engine.identity_block(agent)}")
+    prompt = (f"Bản nháp:\n{cur.get('text', '')}\n\nNguồn đã dùng:\n{ctx}\n\nYêu cầu: {ask}")
     try:
         routed = await request.app.state.model_router.generate(
             user.org_id, agent_key=_agent_key(r), purpose="draft_regenerate", json_mode=False, temperature=0.3,
-            messages=[Message("system", "Bạn soạn lại bản nháp tin nhắn công việc. Chỉ dùng dữ kiện có trong bản "
-                                        "nháp và danh sách nguồn; không bịa số liệu. Chỉ trả nội dung mới."),
-                      Message("user", f"Bản nháp:\n{cur.get('text', '')}\n\nNguồn đã dùng:\n{ctx}\n\n"
-                                      f"Yêu cầu: {ask}")])
+            messages=[Message("system", system), Message("user", prompt)])
     except ModelUnavailable as e:
-        raise model_unavailable("Chưa có model nào chạy được để soạn lại", _owner_reasons(user, e.reasons)) from e
+        raise model_unavailable("Chưa có model nào chạy được để soạn lại", _owner_reasons(user, e.reasons),
+                                no_chain=e.no_chain) from e
+    new_text = routed.text.strip()
+    if not new_text:
+        raise ApiError(502, "MODEL_BAD_OUTPUT", "Model trả về bản trống — bản nháp giữ nguyên, thử lại hoặc sửa tay",
+                       "Phản hồi của model rỗng.")
+    from gh.biz.duty.context import mentioned_ids
+
+    invented = sorted(mentioned_ids(new_text) - mentioned_ids(prompt))
+    if invented:
+        raise ApiError(502, "MODEL_BAD_OUTPUT",
+                       "Bản soạn lại nhắc tới mã không có trong nguồn — đã bỏ, bản nháp giữ nguyên",
+                       f"Mã không có trong bản nháp/nguồn: {', '.join(invented[:5])}. Thử lại hoặc sửa tay.")
     versions = [*list(cur.get("versions") or []),
                 {"at": iso(datetime.now(UTC)),
                  "by": "agent" if r.agent_id else "user", "text": cur.get("text", "")}]
-    new_body = {**cur, "text": routed.text.strip(), "versions": versions}
+    new_body = {**cur, "text": new_text, "versions": versions}
     await db.execute(text("UPDATE biz.action_drafts SET body = CAST(:b AS jsonb), updated_at = now() WHERE id = :i"),
                      {"b": orjson.dumps(new_body).decode(), "i": draft_id})
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
@@ -416,6 +440,11 @@ async def regenerate(draft_id: uuid.UUID, request: Request, body: RegenerateIn |
 
 
 # ─── quyết định của agent ─────────────────────────────────────────────────────
+
+def _proposal_text(proposal: Any, owner: bool) -> str | None:
+    t = proposal.get("text") if isinstance(proposal, dict) else None
+    return mask_text(t.strip()[:2000], owner) if isinstance(t, str) and t.strip() else None
+
 
 @router.get("/agents/decisions")
 async def agent_decisions(agent_id: uuid.UUID | None = None, decision: str | None = None, cursor: str | None = None,
@@ -435,14 +464,19 @@ async def agent_decisions(agent_id: uuid.UUID | None = None, decision: str | Non
     params = {"o": user.org_id, "a": agent_id, "k": decision, "c": parse_cursor(cursor)}
     total = (await db.execute(text(f"SELECT count(*) FROM agent.decisions d WHERE {where}"), params)).scalar_one()  # noqa: S608
     rows = (await db.execute(text(f"""
-        SELECT d.*, a.name AS agent_name, ad.code AS draft_code FROM agent.decisions d
+        SELECT d.*, a.name AS agent_name, ad.code AS draft_code, ad.status AS draft_status FROM agent.decisions d
         JOIN agent.identities a ON a.id = d.agent_id LEFT JOIN biz.action_drafts ad ON ad.id = d.draft_id
         WHERE {where} ORDER BY d.at DESC LIMIT :n"""), {**params, "n": limit + 1})).all()  # noqa: S608
     owner = user.role_code == rbac.OWNER
     items = [{"id": str(r.id), "at": iso(r.at), "agent": {"id": str(r.agent_id), "name": r.agent_name},
               "decision": r.decision, "rationale": mask_text(r.rationale, owner), "trigger": r.trigger_ref,
               "context_refs": r.context_refs or [],
-              "draft": {"id": str(r.draft_id), "code": r.draft_code} if r.draft_id else None}
+              # v0.1.67 (F076): `outcome` (held = nháp chờ duyệt, suggested, noted, blocked, rejected, none) + trạng
+              # thái nháp thật — web chỉ ghi "Đã gửi" khi nháp `sent`. (F075): nội dung gợi ý/nháp agent đã soạn
+              # (che số nhạy cảm).
+              "outcome": r.outcome, "proposal_text": _proposal_text(r.proposal, owner),
+              "draft": {"id": str(r.draft_id), "code": r.draft_code, "status": r.draft_status}
+              if r.draft_id else None}
              for r in rows[:limit]]
     return {"items": items, "next_cursor": iso(rows[limit - 1].at) if len(rows) > limit else None, "total": total}
 

@@ -208,9 +208,16 @@ function DecisionsPanel() {
           <div className="ag-log-row" key={d.id}>
             <span className="ag-log-row__time">{fmtDMClock(d.at)}</span>
             <span className="ag-log-row__agent">{d.agent.name}</span>
-            <span className="ag-log-row__what" style={{ color: decisionTone(d.decision) }} title={decisionWhat(d)}>
+            <span className="ag-log-row__what" style={{ color: decisionTone(d) }} title={decisionWhat(d)}>
               {decisionWhat(d)}
             </span>
+            {/* F075: câu agent đã gợi ý / soạn — trước đây lưu nhưng không màn nào đọc được. */}
+            {d.proposal_text ? (
+              <span className="ag-log-row__proposal" data-testid="agent-proposal">
+                {d.decision === 'suggest' ? 'Gợi ý: ' : d.decision === 'note' ? 'Ghi chú: ' : 'Nội dung soạn: '}
+                {d.proposal_text}
+              </span>
+            ) : null}
           </div>
         ))
       )}
