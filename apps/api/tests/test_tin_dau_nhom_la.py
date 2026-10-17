@@ -92,7 +92,8 @@ async def test_existing_pending_or_off_group_still_drops_first_message(app, db, 
 
 async def test_first_message_failure_does_not_lose_the_new_group(app, db, redis, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     """Review v0.1.65 P3: lưu tin đầu lỗi (lỗi DB) chạy trong savepoint ⇒ chỉ mất tin đầu; nhóm vừa tạo, tập nghe và
-    bộ đếm «N nhóm mới» vẫn được commit (trước đây cả giao dịch bị huỷ ⇒ bus giao lại 5 lần rồi vào DLQ, nhóm không có)."""
+    bộ đếm «N nhóm mới» vẫn được commit (trước đây cả giao dịch bị huỷ ⇒ bus giao lại 5 lần rồi vào DLQ, nhóm không
+    có)."""
     import gh.data.ingest as ingest_mod
 
     async def boom(db_: Any, org_: Any, p: Any) -> None:

@@ -309,8 +309,8 @@ async def sync_listen_sets(db: AsyncSession, redis: Redis, org_id: uuid.UUID) ->
         if ids:
             pipe.sadd(key, *ids)
         pipe.set(f"gh:bridge:listen_direct:{ch}", "0" if direct_mode(settings, ch) == "off" else "1")
-        # Cờ «nhóm mới» của kênh: bridge chỉ gắn nội dung tin đầu (`first_message`) vào `group.discovered` khi = silent —
-        # ask/off thì lõi không lưu nên nội dung không được phép nằm lại trong stream (review v0.1.65 P2-1).
+        # Cờ «nhóm mới» của kênh: bridge chỉ gắn nội dung tin đầu (`first_message`) vào `group.discovered` khi =
+        # silent — ask/off thì lõi không lưu nên nội dung không được phép nằm lại trong stream (review v0.1.65 P2-1).
         pipe.set(f"gh:bridge:new_group_mode:{ch}", new_group_mode(settings, ch))
     await pipe.execute()
 

@@ -124,14 +124,15 @@ def test_qd1710_allowed_decisions_in_silent_group_are_silent_and_note_at_every_l
 
 @pytest.mark.parametrize("tagged", [False, True])
 @pytest.mark.parametrize("choice", ["suggest", "draft", "send"])
-async def test_qd1710_silent_group_is_not_given_to_the_duty_agent_so_never_replies(w, db, redis, choice: str, tagged: bool) -> None:  # type: ignore[no-untyped-def]
-    """Mặc định sổ câu hỏi #22 (review v0.1.65): nhóm «Lắng nghe im lặng» KHÔNG vào ứng viên agent trực — không tốn một lượt
-    LLM chỉ để ra silent/note, kể cả khi được tag; sàng lọc vẫn chạy (đơn vị ý nghĩa vẫn được tạo)."""
+async def test_qd1710_silent_group_is_not_given_to_the_duty_agent(w, db, redis, choice: str, tagged: bool) -> None:  # type: ignore[no-untyped-def]
+    """Mặc định sổ câu hỏi #22 (review v0.1.65): nhóm «Lắng nghe im lặng» KHÔNG vào ứng viên agent trực — không tốn một
+    lượt LLM chỉ để ra silent/note, kể cả khi được tag; sàng lọc vẫn chạy (đơn vị ý nghĩa vẫn được tạo)."""
     a = await make_agent(db, w, level=6)
     await db.execute(text("UPDATE core.groups SET listen_mode = 'silent' WHERE id = :g"), {"g": w["g1"]})
     await db.commit()
     [u] = await refine(w, redis, msg(BUY, mentions=tagged))
-    assert (await db.execute(text("SELECT count(*) FROM clean.meaning_units WHERE id = :u"), {"u": u})).scalar_one() == 1
+    n_units = (await db.execute(text("SELECT count(*) FROM clean.meaning_units WHERE id = :u"), {"u": u})).scalar_one()
+    assert n_units == 1
     router = decide(choice)
     await hook(w, redis, router, [u])
     assert router.calls == []                                                          # không gọi model

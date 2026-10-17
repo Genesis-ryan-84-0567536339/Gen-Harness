@@ -117,8 +117,8 @@ WHERE (
        AND (CASE WHEN u.group_id IS NULL
                  -- v0.1.65: tin 1-1 mặc định IM LẶNG (`silent`: lưu, không đưa cho agent trực); chỉ `reply` mới có
                  THEN {direct_mode} = 'reply'
-                 -- QD 17/10 + sổ câu hỏi #22: nhóm `silent` (Lắng nghe im lặng) KHÔNG vào ứng viên — không bao giờ trả lời nên
-                 -- không tốn một lượt LLM chỉ để ra silent/note; tin vẫn được lưu và sàng lọc như thường.
+                 -- QD 17/10 + sổ câu hỏi #22: nhóm `silent` (Lắng nghe im lặng) KHÔNG vào ứng viên — không bao giờ
+                 -- trả lời nên không tốn một lượt LLM chỉ để ra silent/note; tin vẫn được lưu và sàng lọc như thường.
                  ELSE u.listen_mode = 'proactive' OR (u.listen_mode = 'tagged_only' AND u.tagged) END)
   )
   AND NOT EXISTS (SELECT 1 FROM agent.decisions d WHERE d.agent_id = a.id AND d.trigger_unit_id = u.id)

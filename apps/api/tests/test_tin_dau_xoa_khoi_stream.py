@@ -136,9 +136,10 @@ async def test_patch_channel_and_box_apply_refresh_the_flag(owner_api, db, redis
     await _set_mode(db, "zalo", "ask")
     ids = await _pending(db, redis, "g1")
     r = await owner_api.send("PATCH", f"/channels/zalo/groups/{ids['g1']}/mode", {"mode": "silent"})
-    assert r.status_code == 200 and await redis.get(FLAG) == b"ask"   # chọn riêng nhóm này: chính sách nhóm sau giữ nguyên
+    assert r.status_code == 200 and await redis.get(FLAG) == b"ask"   # chọn riêng nhóm này: nhóm sau giữ nguyên
     # nhóm đã ở đúng chế độ rồi vẫn phải làm mới cờ khi Sếp tick «Áp dụng cho các nhóm mới»
-    r = await owner_api.send("PATCH", f"/channels/zalo/groups/{ids['g1']}/mode", {"mode": "silent", "apply_to_new": True})
+    url = f"/channels/zalo/groups/{ids['g1']}/mode"
+    r = await owner_api.send("PATCH", url, {"mode": "silent", "apply_to_new": True})
     assert r.status_code == 200 and await redis.get(FLAG) == b"silent"
 
 

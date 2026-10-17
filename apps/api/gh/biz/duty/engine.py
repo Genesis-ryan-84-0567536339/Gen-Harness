@@ -63,8 +63,8 @@ def _identity(agent: Any) -> str:
 def replies_allowed(c: Candidate) -> bool:
     """QD 17/10/2026: nhóm «Lắng nghe im lặng» (`silent`) KHÔNG BAO GIỜ trả lời — kể cả khi được tag, kể cả khi agent
     được gán BOT cho nhóm/người. Mọi chế độ khác giữ như cũ (tagged_only: được tag thì trả lời).
-    Mặc định #22: nhóm `silent` còn không vào ứng viên (`context.candidates`) nên hàm này là lớp phòng thủ — nhóm vừa đổi
-    sang `silent` giữa lúc chọn ứng viên và lúc xử lý phản hồi (xem `apply`, đọc lại chế độ hiện tại)."""
+    Mặc định #22: nhóm `silent` còn không vào ứng viên (`context.candidates`) nên hàm này là lớp phòng thủ — nhóm
+    vừa đổi sang `silent` giữa lúc chọn ứng viên và lúc xử lý phản hồi (xem `apply`, đọc lại chế độ hiện tại)."""
     return not (c.group_id and c.listen_mode == "silent")
 
 

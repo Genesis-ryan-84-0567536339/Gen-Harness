@@ -403,7 +403,8 @@ async def channel_group_mode(type_: str, gid: uuid.UUID, body: GroupModeIn, requ
         if not user.pin_active():
             raise pin_required()
         await _save_new_group_mode(db, user, type_, body.mode)
-        await sync_listen_sets(db, request.app.state.redis, user.org_id)   # cờ «nhóm mới» của bridge, kể cả khi nhóm này không đổi chế độ
+        # cờ «nhóm mới» của bridge, làm mới cả khi nhóm này không đổi chế độ
+        await sync_listen_sets(db, request.app.state.redis, user.org_id)
     else:
         await set_channel_setting(db, user.org_id, "new_group_asked", type_, True)
     return await update_group(db, request.app.state.redis, user, gid, GroupPatch(listen_mode=body.mode))

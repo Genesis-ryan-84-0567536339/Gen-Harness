@@ -40,8 +40,9 @@ PLUGIN_CONTROL = "gh.plugin.control"
 PLUGIN_HEALTH = "gh.plugin.health"
 
 
-#: Khoá payload mang NỘI DUNG tin theo stream: bản ghi gốc không được nằm lại sau khi đã xử lý (consumer tự XDEL khi xong)
-#: và bản sao vào `.dlq` không được mang theo (review v0.1.65 P2-1: `directory` ← `group.discovered.first_message`).
+#: Khoá payload mang NỘI DUNG tin theo stream: bản ghi gốc không được nằm lại sau khi đã xử lý (consumer tự XDEL khi
+#: xong) và bản sao vào `.dlq` không được mang theo (review v0.1.65 P2-1: `directory` ←
+#: `group.discovered.first_message`).
 CONTENT_PAYLOAD_KEYS: dict[str, tuple[str, ...]] = {BRIDGE_DIRECTORY: ("first_message",)}
 
 
