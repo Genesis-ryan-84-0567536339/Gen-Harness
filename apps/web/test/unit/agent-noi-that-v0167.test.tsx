@@ -7,7 +7,7 @@ import { ApiError } from '@gen-harness/contracts';
 import type { AgentDecision, DraftDetail, DraftItem } from '@gen-harness/contracts';
 import { WorkbenchScreen } from '../../src/screens/queue/WorkbenchScreen';
 import { AgentsScreen } from '../../src/screens/agents/AgentsScreen';
-import { decisionLabel, decisionTone } from '../../src/screens/agents/agentsModel';
+import { decisionLabel, decisionTone, decisionWhat } from '../../src/screens/agents/agentsModel';
 import { ActionError, ModelUnavailableNotice } from '../../src/screens/common';
 import { errorText, isModelDown } from '../../src/lib/errorText';
 import { MODEL_DOWN_TEXT, MODEL_UNAVAILABLE_TEXT } from '../../src/lib/friendlyError';
@@ -143,6 +143,16 @@ describe('F076 + F075 — bảng "Agent đã nói gì" nói đúng số phận c
   const base = { rationale: null, context_refs: [], at: '2026-10-10T08:00:00Z', agent: { id: 'a1', name: 'Trợ lý thương mại' } };
   const trig = { type: 'meaning_unit', id: 'mu', code: 'OPP-1', label: 'Hỏi giá' };
   const D = (o: Partial<AgentDecision> & Pick<AgentDecision, 'id' | 'decision'>): AgentDecision => ({ ...base, trigger: trig, draft: null, ...o });
+
+  it('decisionWhat: thiếu cớ (nhãn/mã/loại) thì bỏ phần sau dấu «·», không hiện "undefined"', () => {
+    expect(decisionWhat(D({ id: '1', decision: 'silent' }))).toBe('Im lặng · Hỏi giá');
+    const noTrig = { type: undefined, id: 'x', code: undefined, label: undefined } as unknown as AgentDecision['trigger'];
+    expect(decisionWhat(D({ id: '2', decision: 'silent', trigger: noTrig }))).toBe('Im lặng');
+    expect(decisionWhat(D({ id: '3', decision: 'silent', trigger: { ...noTrig, type: 'meaning_unit' } }))).toBe('Im lặng · meaning_unit');
+    const dr = D({ id: '4', decision: 'draft', outcome: 'held', trigger: noTrig, draft: { id: 'x', code: 'ACT-9', status: 'pending' } });
+    expect(decisionWhat(dr)).toBe('Soạn sẵn chờ duyệt ACT-9');
+    expect(decisionWhat(dr)).not.toMatch(/undefined|·\s*$/);
+  });
 
   it('decisionLabel: send/draft chỉ "Đã gửi" khi nháp thật sự sent', () => {
     const held = D({ id: '1', decision: 'send', outcome: 'held', draft: { id: 'x', code: 'ACT-1', status: 'pending' } });

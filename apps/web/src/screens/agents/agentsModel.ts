@@ -86,9 +86,10 @@ export function decisionTone(d: AgentDecision): string {
 }
 
 export function decisionWhat(d: AgentDecision): string {
-  const trigger = d.trigger.label ?? d.trigger.code ?? d.trigger.type;
-  const prefix = decisionLabel(d);
-  return d.draft ? `${prefix} ${d.draft.code} · ${trigger}` : `${prefix} · ${trigger}`;
+  // Máy chủ cũ / bản ghi thiếu cả nhãn, mã lẫn loại cớ ⇒ bỏ phần sau dấu «·» (không bao giờ hiện chữ "undefined").
+  const trigger = (d.trigger?.label || d.trigger?.code || d.trigger?.type || '').trim();
+  const prefix = d.draft ? `${decisionLabel(d)} ${d.draft.code}` : decisionLabel(d);
+  return trigger ? `${prefix} · ${trigger}` : prefix;
 }
 
 /**
