@@ -95,9 +95,11 @@ async def _scan_slow_response(db: AsyncSession, org_id: uuid.UUID) -> int:
     - "Đã trả lời": nhóm ⇒ có tin đi sau đó trong CÙNG nhóm; tin 1-1 ⇒ có tin đi sau đó GỬI CHO ĐÚNG khách này
       (`outbound_to_sql`) — Sếp nhắn khách A không che khách B.
     - Một người (và một nhóm / cuộc 1-1) một cảnh báo: lấy tin chờ lâu nhất làm bằng chứng; tin sau của cùng người
-      không sinh thêm dòng cùng tiêu đề."""
+      không sinh thêm dòng cùng tiêu đề. Tin 1-1 chưa gắn được người gửi (person_id rỗng) thì KHÔNG gom: `DISTINCT ON`
+      coi mọi NULL là một ⇒ mỗi tin một khoá riêng (review v0.1.67), không để một cuộc bị bỏ quên che cuộc khác."""
     rows = (await db.execute(text(f"""
-        SELECT DISTINCT ON (c.person_id, c.group_id, c.channel_id)
+        SELECT DISTINCT ON (c.person_id, (CASE WHEN c.person_id IS NULL AND c.group_id IS NULL THEN c.raw_id END),
+                            c.group_id, c.channel_id)
                c.raw_id, c.person_id, c.person_name, c.owner_user_id, u.display_name AS owner_name
         FROM (
           SELECT e.id AS raw_id, e.received_at, e.channel_id, e.group_id, e.occurred_at, p.id AS person_id,
@@ -127,7 +129,8 @@ async def _scan_slow_response(db: AsyncSession, org_id: uuid.UUID) -> int:
             AND o2.received_at >= c.received_at AND o2.occurred_at > c.occurred_at
             AND CASE WHEN c.group_id IS NOT NULL THEN o2.group_id = c.group_id
                      ELSE o2.group_id IS NULL AND {outbound_to_sql("o2", "c.ids", "c.ext")} END)
-        ORDER BY c.person_id, c.group_id, c.channel_id, c.occurred_at
+        ORDER BY c.person_id, (CASE WHEN c.person_id IS NULL AND c.group_id IS NULL THEN c.raw_id END),
+                 c.group_id, c.channel_id, c.occurred_at
         LIMIT :lim"""),  # noqa: S608 — outbound_to_sql là hằng nội bộ
         {"o": org_id, "sla": RESPONSE_SLA_MIN, "win": RESPONSE_WINDOW_H, "lim": SCAN_LIMIT,
          "nokind": list(NO_REPLY_KINDS), "need": list(NEEDS_REPLY_EVENTS)})).all()

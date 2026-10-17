@@ -147,3 +147,27 @@ async def test_care_pairing_matches_reply_to_the_right_customer(app, db) -> None
     assert by[raw_b] is None                                      # B chưa — tin riêng cho A không che B
     assert len(rows) == 2                                         # reaction không tính là tin cần trả lời
     _ = uuid
+
+
+async def test_unresolved_senders_in_dm_each_get_their_own_alert(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """Review v0.1.67 P3: tin 1-1 chưa gắn được người gửi (sender_identity_id rỗng ⇒ person_id rỗng) không bị
+    `DISTINCT ON` gom thành MỘT cảnh báo — hai cuộc 1-1 khác nhau bị bỏ quên phải thành hai cảnh báo."""
+    org = await org_id(db)
+    await _enable_dm(db, org)
+    ch = (await db.execute(text("SELECT id FROM core.channels WHERE org_id = :o AND type = 'zalo'"),
+                           {"o": org})).scalar_one()
+    raws = []
+    for i, hours in enumerate((4, 3)):
+        raws.append((await db.execute(text("""
+            INSERT INTO raw.events (org_id, occurred_at, channel_id, group_id, sender_identity_id, external_msg_id,
+                                    kind, body_text, payload, content_hash, direction)
+            VALUES (:o, now() - make_interval(hours => :h), :c, NULL, NULL, :m, 'text', 'Anh báo giá giúp em',
+                    CAST(:p AS jsonb), decode(md5(:m), 'hex'), 'inbound') RETURNING id"""),
+                                    {"o": org, "h": hours, "c": ch, "m": f"anon-{i}-{uuid.uuid4().hex[:6]}",
+                                     "p": f'{{"threadId": "lạ-{i}"}}'})).scalar_one())
+    for raw in raws:
+        await _unit(db, org, person_id=None, event_type="AskedPrice", conclusion="Hỏi giá", raw_id=raw)
+    await db.commit()
+    await queue_jobs.early_warning_scan({"redis_bus": redis})
+    rows = await _alerts(db)
+    assert sorted(str(r.evidence[0]["id"]) for r in rows) == sorted(str(r) for r in raws), [r.title for r in rows]
