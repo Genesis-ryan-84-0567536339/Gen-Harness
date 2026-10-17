@@ -301,10 +301,14 @@ func TestWatchdog_APIDownSendsExactlyOnce(t *testing.T) {
 		t.Fatalf("lượt 1 phải đúng 1 tin, được %d: %q", h.tg.posts(), sent)
 	}
 	for _, want := range []string{"Gen-Harness · CẢNH BÁO", "Máy chủ: may-chu-test", "• Máy chủ ứng dụng (api) không chạy", "Đã tự khởi động lại api lúc",
-		"Mở Console: https://localhost:18443/connections#telegram", "mọi thao tác Sếp xác nhận trong Console"} {
+		"Mở Console từ máy chủ Gen-Harness (chưa bật Truy cập từ xa", "mọi thao tác Sếp xác nhận trong Console"} {
 		if !strings.Contains(sent[0], want) {
 			t.Errorf("tin thiếu %q:\n%s", want, sent[0])
 		}
+	}
+	// F092: chưa có public_url ⇒ không chèn link localhost vào tin (điện thoại không mở được).
+	if strings.Contains(sent[0], "localhost") || strings.Contains(sent[0], "https://") {
+		t.Errorf("tin không được chèn link localhost:\n%s", sent[0])
 	}
 	if h.tg.paths[0] != "/bot"+wdToken+"/sendMessage" {
 		t.Fatalf("path %q", h.tg.paths[0])
@@ -895,5 +899,41 @@ func TestWatchdog_LamMoiNightlyStatus(t *testing.T) {
 	h.mustRun(WatchdogOptions{Quiet: true})
 	if h.nightly != 2 {
 		t.Fatalf("khoá bận ⇒ lượt bị bỏ qua, không làm mới: %d", h.nightly)
+	}
+}
+
+func TestWatchdogConsoleURL_ChiLinkKhiMoDuocTuNgoai(t *testing.T) {
+	env := testEnv(t, filepath.Join(t.TempDir(), "compose.yml"))
+	for _, c := range []struct{ public, want string }{
+		{"https://gh.example.vn", "https://gh.example.vn"},
+		{"https://gh.example.vn/", "https://gh.example.vn"},
+		{"http://203.0.113.5:8443", "http://203.0.113.5:8443"},
+		{"", ""},
+		{"  ", ""},
+		{"https://localhost:8443", ""},
+		{"https://LOCALHOST.:8443/", ""},
+		{"https://gh.localhost", ""},
+		{"http://127.0.0.1:8080", ""},
+		{"http://127.5.6.7", ""},
+		{"https://[::1]:8443", ""},
+		{"http://0.0.0.0:8443", ""},
+		{"localhost:8443", ""},
+		{"://hỏng", ""},
+	} {
+		if got := watchdogConsoleURL(env, c.public); got != c.want {
+			t.Errorf("watchdogConsoleURL(%q) = %q, muốn %q", c.public, got, c.want)
+		}
+	}
+}
+
+func TestWatchdogMessage_KhongLinkKhiConsoleURLRong(t *testing.T) {
+	local := watchdogMessage("Gen-Harness · CẢNH BÁO", "Máy chủ: x", []string{"• a"}, "")
+	if strings.Contains(local, "https://") || strings.Contains(local, "Mở Console:") ||
+		!strings.Contains(local, "Mở Console từ máy chủ Gen-Harness (chưa bật Truy cập từ xa") {
+		t.Errorf("tin local sai:\n%s", local)
+	}
+	remote := watchdogMessage("Gen-Harness · CẢNH BÁO", "Máy chủ: x", nil, "https://gh.example.vn")
+	if !strings.Contains(remote, "Mở Console: https://gh.example.vn/connections#telegram") {
+		t.Errorf("tin có địa chỉ ngoài phải có link:\n%s", remote)
 	}
 }
