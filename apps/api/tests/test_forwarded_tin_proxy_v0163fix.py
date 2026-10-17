@@ -52,6 +52,7 @@ def test_trusted_proxy_and_loopback_keep_old_behaviour(monkeypatch: pytest.Monke
 def test_trusted_proxy_by_hostname(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(get_settings(), "trusted_proxies", "proxy")
     monkeypatch.setattr(deps, "_resolve", lambda host: ["172.18.0.9"] if host == "proxy" else [])
+    deps.refresh_trusted_proxies()      # P3-2 (review lần 2): tên được phân giải ở luồng nền / lúc khởi động
     assert deps.client_ip(_req({"X-Forwarded-For": "203.0.113.7"}, "172.18.0.9")) == "203.0.113.7"
     assert deps.client_ip(_req({"X-Forwarded-For": "203.0.113.7"}, "172.18.0.10")) == "172.18.0.10"
 

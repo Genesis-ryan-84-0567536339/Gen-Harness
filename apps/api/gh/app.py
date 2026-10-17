@@ -21,6 +21,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from gh import __version__, biz, health, realtime
 from gh.agents_api.routes import router as agents_router
 from gh.audit.routes import router as audit_router
+from gh.auth import deps
 from gh.auth.account import router as account_router
 from gh.auth.routes import router as auth_router
 from gh.auth.users import router as users_router
@@ -170,6 +171,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         result = await bootstrap(db)
         await db.commit()
     app.state.org_id = result.org_id
+    # Review lần 2 v0.1.63 (P3-2): phân giải tên proxy tin cậy (Caddy) trước yêu cầu đầu — sau đó làm mới ở luồng nền.
+    with contextlib.suppress(Exception):
+        await asyncio.to_thread(deps.refresh_trusted_proxies)
     # v0.1.44 (F-8c): đồng bộ run/telegram.json cho Trực canh máy chủ (sau nhập gói/đổi khoá vẫn khớp) — best-effort.
     await telegram_service.sync_host_file(sessionmaker())
     app.state.console_ready = None
