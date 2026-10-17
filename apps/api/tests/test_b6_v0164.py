@@ -63,6 +63,41 @@ async def test_rule_person_type_is_written_to_person(app, db, redis) -> None:  #
     assert n == 1
 
 
+async def test_person_type_is_not_written_from_outbound_only_evidence(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """P3 review v0.1.64: bằng chứng toàn tin GỬI ĐI (có thể là tài khoản Sếp/nhân viên) mà model bị dẫn dắt ⇒
+    không được gán loại người cho người gửi; chỉ người đến từ tin NHẬN VÀO mới được ghi."""
+    org = await setup_org(db)
+    sm = sessionmaker()
+    [out_raw, in_raw] = await put(
+        sm, org, {**msg(JOB, sender="staff1", name="Tài khoản Sếp"), "direction": "outbound"},
+        msg(JOB, sender="cv1", name="Anh Việt"))
+    p_out, p_in = await person_of(db, out_raw), await person_of(db, in_raw)
+    st = await Refinery(sm, redis, job_router()).run(org, "manual")  # type: ignore[arg-type]
+    assert st.clean >= 2
+    assert (await ptype(db, p_out))[0] == "unknown"  # người gửi tin gửi đi: không bị gán
+    assert (await ptype(db, p_in))[0] == "candidate"  # người nhắn vào: vẫn ghi như cũ
+    n = (await db.execute(text("""SELECT count(*) FROM ops.action_log WHERE action = 'person.type_inferred'
+                                  AND target_id = :p"""), {"p": str(p_out)})).scalar_one()
+    assert n == 0
+
+
+async def test_person_type_uses_inbound_person_when_evidence_is_mixed(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+    org = await setup_org(db)
+    sm = sessionmaker()
+    [out_raw, in_raw] = await put(
+        sm, org, {**msg("Bên em đang tuyển", sender="staff1", name="Nhân viên"), "direction": "outbound"},
+        msg(JOB, sender="cv1", name="Anh Việt"))
+    p_out, p_in = await person_of(db, out_raw), await person_of(db, in_raw)
+
+    def both(m: object) -> dict[str, object]:
+        refs = refs_in(m)  # type: ignore[arg-type]
+        return {"units": [{**unit(refs[0]), "evidence": refs}], "noise": []}
+
+    await Refinery(sm, redis, FakeRouter(both)).run(org, "manual")  # type: ignore[arg-type]
+    assert (await ptype(db, p_in))[0] == "candidate"
+    assert (await ptype(db, p_out))[0] == "unknown"
+
+
 async def test_rule_never_overwrites_a_value_the_owner_set(app, db, redis, owner_api) -> None:  # type: ignore[no-untyped-def]
     org = await setup_org(db)
     sm = sessionmaker()

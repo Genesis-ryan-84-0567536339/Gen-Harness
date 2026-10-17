@@ -511,8 +511,8 @@ class Refinery:
                 out = apply_outputs(applied)
                 event_type = u.event_type
                 side = u.side or {"demand": "demand", "supply": "supply"}.get(str(out["sets"].get("side")), None)
-                person_id = next((e.person_id for e in evs if e.direction == "inbound" and e.person_id),
-                                 first.person_id)
+                inbound_person_id = next((e.person_id for e in evs if e.direction == "inbound" and e.person_id), None)
+                person_id = inbound_person_id or first.person_id
                 group_id = first.group_id
                 eng = await scoring.engagement(db, person_id)
                 scores = scoring.unit_scores(u.signals, out["adds"], u.confidence, eng)
@@ -535,8 +535,10 @@ class Refinery:
                     score, applied)
                 new_units.append((unit_id, observed_at, u.conclusion))
                 st.unit_ids.append(str(unit_id))
-                if person_id and set_type:
-                    await self._write_person_type(db, org_id, person_id, str(set_type), unit_id)
+                # Loại người chỉ ghi cho người ĐẾN TỪ TIN NHẬN VÀO: bằng chứng toàn tin gửi đi là của tài khoản mình
+                # (Sếp/nhân viên) — model bị dẫn dắt cũng không được gán loại cho họ.
+                if inbound_person_id and set_type:
+                    await self._write_person_type(db, org_id, inbound_person_id, str(set_type), unit_id)
                 if person_id:
                     touched.add(("person", person_id))
                 if group_id:
