@@ -365,6 +365,28 @@ async def test_rejections_are_silent_logged_without_content_and_bell(owner_api: 
     assert (await _row()).inbound_offset == 17
 
 
+async def test_rejection_action_log_is_capped_per_reason_per_hour(owner_api: Api, bot: FakeBot, redis: Any) -> None:
+    """P3 review v0.1.64: bị spam ⇒ Action Log không phình vô hạn: tối đa N dòng/giờ/lý do, còn lại đếm ở Redis."""
+    await _pair(owner_api, bot, redis)
+    org = await _org()
+    n = inbound.REJECT_LOG_PER_REASON
+    total = n + 7
+    now = datetime.now(UTC)
+    bot.updates = [msg(10 + i, "spam", chat_id=999, user_id=999, date=now) for i in range(total)]
+    bot.updates += [msg(200 + i, "nhóm", chat_id=-5, chat_type="group", date=now) for i in range(2)]
+    out = await poller.poll_org(sessionmaker(), redis, None, org, transport=httpx.MockTransport(bot.handle))
+    assert len(out["results"]) == total + 2
+    logs = await _rejected_logs()
+    stranger = [lg for lg in logs if lg.detail["reason"] == "stranger_chat"]
+    assert len(stranger) == n + 1  # N dòng + đúng MỘT dòng báo "đã giới hạn"
+    assert sum(1 for lg in stranger if lg.detail.get("throttled")) == 1
+    assert len([lg for lg in logs if lg.detail["reason"] == "group"]) == 2  # giới hạn theo TỪNG lý do
+    assert int(await redis.get(f"gh:tg:rejlog:{org}:stranger_chat")) == total  # phần còn lại vẫn được đếm
+    async with admin_sessionmaker()() as s:  # chuông "người lạ" vẫn kêu đúng một lần dù bớt dòng nhật ký
+        bells = (await s.execute(text("SELECT 1 FROM core.notifications WHERE kind = 'telegram.rejected'"))).all()
+    assert len(bells) == 1
+
+
 async def test_owner_stale_backlog_and_unpaired_chatter_do_not_ring_stranger_bell(
     owner_api: Api, bot: FakeBot, redis: Any
 ) -> None:

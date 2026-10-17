@@ -40,6 +40,7 @@ PAIR_TTL = timedelta(minutes=10)
 PAIR_MAX_ATTEMPTS = 5
 REJECT_BELL_AFTER = 5
 REJECT_WINDOW_S = 3600
+REJECT_LOG_PER_REASON = 20  # tối đa dòng Action Log `telegram.rejected` mỗi lý do mỗi giờ (chống phình nhật ký)
 RATE_PER_MIN = 20
 TEXT_MAX = 4000
 ACTION_REJECTED = "telegram.rejected"
@@ -260,17 +261,33 @@ async def record_reject(
                 chat_type = t if isinstance(t, str) and len(t) <= 20 else None
                 break
     uid = update.get("update_id") if isinstance(update, dict) and _is_int(update.get("update_id")) else None
-    await actionlog.record(
-        db,
-        org_id=org_id,
-        actor_type="system",
-        actor_id="system:telegram",
-        action=ACTION_REJECTED,
-        target_type="telegram",
-        target_id="inbound",
-        result="blocked",
-        detail={"reason": reason, "update_id": uid, "chat_type": chat_type},
-    )
+    detail: dict[str, Any] | None = {"reason": reason, "update_id": uid, "chat_type": chat_type}
+    if redis is not None:
+        # Giới hạn nhật ký: N dòng đầu mỗi giờ cho mỗi lý do; dòng thứ N+1 là MỘT dòng báo "đã giới hạn"; các tin sau
+        # chỉ tăng bộ đếm Redis (`gh:tg:rejlog:<org>:<lý do>`). Redis lỗi ⇒ vẫn ghi (thà nhiều hơn mất dấu vết).
+        try:
+            k = f"gh:tg:rejlog:{org_id}:{reason}"
+            c = int(await redis.incr(k))
+            if c == 1:
+                await redis.expire(k, REJECT_WINDOW_S)
+            if c == REJECT_LOG_PER_REASON + 1:
+                detail = {"reason": reason, "throttled": True, "per_hour": REJECT_LOG_PER_REASON}
+            elif c > REJECT_LOG_PER_REASON + 1:
+                detail = None
+        except Exception:  # noqa: BLE001
+            log.warning("Telegram: không đếm được giới hạn nhật ký bỏ tin", exc_info=True)
+    if detail is not None:
+        await actionlog.record(
+            db,
+            org_id=org_id,
+            actor_type="system",
+            actor_id="system:telegram",
+            action=ACTION_REJECTED,
+            target_type="telegram",
+            target_id="inbound",
+            result="blocked",
+            detail=detail,
+        )
     if reason in NO_BELL or redis is None or _sent_by(update, owner_tg_user_id):
         return
     key = f"gh:tg:rej:{org_id}"
