@@ -405,7 +405,7 @@ function BindingsPanel({ canManage }: { canManage: boolean }) {
       ) : bindings.data.items.length === 0 ? (
         <EmptyState icon="ph ph-git-branch" title="Chưa có agent nào để gán model" />
       ) : (
-        <table className="apm-table">
+        <table className="apm-table apm-table--bindings">
           <thead>
             <tr>
               <th>Agent</th>
@@ -417,10 +417,10 @@ function BindingsPanel({ canManage }: { canManage: boolean }) {
           <tbody>
             {bindings.data.items.map((slot) => (
               <tr key={slot.agent_key}>
-                <td>
+                <td className="apm-td-agent">
                   <span className="apm-table__agent">{slot.label}</span>
                 </td>
-                <td>
+                <td className="apm-td-model">
                   {canManage ? (
                     <button type="button" className="apm-model-pill" onClick={() => setEditing(slot)}>
                       {bindingModelText(slot)}
@@ -450,10 +450,10 @@ function BindingsPanel({ canManage }: { canManage: boolean }) {
                     </span>
                   ) : null}
                 </td>
-                <td className="mono" data-testid={`binding-effort-${slot.agent_key}`}>
+                <td className="mono apm-td-effort" data-label="Mức suy nghĩ" data-testid={`binding-effort-${slot.agent_key}`}>
                   {bindingEffortText(slot)}
                 </td>
-                <td>
+                <td className="apm-td-act">
                   {canManage && slot.binding ? (
                     <RemoveBindingButton agentKey={slot.agent_key} />
                   ) : null}

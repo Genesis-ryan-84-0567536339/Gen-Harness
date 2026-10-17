@@ -160,14 +160,16 @@ function AgentCard({
           {autonomyChoice(agent.autonomy_level)?.label ?? `mức ${agent.autonomy_level}`}
         </span>
         <span className="ag-card__spoke" title={spoke}>{spoke}</span>
-        {canManage ? (
-          <Button variant="ghost" className="btn-22" onClick={onArchive} aria-label={`Lưu trữ agent ${agent.name}`}>
-            Lưu trữ
+        <span className="ag-card__acts">
+          {canManage ? (
+            <Button variant="ghost" className="btn-22" onClick={onArchive} aria-label={`Lưu trữ agent ${agent.name}`}>
+              Lưu trữ
+            </Button>
+          ) : null}
+          <Button variant="ghost" className="btn-22" onClick={onEdit} aria-label={`${canManage ? 'Sửa' : 'Xem'} agent ${agent.name}`}>
+            {canManage ? 'Sửa' : 'Xem'}
           </Button>
-        ) : null}
-        <Button variant="ghost" className="btn-22" onClick={onEdit} aria-label={`${canManage ? 'Sửa' : 'Xem'} agent ${agent.name}`}>
-          {canManage ? 'Sửa' : 'Xem'}
-        </Button>
+        </span>
       </div>
     </article>
   );
