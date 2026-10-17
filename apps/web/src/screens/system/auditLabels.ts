@@ -130,6 +130,7 @@ export const ACTION_LABEL: Record<string, string> = {
   'refinery.run_requested': 'Chạy lọc dữ liệu thủ công',
   'refinery.schedule_changed': 'Sửa lịch lọc dữ liệu',
   'refinery.triage_settings_changed': 'Sửa cài đặt phân loại tin',
+  'person.type_inferred': 'Gen tự nhận loại người từ quy tắc sàng lọc',
   'rule.created': 'Tạo luật lọc',
   'rule.updated': 'Sửa luật lọc',
   'rule.enabled': 'Bật luật lọc',
