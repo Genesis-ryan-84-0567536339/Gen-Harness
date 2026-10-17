@@ -62,7 +62,7 @@ export function Step11Backup({ meta, description, onBack, onSaved, formRef, onSk
       <div className="setup-section" data-testid="step11-default">
         <div className="setup-section__title">Sao lưu đã tự bật</div>
         <p className="muted-note">
-          Hằng ngày lúc 02:00, giữ 7 bản gần nhất, lưu mã hoá ngay trong máy chủ. Đi tiếp hay bấm Để sau thì lịch này vẫn chạy; muốn đổi giờ hay
+          Hằng ngày lúc 02:00, giữ 7 bản theo ngày, 4 theo tuần, 12 theo tháng — lưu mã hoá ngay trong máy chủ. Đi tiếp hay bấm Để sau thì lịch này vẫn chạy; muốn đổi giờ hay
           tần suất thì mở “Đổi lịch” bên dưới.
         </p>
       </div>

@@ -55,7 +55,7 @@ describe('Gen-hub ghi Kho có xác nhận — chữ trên Trợ giúp và Hướ
     const text = [step!.why, ...step!.steps].join('\n');
     expect(text).not.toContain('(chỉ đọc)');
     expect(text).toMatch(/KHÔNG bật quyền ghi lịch, mail hay Drive/);
-    expect(text).toMatch(/Tuỳ chọn: tick kho_create, kho_update/);
+    expect(text).toMatch(/Tuỳ chọn: tick quyền ghi Kho/);
     expect(step!.why).toMatch(/Xác nhận và nhập mã PIN/);
   });
 });

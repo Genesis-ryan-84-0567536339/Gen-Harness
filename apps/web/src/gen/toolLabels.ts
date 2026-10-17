@@ -1,4 +1,4 @@
-import type { DataToolName } from '@gen-harness/contracts';
+import { relabelKho, type DataToolName } from '@gen-harness/contracts';
 
 /**
  * Nhãn tiếng Việt của bước `tool` trong khung Gen ("Đã tra …"). Phải phủ MỌI tên trong `DATA_TOOL_NAMES`
@@ -21,9 +21,9 @@ export const TOOL_LABEL: Record<DataToolName, string> = {
   'task.list': 'việc & nhắc hẹn',
   'staff.list': 'danh sách người',
   'refinery.summary': 'lọc tin',
-  'hub.kho_summary': 'Kho tri thức (Gen-hub)',
-  'hub.kho_search': 'Kho tri thức (Gen-hub)',
-  'hub.kho_get': 'Kho tri thức (Gen-hub)',
+  'hub.kho_summary': 'Kho dữ liệu (Gen-hub)',
+  'hub.kho_search': 'Kho dữ liệu (Gen-hub)',
+  'hub.kho_get': 'Kho dữ liệu (Gen-hub)',
   'social.accounts': 'tài khoản mạng xã hội',
   'social.read': 'đọc mạng xã hội',
   // v0.1.49 (QD-16): Tài liệu / Deal / Vụ việc nội bộ + lịch / việc / mail / Drive Google qua Gen-hub (chỉ đọc).
@@ -44,7 +44,10 @@ export const TOOL_LABEL: Record<DataToolName, string> = {
   'coach.status': 'Việc cần làm & bài học',
 };
 
-/** Nhãn của một bước tool; tên lạ (máy chủ mới hơn web) ⇒ câu chung, không lộ tên kỹ thuật. */
-export function toolLabel(name: string): string {
-  return (TOOL_LABEL as Record<string, string>)[name] ?? 'dữ liệu';
+/**
+ * Nhãn của một bước tool; tên lạ (máy chủ mới hơn web) ⇒ câu chung, không lộ tên kỹ thuật. `khoLabel` = tên Kho Sếp tự đặt
+ * (`HubLink.kho_label`, v0.1.57) — nhãn "Kho dữ liệu (Gen-hub)" đi qua `relabelKho` như mọi chữ tên Kho khác (F117).
+ */
+export function toolLabel(name: string, khoLabel?: string | null): string {
+  return relabelKho((TOOL_LABEL as Record<string, string>)[name] ?? 'dữ liệu', khoLabel);
 }

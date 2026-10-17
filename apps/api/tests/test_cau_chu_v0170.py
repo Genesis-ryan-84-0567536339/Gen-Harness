@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+import pytest
 from sqlalchemy import text
 
 from gh import backup, errors
@@ -74,3 +75,37 @@ async def test_channels_connected_skips_non_intake_channels(owner_api: Api, db: 
     for kind in ("telegram", "facebook", "linkedin"):                        # không đưa tin khách về Thông tin
         await _session(db, await channel(db, org, kind), "active", started=True, ended=False)
     assert await svc.channels_connected(db, org) == 0
+
+
+# ─── E2: tin Telegram không chèn link localhost (F092) ───────────────────────────────────────────────────────────
+
+def _texts(tsvc: Any) -> dict[str, str]:
+    return {"/connections#telegram": tsvc.test_text(), "/tasks": tsvc.reminder_text("Gọi lại", "VIEC-1", "P1", None),
+            "/overview": tsvc.briefing_text("sáng 03/10", "Tóm tắt", [])}
+
+
+def test_telegram_messages_skip_console_link_when_public_url_is_local(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Chưa bật Truy cập từ xa (public_url = localhost) ⇒ link trong tin trên điện thoại không mở được: chỉ nói
+    "mở Console từ máy chủ", không in https://localhost:8443/…."""
+    from gh.telegram import service as tsvc
+
+    monkeypatch.setattr(tsvc, "public_url", lambda: "https://localhost:8443")
+    for path, body in _texts(tsvc).items():
+        assert "localhost" not in body and path not in body, body
+        assert "Mở Console từ máy chủ" in body and "Truy cập từ xa" in body
+        assert body.endswith(tsvc.ONE_WAY)
+
+
+def test_telegram_messages_keep_console_link_when_public_url_is_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    from gh.telegram import service as tsvc
+
+    monkeypatch.setattr(tsvc, "public_url", lambda: "https://gen.tail1234.ts.net")
+    for path, body in _texts(tsvc).items():
+        assert f"Mở Console: https://gen.tail1234.ts.net{path}" in body
+        assert "Mở Console từ máy chủ" not in body
+
+
+def test_pin_confirm_errors_say_ma_pin() -> None:
+    for rel in ("auth/account.py", "setup/routes.py"):
+        src = (GH_DIR / rel).read_text(encoding="utf-8")
+        assert "Hai lần nhập PIN" not in src and "Hai lần nhập mã PIN" in src

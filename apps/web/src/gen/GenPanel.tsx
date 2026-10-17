@@ -37,6 +37,16 @@ function useAddressing(): string {
   return me.data?.addressing?.bot_calls_me || 'Sếp';
 }
 
+/** Chip "Đã tra …": nhãn tra Kho theo tên Kho Sếp tự đặt (đọc từ cache thẻ Gen-hub, không tự gọi API — F117). */
+function ToolChip({ name }: { name: string }) {
+  const hub = useQuery({ queryKey: qkMcp.hubLink, queryFn: ({ signal }) => api.hub.link.get(signal), enabled: false });
+  return (
+    <span className="gen-chip">
+      <Icon name="ph ph-magnifying-glass" size={11} /> Đã tra {toolLabel(name, hub.data?.kho_label)}
+    </span>
+  );
+}
+
 function Step({ step, turnId }: { step: GenStep; turnId?: string }) {
   if (step.kind === 'say') return <p className="gen-msg__text">{step.text}</p>;
   // v0.1.55 (G3): thông báo của hệ thống (vd hạ về Tự động) — một dòng nhỏ, luôn là chuỗi.
@@ -47,12 +57,7 @@ function Step({ step, turnId }: { step: GenStep; turnId?: string }) {
         <span>{typeof step.text === 'string' ? step.text : ''}</span>
       </p>
     );
-  if (step.kind === 'tool')
-    return (
-      <span className="gen-chip">
-        <Icon name="ph ph-magnifying-glass" size={11} /> Đã tra {toolLabel(step.name)}
-      </span>
-    );
+  if (step.kind === 'tool') return <ToolChip name={step.name} />;
   if (step.kind === 'ui')
     return (
       <button type="button" className="gen-chip gen-chip--btn" onClick={() => void executeUiAction(step.action, turnId)} title="Làm lại">

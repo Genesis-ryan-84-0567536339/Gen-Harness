@@ -248,7 +248,7 @@ function PinCard({ hasPin }: { hasPin: boolean }) {
           </Button>
           {canAudit ? (
             <Button variant="secondary" icon="ph ph-clock-counter-clockwise" onClick={() => setHistoryOpen(true)}>
-              Lịch sử nhập PIN (cả tổ chức)
+              Lịch sử nhập mã PIN (cả tổ chức)
             </Button>
           ) : null}
         </div>

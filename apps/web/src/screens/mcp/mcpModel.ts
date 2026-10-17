@@ -187,7 +187,7 @@ export function writeScopeRows(scopes: WriteScopesIn): WriteScopeRow[] {
   });
 }
 
-export const WRITE_MISSING_TEXT = 'Vào Gen-hub tick quyền kho_create, kho_update cho token của Gen-Harness rồi bấm Kiểm tra.';
+export const WRITE_MISSING_TEXT = 'Vào Gen-hub tick quyền ghi Kho (tạo và sửa bản ghi — tên trong Gen-hub: kho_create, kho_update) cho token của Gen-Harness rồi bấm Kiểm tra.';
 export const WRITE_ENOUGH_TEXT = 'Đủ quyền ghi Kho (Phiên, Việc).';
 export const WRITE_CONFIRM_ONLY_TEXT = 'Gen chỉ ghi khi Sếp bấm Xác nhận + nhập mã PIN trên thẻ đề xuất.';
 /** Câu khi Owner TỰ đóng tool ghi Kho ở MCP Hub — Kiểm tra không mở lại; tắt hẳn quyền ghi thì bỏ tick ở Gen-hub. */

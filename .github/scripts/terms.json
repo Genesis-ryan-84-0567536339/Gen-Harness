@@ -94,31 +94,6 @@
     "agent-model-ten-man": {
       "apps/api/gh/shell/navigation.py": 1,
       "packages/contracts/src/screens.ts": 5
-    },
-    "kho-tri-thuc": {
-      "apps/api/gh/gen/registry.json": 1,
-      "apps/web/src/gen/toolLabels.ts": 3,
-      "apps/web/src/guide/guideContent.ts": 1,
-      "apps/web/src/screens/mcp/HubLinkCard.tsx": 1
-    },
-    "khoa-dau-hoi": {
-      "apps/api/gh/gen/registry.json": 2,
-      "packages/contracts/src/genTargets.ts": 2
-    },
-    "nghe-im-lang": {
-      "apps/api/gh/biz/duty/engine.py": 2,
-      "apps/web/src/setup/steps.ts": 1
-    },
-    "nhap-pin": {
-      "apps/api/gh/auth/account.py": 1,
-      "apps/api/gh/gen/registry.json": 2,
-      "apps/api/gh/setup/routes.py": 1,
-      "apps/web/src/guide/guideContent.ts": 2,
-      "apps/web/src/screens/system/PinCard.tsx": 2,
-      "apps/web/src/setup/validation.ts": 1
-    },
-    "vai-tieng-anh": {
-      "apps/api/gh/system_api/routes.py": 1
     }
   },
   "crawl_baseline": {
