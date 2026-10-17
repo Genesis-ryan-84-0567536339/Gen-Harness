@@ -282,7 +282,11 @@ async def ai_ready(db: AsyncSession, org_id: uuid.UUID, role: str = READY_ROLE, 
     """Gen (mặc định `core.gen` của Owner) có ít nhất một nguồn AI dùng được không? → {ok, reason_code, reason_vi,
     fix_to}. Lỗi đọc trạng thái KHÔNG ném: trả `ok False` + `reason_code='error'` (nói thật là chưa kiểm tra được)."""
     try:
-        verdict = explain(await source_states(db, org_id, role, owner=owner, box=box))
+        # Review v0.1.68 (P3): savepoint — lỗi SQL bị nuốt ở dưới KHÔNG được làm hỏng giao dịch của người gọi (Postgres
+        # đánh dấu cả giao dịch hỏng nếu không có savepoint; `owner/brief.ai_ready` đã làm đúng như vậy).
+        async with db.begin_nested():
+            states = await source_states(db, org_id, role, owner=owner, box=box)
+        verdict = explain(states)
     except Exception:  # noqa: BLE001
         log.warning("Không đọc được trạng thái nguồn AI (%s)", org_id, exc_info=True)
         return {"ok": False, "reason_code": ERROR, "fix_to": FIX_AI,

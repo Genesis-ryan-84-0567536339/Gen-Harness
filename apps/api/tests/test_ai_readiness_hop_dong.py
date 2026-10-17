@@ -222,6 +222,23 @@ async def test_ai_ready_never_raises(db: Any, monkeypatch: pytest.MonkeyPatch) -
     assert r["ok"] is False and r["reason_code"] == "error"
 
 
+async def test_ai_ready_sql_error_does_not_poison_caller_transaction(db: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review v0.1.68 (P3): lỗi SQL trong `ai_ready` bị nuốt thành `reason_code='error'`, nhưng Postgres đã đánh dấu
+    cả giao dịch hỏng — không có savepoint thì mọi câu lệnh sau của người gọi đều ném InFailedSQLTransaction."""
+    org = await org_id(db)
+    await _src(db, "gemini", rank=1)
+
+    async def bad_sql(session: Any, *_a: Any, **_k: Any) -> Any:
+        await session.execute(text("SELECT * FROM bang_khong_ton_tai_v0168"))
+
+    monkeypatch.setattr(readiness, "source_states", bad_sql)
+    r = await readiness.ai_ready(db, org)
+    assert r["ok"] is False and r["reason_code"] == "error"
+    # Người gọi vẫn dùng được phiên: câu lệnh kế tiếp chạy bình thường, dữ liệu trước đó còn nguyên.
+    n = (await db.execute(text("SELECT count(*) FROM agent.providers WHERE org_id = :o"), {"o": org})).scalar_one()
+    assert n == 1
+
+
 # ─── L1: vai (agy_policy + việc nền) ────────────────────────────────────────────────────────────────────────────
 
 async def test_core_reply_never_uses_agy(db: Any) -> None:
