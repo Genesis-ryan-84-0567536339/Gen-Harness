@@ -288,3 +288,25 @@ test('hẹn quét lại sau phát hiện nhóm mới tính lại lúc tới hạ
   assert.equal(box.scans, 2);
   env.mgr.shutdown();
 });
+
+// ── P3: nhóm WhatsApp địa chỉ theo LID — Sếp không được bị coi là "đã rời" ──
+
+test('WhatsApp: nhóm LID liệt kê chính mình bằng LID ⇒ báo bằng JID của Sếp (khớp tin của mình); người khác giữ nguyên', async () => {
+  const wa = makeBaileysLib();
+  const a = new WhatsAppAdapter({ lib: wa.lib, sessionId: 'w1' });
+  a.own = { jid: '84909999999@s.whatsapp.net', lid: '555@lid', name: 'Kho Gen' };
+  a.sock = { groupFetchAllParticipating: async () => ({
+    '1@g.us': { id: '1@g.us', subject: 'N1', size: 3, participants: [
+      { id: '555@lid', phoneNumber: '84909999999@s.whatsapp.net', admin: 'admin' },
+      { id: '777:4@lid', phoneNumber: '84911111111@s.whatsapp.net' },
+      { id: '84922222222@s.whatsapp.net' }] },
+    '2@g.us': { id: '2@g.us', subject: 'N2', size: 1, participants: [{ id: '555:2@lid' }] },
+    '3@g.us': { id: '3@g.us', subject: 'N3', size: 1, participants: [{ id: '888@lid', lid: '555@lid' }] },
+  }) };
+  const [g1, g2, g3] = await a.syncGroups();
+  assert.deepEqual(g1.members.map((m) => m.external_id), ['84909999999@s.whatsapp.net', '777:4@lid', '84922222222@s.whatsapp.net']);
+  assert.equal(g1.members[0].role, 'admin');
+  assert.equal(g1.members[0].phone, '+84909999999');
+  assert.deepEqual(g2.members.map((m) => m.external_id), ['84909999999@s.whatsapp.net']); // chỉ LID, không có phoneNumber
+  assert.deepEqual(g3.members.map((m) => m.external_id), ['84909999999@s.whatsapp.net']); // khớp qua trường lid
+});

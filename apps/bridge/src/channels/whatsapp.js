@@ -481,6 +481,7 @@ export class WhatsAppAdapter extends EventEmitter {
     if (!this.sock) throw new Error('SESSION_NOT_ACTIVE');
     const all = await this.sock.groupFetchAllParticipating();
     this.lastSyncComplete = true;
+    const mine = new Set([this.own?.jid, this.own?.lid].filter(Boolean));
     return Object.entries(all || {}).map(([jid, g]) => {
       const participants = Array.isArray(g.participants) ? g.participants : [];
       const name = g.subject || '';
@@ -492,7 +493,11 @@ export class WhatsAppAdapter extends EventEmitter {
         member_count: count,
         members_complete: participants.length > 0 && participants.length >= count,
         members: participants.map((p) => {
-          const id = p.id || '';
+          // Nhóm địa chỉ theo LID liệt kê CHÍNH MÌNH bằng LID (kèm phoneNumber = JID), còn tin của mình luôn mang JID ⇒ nếu
+          // giữ nguyên LID thì người của Sếp (nhận diện theo JID) "vắng" trong danh sách đủ và bị đánh dấu đã rời nhóm.
+          // So cả JID lẫn LID của chính mình (id, lid, phoneNumber) và báo bằng JID.
+          const isMe = [p.id, p.lid, p.phoneNumber].map(bareJid).some((j) => j && mine.has(j));
+          const id = isMe && this.own?.jid ? this.own.jid : (p.id || '');
           const member = { external_id: id, name: p.name || p.notify || this.names.get(bareJid(id)) || '' };
           const phone = phoneOf(p.phoneNumber) || phoneOf(id);
           if (phone) member.phone = phone;
