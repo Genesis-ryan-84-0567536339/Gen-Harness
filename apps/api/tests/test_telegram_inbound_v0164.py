@@ -500,6 +500,23 @@ async def test_find_chat_does_not_poll_while_inbound_active(owner_api: Api, bot:
     assert bot.polls() == [] and not [c for c in bot.calls if c[0].endswith("getUpdates")]
 
 
+async def test_find_chat_with_token_in_body_also_does_not_poll_while_inbound_active(
+    owner_api: Api, bot: FakeBot, redis: Any
+) -> None:
+    """P3 review v0.1.64: nhánh có token trong thân bỏ qua kiểm "đang nhận tin" ⇒ getUpdates song song gây 409."""
+    await _pair(owner_api, bot, redis)
+    bot.calls.clear()
+    for payload in ({"token": TOKEN}, {"token": TOKEN2}):
+        body = (await owner_api.send("POST", "/notify/telegram/find-chat", payload)).json()
+        assert body["error_code"] == "TELEGRAM_INBOUND_ACTIVE" and body["chats"] == [], payload
+    assert not [c for c in bot.calls if c[0].endswith("getUpdates")]
+    # tắt nhận tin (vẫn đã ghép) ⇒ tìm chat bằng token trong thân lại dùng được
+    r = await owner_api.send("PUT", "/notify/telegram/inbound", {"enabled": False})
+    assert r.status_code == 200, r.text
+    body = (await owner_api.send("POST", "/notify/telegram/find-chat", {"token": TOKEN})).json()
+    assert body["error_code"] != "TELEGRAM_INBOUND_ACTIVE"
+
+
 async def test_rate_limit_20_per_minute(redis: Any) -> None:
     org = uuid.uuid4()
     t = datetime.now(UTC)

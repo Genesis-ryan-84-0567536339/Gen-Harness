@@ -159,6 +159,13 @@ async def find_chat(request: Request, body: FindChatIn | None = None, _m: servic
                     user: service.CurrentUser = Depends(require_owner), db: AsyncSession = DB) -> dict[str, Any]:
     """Chỉ đọc — không lưu token, không ghi Action Log (thao tác tra cứu)."""
     actionlog.exempt()
+    # Vòng nhận tin của worker đang giữ offset của bot — gọi getUpdates riêng (kể cả token dán trong thân) sẽ tranh/làm
+    # mất tin và Telegram trả 409. Kiểm theo TỔ CHỨC cho cả hai nhánh.
+    ib = await inbound.load(db, user.org_id)
+    if ib is not None and (ib.inbound_enabled or inbound.pair_active(ib)):
+        return {"chats": [], "error_code": "TELEGRAM_INBOUND_ACTIVE",
+                "message": "Đang bật nhận tin từ Sếp nên không tìm chat_id kiểu cũ — dùng nút Ghép Telegram "
+                           "(mã 6 số) hoặc tắt \"Nhận tin từ Sếp\" rồi tìm lại"}
     token = (body.token or "").strip() if body else ""
     if token:
         token = tsvc.validate_token(token)
@@ -168,12 +175,6 @@ async def find_chat(request: Request, body: FindChatIn | None = None, _m: servic
             return {"chats": [], "error_code": tsvc.NOT_CONFIGURED,
                     "message": "Dán token bot trước rồi bấm Tìm chat_id"}
         token = tsvc.decrypt_token(row)
-        ib = await inbound.load(db, user.org_id)
-        if ib is not None and (ib.inbound_enabled or inbound.pair_active(ib)):
-            # Vòng nhận tin của worker đang giữ offset của bot này — gọi getUpdates riêng sẽ tranh/làm mất tin.
-            return {"chats": [], "error_code": "TELEGRAM_INBOUND_ACTIVE",
-                    "message": "Đang bật nhận tin từ Sếp nên không tìm chat_id kiểu cũ — dùng nút Ghép Telegram "
-                               "(mã 6 số) hoặc tắt \"Nhận tin từ Sếp\" rồi tìm lại"}
     try:
         chats = await client(request).get_updates(token)
     except tg.TelegramError as e:
