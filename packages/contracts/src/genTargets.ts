@@ -108,7 +108,7 @@ export const GEN_TARGETS: GenTarget[] = [
   { id: 'system.brain.coach', screen: 'system', label: 'Thẻ "Gen hướng dẫn"', description: 'Bật/tắt Gen hướng dẫn, chuông nhắc, số bài học mỗi ngày (0–2), giờ yên lặng và danh sách việc Sếp đã chọn không dùng (có nút Bật lại)', params: { tab: 'brain' }, permission: 'system.manage' },
   { id: 'system.brain.jev', screen: 'system', label: 'Thẻ Jev (System One)', description: 'Cấu hình nguồn model quyết định nhanh Jev', params: { tab: 'brain' } },
   { id: 'system.brain.jev.test', screen: 'system', label: 'Nút "Kiểm tra 1 lần" Jev', description: 'Gọi thử Jev một lần để biết khoá và địa chỉ đúng chưa', params: { tab: 'brain' } },
-  { id: 'system.brain.jev.enable', screen: 'system', label: 'Nút "Bật Jev" (1 chạm)', description: 'Bật Jev bằng khóa OpenRouter đang có hoặc dán khóa mới (cần mã PIN); sau đó bấm "Thử 12 câu mẫu"', params: { tab: 'brain' }, permission: 'system.manage' },
+  { id: 'system.brain.jev.enable', screen: 'system', label: 'Nút "Bật Jev" (1 chạm)', description: 'Bật Jev bằng khoá OpenRouter đang có hoặc dán khoá mới (cần mã PIN); sau đó bấm "Thử 12 câu mẫu"', params: { tab: 'brain' }, permission: 'system.manage' },
   { id: 'system.brain.triage', screen: 'system', label: 'Thẻ "Lọc tin"', description: 'Bật/tắt lọc tin, chọn mức Thấp/Vừa/Cao; Jev và ngưỡng số ở Nâng cao (chỉ Owner sửa)', params: { tab: 'brain' } },
   { id: 'system.storage.health', screen: 'system', label: 'Sức khoẻ hệ thống', description: 'Bộ xử lý nền, Trình duyệt nền, hàng lỗi, sao lưu, cập nhật, ổ đĩa; chi tiết kỹ thuật lịch chạy', params: { tab: 'storage' } },
   { id: 'system.storage.retention', screen: 'system', label: 'Hạn lưu dữ liệu', description: 'Mỗi tập dữ liệu giữ bao lâu', params: { tab: 'storage' } },
