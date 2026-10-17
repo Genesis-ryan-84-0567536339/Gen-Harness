@@ -247,7 +247,7 @@ async def test_generate_agent_is_decided_at_call_time(owner_api, app, db, clis, 
     aid = await _seed_agent(db, org)
     key = f"agent:{aid}"
     n = len(_calls(clis))
-    out = await app.state.model_router.generate(org, agent_key=key, purpose="duty_decide", messages=MSGS,
+    out = await app.state.model_router.generate(org, agent_key=key, purpose="agent.task", messages=MSGS,
                                                 json_mode=False)
     assert out.provider == "Antigravity CLI" and len(_calls(clis)) == n + 1 and not box.calls   # chưa gắn kênh ⇒ inproc
 
@@ -255,18 +255,18 @@ async def test_generate_agent_is_decided_at_call_time(owner_api, app, db, clis, 
     await db.execute(text("INSERT INTO agent.channel_scopes (agent_id, channel_id, group_id) VALUES (:a, :c, NULL)"),
                      {"a": aid, "c": ch})
     await db.commit()
-    out = await app.state.model_router.generate(org, agent_key=key, purpose="duty_decide", messages=MSGS,
+    out = await app.state.model_router.generate(org, agent_key=key, purpose="agent.task", messages=MSGS,
                                                 json_mode=False)                       # gắn kênh ⇒ ngoại giao ⇒ qua hộp
     assert len(box.calls) == 1 and len(_calls(clis)) == n + 2        # hộp ủy quyền CLI giả: thêm 1 lượt
     box.state = "not_installed"
     with pytest.raises(ModelUnavailable) as ei:                                         # hộp chưa cài ⇒ không agy
-        await app.state.model_router.generate(org, agent_key=key, purpose="duty_decide", messages=MSGS,
+        await app.state.model_router.generate(org, agent_key=key, purpose="agent.task", messages=MSGS,
                                               json_mode=False)
     assert REASON in ei.value.reasons and len(_calls(clis)) == n + 2
 
     await db.execute(text("DELETE FROM agent.channel_scopes WHERE agent_id = :a"), {"a": aid})
     await db.commit()
-    out = await app.state.model_router.generate(org, agent_key=key, purpose="duty_decide", messages=MSGS,
+    out = await app.state.model_router.generate(org, agent_key=key, purpose="agent.task", messages=MSGS,
                                                 json_mode=False)
     assert out.provider == "Antigravity CLI" and len(_calls(clis)) == n + 3 and len(box.calls) == 1
 
@@ -364,7 +364,9 @@ def test_decide_denies_by_purpose_whatever_the_key() -> None:
             assert not v.allowed and v.code == "untrusted_text" and v.reason == agy_policy.REASON_UNTRUSTED_TEXT
     assert "văn bản" in (v.reason or "") and "khoá API" in (v.reason or "")
     # Việc khác của cùng khoá vẫn như cũ.
-    assert d("core.refinery", purpose="refinery", box="ok").allowed and d(inner, purpose="duty_decide").allowed
+    assert d("core.refinery", purpose="refinery", box="ok").allowed and d(inner, purpose="agent.task").allowed
+    # Review v0.1.63 (P3): trực việc (`duty_decide`) đọc tin khách ⇒ qua hộp kể cả agent nội bộ.
+    assert d(inner, purpose="duty_decide").where == "box" and not d(inner, purpose="duty_decide").allowed
     assert d("core.gen", purpose="gen.turn").allowed and d("core.gen", purpose=None).allowed
 
 
@@ -383,7 +385,7 @@ async def test_generate_denies_agy_by_purpose_for_an_internal_agent_key(owner_ap
         await app.state.model_router.generate(org, agent_key="core.refinery", purpose=purpose, messages=MSGS,
                                               json_mode=False)
     assert len(_calls(clis)) == n
-    out = await app.state.model_router.generate(org, agent_key=f"agent:{aid}", purpose="duty_decide", messages=MSGS,
+    out = await app.state.model_router.generate(org, agent_key=f"agent:{aid}", purpose="agent.task", messages=MSGS,
                                                 json_mode=False)              # cùng khoá, việc khác ⇒ vẫn agy
     assert out.provider == "Antigravity CLI" and len(_calls(clis)) == n + 1
 

@@ -35,7 +35,7 @@ st = await box_status()          # cache 10 giây; không tham số = đọc GH_
 | Vai | Nơi chạy agy |
 |---|---|
 | `core.gen` của Owner, `agent:<id>` nội bộ (không gắn kênh / nhóm / người) | trong tiến trình (`AgyClient`) |
-| `core.briefing` (gói sửa review P2-3: prompt có tên hiển thị khách, tiêu đề việc), `core.reply`, `core.refinery`, `agent:<id>` ngoại giao (có `channel_scopes` / BOT nhóm / BOT người), `core.gen` của nhân viên, lượt thử agent (`purpose="setup_agent_try"`), khoá lạ | qua hộp (`AgyBoxClient`) |
+| `core.briefing` (gói sửa review P2-3: prompt có tên hiển thị khách, tiêu đề việc), `core.reply`, `core.refinery`, `agent:<id>` ngoại giao (có `channel_scopes` / BOT nhóm / BOT người), `core.gen` của nhân viên, lượt thử agent (`purpose="setup_agent_try"`), trực việc (`purpose="duty_decide"`), khoá lạ | qua hộp (`AgyBoxClient`) |
 
 - Một điểm quyết định: `agy_policy.decide(role, owner=, diplomatic=, box=, purpose=)` = `placement.placement(...)` ⊕ `box_status()["state"]`;
   bên gọi có DB dùng `verdict_for` / `verdicts_for`. `AgyVerdict{allowed, where, code, reason}`.

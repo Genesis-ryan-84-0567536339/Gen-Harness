@@ -336,7 +336,7 @@ async def test_heal_that_hangs_is_cut_and_gen_turn_goes_on(owner_api, app, needs
     assert started == [pid]
 
 
-@pytest.mark.parametrize("agent_key,purpose", [("core.gen", "gen.briefing"), ("agent:{id}", "duty_decide")])
+@pytest.mark.parametrize("agent_key,purpose", [("core.gen", "gen.briefing"), ("agent:{id}", "agent.task")])
 async def test_background_and_other_roles_also_self_heal_agy(  # type: ignore[no-untyped-def]
         owner_api, app, needs_effort, box, agent_key, purpose) -> None:
     """Chuỗi rỗng ở việc nền / vai core cũng tự lành (gọi thử một lần rồi lưu model) và lượt gọi trả lời bằng agy. H2:

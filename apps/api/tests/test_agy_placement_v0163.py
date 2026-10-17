@@ -55,15 +55,18 @@ PLACEMENT_CASES: list[tuple[str, Any, bool, str | None, str]] = [
     (REPLY, None, False, "draft_regenerate", "box"),
     (REFINERY, None, True, "refinery", "box"),                  # sàng lọc tin người lạ
     (REFINERY, None, False, "rule_test", "box"),
-    ("agent:7", None, True, "duty_decide", "inproc"),           # agent nội bộ
-    ("agent:7", False, True, "duty_decide", "inproc"),
-    ("agent:7", placement.AgentRef(), True, "duty_decide", "inproc"),
-    ("agent:7", True, True, "duty_decide", "box"),              # agent ngoại giao
-    ("agent:7", placement.AgentRef(diplomatic=True), True, "duty_decide", "box"),
+    ("agent:7", None, True, "agent.task", "inproc"),           # agent nội bộ
+    ("agent:7", False, True, "agent.task", "inproc"),
+    ("agent:7", placement.AgentRef(), True, "agent.task", "inproc"),
+    ("agent:7", True, True, "agent.task", "box"),              # agent ngoại giao
+    ("agent:7", placement.AgentRef(diplomatic=True), True, "agent.task", "box"),
     ("agent:7", False, True, "setup_agent_try", "box"),         # thử agent luôn qua hộp
+    # Review v0.1.63 (P3): trực việc (`duty_decide`) đọc tin khách ⇒ luôn qua hộp, kể cả agent chưa "ngoại giao".
+    ("agent:7", False, True, "duty_decide", "box"),
+    ("agent:7", None, False, "duty_decide", "box"),
     ("agent:7", False, True, "draft_translate", "box"),         # nháp có agent_id đã bị gỡ khỏi nhóm: vẫn là tin khách
     ("agent:7", None, False, "draft_regenerate", "box"),
-    ("agent:7", "agent:7", True, "duty_decide", "inproc"),      # B2 truyền khoá đầy đủ: không đủ tin ⇒ nội bộ
+    ("agent:7", "agent:7", True, "agent.task", "inproc"),      # B2 truyền khoá đầy đủ: không đủ tin ⇒ nội bộ
     ("agent:*", "agent:7", True, None, "inproc"),               # B2: role = profiles.role_of(key)
     (GEN, None, True, "setup_agent_try", "box"),
     ("core.embedding", None, True, None, "box"),                # khoá lạ: đóng an toàn
@@ -93,7 +96,7 @@ def test_placement_table_is_the_single_source_and_read_only() -> None:
                                             REPLY: "box", REFINERY: "box"}
     with pytest.raises(TypeError):
         placement.AGY_PLACEMENT["core.reply"] = "inproc"  # type: ignore[index]
-    assert placement.BOX_PURPOSES == {"setup_agent_try", "draft_translate", "draft_regenerate"}
+    assert placement.BOX_PURPOSES == {"setup_agent_try", "draft_translate", "draft_regenerate", "duty_decide"}
     # Hai tên chỗ chạy là hằng của hợp đồng — B2 so khớp theo chuỗi.
     assert (placement.INPROC, placement.BOX) == ("inproc", "box")
 
@@ -104,8 +107,8 @@ def test_placement_table_is_the_single_source_and_read_only() -> None:
 @pytest.mark.parametrize("owner", [True, False])
 @pytest.mark.parametrize("role,agent,purpose", [
     (GEN, None, "gen.turn"), (BRIEFING, None, "gen.briefing"), (REPLY, None, "draft_translate"),
-    (REFINERY, None, "refinery"), ("agent:7", False, "duty_decide"), ("agent:7", True, "duty_decide"),
-    ("agent:7", False, "setup_agent_try"),
+    (REFINERY, None, "refinery"), ("agent:7", False, "agent.task"), ("agent:7", True, "agent.task"),
+    ("agent:7", False, "setup_agent_try"), ("agent:7", False, "duty_decide"),
 ])
 def test_decide_is_placement_plus_box_state(role: str, agent: bool, purpose: str, owner: bool, state: str) -> None:
     v = agy_policy.decide(role, owner=owner, diplomatic=bool(agent), box=state, purpose=purpose)
@@ -184,7 +187,8 @@ async def _diplomatic_agent(db, org: uuid.UUID) -> uuid.UUID:  # type: ignore[no
 @pytest.mark.parametrize("owner", [True, False])
 @pytest.mark.parametrize("role,purpose", [
     (GEN, "gen.turn"), (BRIEFING, "gen.briefing"), (REPLY, "draft_translate"), (REFINERY, "refinery"),
-    ("internal", "duty_decide"), ("diplomatic", "duty_decide"), ("internal", "setup_agent_try"),
+    ("internal", "agent.task"), ("diplomatic", "agent.task"), ("internal", "setup_agent_try"),
+    ("internal", "duty_decide"),
     ("internal", "draft_translate"), ("internal", "draft_regenerate"),
 ])
 async def test_generate_matrix_role_by_box_by_asker(app, db, redis, boxctl, role, purpose, owner, state) -> None:  # type: ignore[no-untyped-def]
@@ -198,7 +202,7 @@ async def test_generate_matrix_role_by_box_by_asker(app, db, redis, boxctl, role
         key = f"agent:{await _diplomatic_agent(db, w.org)}"
     # Bảng kỳ vọng viết tay (không gọi `placement`): core.gen Owner / agent nội bộ ⇒ trong tiến trình; Bản tin qua hộp.
     inproc_case = ((role == GEN and owner and purpose == "gen.turn")
-                   or (role == "internal" and purpose == "duty_decide"))
+                   or (role == "internal" and purpose == "agent.task"))
     expected = "inproc" if inproc_case else "box"
 
     out = await w.router.generate(w.org, agent_key=key, purpose=purpose, messages=MSGS, json_mode=False, owner=owner)
@@ -244,17 +248,17 @@ async def test_generate_agent_changes_place_when_channels_are_attached(app, db, 
     w = await _fixture_world(db, redis, ctl)
     aid = await _seed_agent(db, w.org)
     key = f"agent:{aid}"
-    out = await w.router.generate(w.org, agent_key=key, purpose="duty_decide", messages=MSGS, json_mode=False)
+    out = await w.router.generate(w.org, agent_key=key, purpose="agent.task", messages=MSGS, json_mode=False)
     assert out.text == "trả lời trong tiến trình" and not ctl.calls                 # chưa gắn kênh ⇒ nội bộ ⇒ inproc
     ch = (await db.execute(text("SELECT id FROM core.channels WHERE org_id = :o ORDER BY created_at LIMIT 1"),
                            {"o": w.org})).scalar_one()
     await db.execute(text("INSERT INTO agent.channel_scopes (agent_id, channel_id, group_id) VALUES (:a, :c, NULL)"),
                      {"a": aid, "c": ch})
     await db.commit()
-    out = await w.router.generate(w.org, agent_key=key, purpose="duty_decide", messages=MSGS, json_mode=False)
+    out = await w.router.generate(w.org, agent_key=key, purpose="agent.task", messages=MSGS, json_mode=False)
     assert out.text == "trả lời từ hộp" and len(ctl.calls) == 1 and len(w.inproc) == 1   # gắn kênh ⇒ ngoại giao ⇒ hộp
     ctl.state = "down"
-    out = await w.router.generate(w.org, agent_key=key, purpose="duty_decide", messages=MSGS, json_mode=False)
+    out = await w.router.generate(w.org, agent_key=key, purpose="agent.task", messages=MSGS, json_mode=False)
     assert out.provider == "alpha" and len(ctl.calls) == 1 and len(w.inproc) == 1        # hộp tắt ⇒ nguồn kế
 
 
