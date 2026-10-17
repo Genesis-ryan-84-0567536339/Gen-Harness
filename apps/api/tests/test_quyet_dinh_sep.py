@@ -302,6 +302,16 @@ def test_q6_tagged_only_group_messages_are_still_stored() -> None:
 
 # ─── 16/10 · Q4 / Q7 ──────────────────────────────────────────────────────────────────────────────────────────
 
+def test_q4_manager_promise_matches_reality_no_team_feature() -> None:
+    """16/10 Q4 (=2): chưa có tính năng Nhóm ⇒ vai Quản lý KHÔNG hứa "thấy team mình" (xem test_team_scope_v016x)."""
+    from gh.auth import rbac
+
+    manager = next(rd for rd in rbac.ROLES if rd.code == rbac.MANAGER)
+    assert manager.meta == "thấy việc được giao"
+    users_model = (ROOT / "apps" / "web" / "src" / "screens" / "system" / "usersModel.ts").read_text(encoding="utf-8")
+    assert "thấy việc được giao" in users_model and "thấy team mình" not in users_model
+
+
 def test_q7_jev_stays_enabled_as_decided() -> None:
     """16/10 Q7 (=1): giữ Jev như hiện tại — lọc trước vẫn bật mặc định (mở băng QD-10/QD-13 được ghi nhận)."""
     from gh.refinery import triage

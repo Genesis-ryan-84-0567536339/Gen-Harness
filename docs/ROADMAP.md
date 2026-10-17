@@ -99,6 +99,7 @@ Việc đã hứa hoặc đã biết mà chưa làm. Mỗi dòng ghi điều ki�
 | 43 | **Nút "Chạy lại tin lỗi"** (v0.1.62): tin vào hàng lỗi (DLQ) đã có Phát lại/Xoá ở Sức khoẻ, nhưng tin sàng lọc lỗi (`raw_error`) chưa có nút chạy lại thủ công và Sức khoẻ chưa đếm số tin lỗi | Chưa làm — gắn gói B6 (v0.1.64) |
 | 44 | **Allowlist egress cho `agy-out`** (v0.1.63): hộp agy ra Internet qua proxy chỉ cho tên miền Google; cần thử agy có theo `HTTPS_PROXY` không. Kèm: hộp về mạng vẫn tới được `api:8000` qua `agy-bus` | Chưa làm. Mặc định chấp nhận ở v0.1.63 vì API đòi xác thực; sau đó cho api chỉ nghe `agy-bus` ở cổng riêng / không nhận yêu cầu từ hộp |
 | 45 | **Chuyển cả core vào hộp agy** (v0.1.62): Gen của Sếp vẫn chạy agy trong tiến trình api và đọc tin người ngoài khi đọc Hộp thư (rủi ro còn lại của "agy cho lớp core") | Chưa làm — khi hộp riêng ổn định |
+| 46 | **Tính năng Nhóm (team)** (v0.1.69, Q4=2 ngày 16/10): chưa có màn/API tạo nhóm và xếp người nên vai Quản lý chỉ thấy việc và khách được giao cho mình — lời hứa "thấy team mình" đã gỡ khỏi nhãn vai, ô chọn phạm vi "Theo team" (nay "Việc được giao", chỉ còn hiện khi giá trị đã lưu) và Nhật ký | Chưa làm — làm khi đội đông (~2 ngày: API teams, Đội ngũ › Nhóm, bật `TEAMS_AVAILABLE` ở `systemModel.ts`, đổi lại nhãn vai Quản lý) |
 
 ### Câu hỏi mở — mặc định đã chọn (16/10/2026; Sếp sửa nếu muốn khác)
 - Tin riêng 1-1: lưu im lặng, không tự trả lời (làm cùng v0.1.65). Nhóm mới: Console hỏi khi kết nối kênh (Im lặng / Không nghe); chưa chọn = `pending` — không lưu tin, vẫn thu thành viên.

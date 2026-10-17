@@ -24,7 +24,8 @@ class RoleDef:
 # mọi màn gọi một tên (migration 0036 đổi tên ở máy đã cài). Mã vai trò (`code`) mới là khoá so sánh; không so theo tên.
 ROLES = (
     RoleDef(OWNER, "Owner — Sếp", "thấy toàn cảnh"),
-    RoleDef(MANAGER, "Quản lý", "thấy team mình"),
+    # Q4=2 (16/10): chưa có tính năng Nhóm (tạo nhóm, xếp người) ⇒ không hứa "thấy team mình".
+    RoleDef(MANAGER, "Quản lý", "thấy việc được giao"),
     RoleDef(OPERATOR, "Vận hành", "thấy hàng đợi việc"),
     RoleDef(AGENT_STAFF, "Nhân viên phụ trách", "chỉ khách được phân"),
     RoleDef(AUDITOR, "Kiểm soát", "xem, không hành động"),

@@ -11,7 +11,7 @@ import { describeError, type StepProps } from './types';
 
 type InviteRole = 'manager' | 'operator' | 'agent_staff' | 'auditor';
 const ROLE_OPTIONS: Array<{ value: InviteRole; label: string }> = [
-  { value: 'manager', label: 'Quản lý — thấy team mình' },
+  { value: 'manager', label: 'Quản lý — thấy việc được giao' },
   { value: 'operator', label: 'Vận hành — xử lý hàng đợi việc' },
   { value: 'agent_staff', label: 'Nhân viên phụ trách — chỉ khách được phân' },
   { value: 'auditor', label: 'Kiểm soát — chỉ xem' },

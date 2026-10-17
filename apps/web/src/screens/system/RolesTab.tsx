@@ -54,7 +54,7 @@ const CODE_WORD: Record<string, string> = {
 /** Quyền "duyệt & gửi ra ngoài": ô riêng, không đổi theo ô "soạn nháp" (cho soạn ≠ cho duyệt). */
 const APPROVE_CODE = 'action.approve';
 const SPLIT_LABEL: Record<string, string> = { 'action.draft': 'Soạn nháp', [APPROVE_CODE]: 'Duyệt & gửi ra ngoài' };
-const SCOPE_WORD: Record<PermScope, string> = { all: 'tất cả', team: 'theo team', assigned: 'khách được phân', none: 'không' };
+const SCOPE_WORD: Record<PermScope, string> = { all: 'tất cả', team: 'việc được giao', assigned: 'khách được phân', none: 'không' };
 const MIXED = 'mixed';
 const MIXED_HINT = 'Các quyền trong cột đang khác mức — chọn một mức để đặt đồng loạt.';
 
@@ -112,7 +112,7 @@ function PermissionMatrix() {
             {(['all', 'team', 'none'] as PermScope[]).map((s) => (
               <span className="roles-legend__item" key={s}>
                 <Icon name={SCOPE_CELL[s].icon} size={13} color={SCOPE_CELL[s].tone} />
-                {s === 'all' ? 'tất cả dữ liệu' : s === 'team' ? 'có giới hạn (theo team / khách được phân)' : 'không được'}
+                {s === 'all' ? 'tất cả dữ liệu' : s === 'team' ? 'có giới hạn (việc / khách được giao)' : 'không được'}
               </span>
             ))}
           </div>

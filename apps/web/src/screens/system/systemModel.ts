@@ -381,19 +381,22 @@ export const CLI_LOGIN_TEXT: Record<CliLoginStatus, string> = {
 export { N3 };
 
 // ── Quyền hạn: ma trận (PLAN 4.5, thiết kế `permCols`/`permRows`) ───────────
-// v0.1.28 (UX N7): ô ma trận nói PHẠM VI dữ liệu (tất cả / theo team / khách được phân / không), không nói "toàn
+// v0.1.28 (UX N7): ô ma trận nói PHẠM VI dữ liệu (tất cả / việc được giao / khách được phân / không), không nói "toàn
 // quyền" — Auditor chỉ xem, ô ✓ của Auditor nghĩa là xem được tất cả, không phải được làm mọi thứ. Nhãn ngắn để ô
 // chọn không bị cắt chữ.
 export const SCOPE_CELL: Record<PermScope, { icon: string; tone: string; title: string }> = {
   all: { icon: 'ph-fill ph-check-circle', tone: OK, title: 'Tất cả dữ liệu' },
-  team: { icon: 'ph ph-minus-circle', tone: WARN, title: 'Chỉ dữ liệu của team mình' },
+  team: { icon: 'ph ph-minus-circle', tone: WARN, title: 'Chỉ việc được giao cho họ' },
   assigned: { icon: 'ph ph-minus-circle', tone: WARN, title: 'Chỉ khách được phân' },
   none: { icon: 'ph ph-x', tone: N5, title: 'Không được' },
 };
 
+/** F096 (Q4 = 2, 16/10): hệ thống chưa có tính năng Nhóm (tạo nhóm, xếp người — Nợ ROADMAP) ⇒ false. */
+export const TEAMS_AVAILABLE = false;
+
 export const SCOPE_OPTIONS: Array<{ value: PermScope; label: string }> = [
   { value: 'all', label: 'Tất cả' },
-  { value: 'team', label: 'Theo team' },
+  { value: 'team', label: 'Việc được giao' },
   { value: 'assigned', label: 'Khách được phân' },
   { value: 'none', label: 'Không' },
 ];
@@ -404,7 +407,11 @@ export const CLI_ADD_PIN_TEXT = 'Đăng nhập / thêm tài khoản cần mã PI
 /** F-58: quyền chỉ-toàn-tổ-chức (system.manage) chỉ có "Tất cả" / "Không"; giá trị cũ team/assigned (không có tác dụng)
  *  vẫn hiện để ô chọn không trống, kèm ghi chú, và không chọn lại được. */
 export function scopeOptionsFor(permission: string, current: PermScope): Array<{ value: PermScope; label: string; disabled?: boolean }> {
-  if (!ALL_ONLY_PERMS.includes(permission)) return SCOPE_OPTIONS;
+  // F096 (Q4 = 2): chưa có cách tạo team ⇒ mức "team" chỉ còn là việc được giao cho chính người đó; không mời chọn mới,
+  // nhưng giá trị đã lưu vẫn hiện để ô chọn không trống. Có tính năng Nhóm thì bật `TEAMS_AVAILABLE`.
+  if (!ALL_ONLY_PERMS.includes(permission)) {
+    return TEAMS_AVAILABLE || current === 'team' ? SCOPE_OPTIONS : SCOPE_OPTIONS.filter((o) => o.value !== 'team');
+  }
   const opts: Array<{ value: PermScope; label: string; disabled?: boolean }> = SCOPE_OPTIONS.filter((o) => o.value === 'all' || o.value === 'none');
   if (current !== 'all' && current !== 'none') {
     const old = SCOPE_OPTIONS.find((o) => o.value === current);
@@ -416,7 +423,7 @@ export function scopeOptionsFor(permission: string, current: PermScope): Array<{
 /** v0.1.28 (UX N7): tên vai trò tiếng Việt trên giao diện (mã vai trò và tên lưu ở máy chủ giữ nguyên). */
 export const ROLE_LABEL: Record<string, { name: string; meta: string }> = {
   owner: { name: 'Owner — Sếp', meta: 'thấy và làm mọi thứ' },
-  manager: { name: 'Quản lý', meta: 'thấy team mình' },
+  manager: { name: 'Quản lý', meta: 'thấy việc được giao' },
   operator: { name: 'Vận hành', meta: 'xử lý hàng đợi việc' },
   agent_staff: { name: 'Nhân viên phụ trách', meta: 'chỉ khách được phân' },
   auditor: { name: 'Kiểm soát', meta: 'chỉ xem, không làm thao tác nào' },
