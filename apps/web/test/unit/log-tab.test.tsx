@@ -105,6 +105,7 @@ describe('Nhật ký hành động › câu tiếng Việt (F105)', () => {
     expect(actionLabel('provider.mot_viec_moi')).toBe('Nhà cung cấp AI — thao tác khác');
     expect(actionLabel('xyz.abc')).toBe('Thao tác khác');
     // Gói R: gắn/gỡ MODEL cho agent (không phải gắn vào nhóm chat); thao tác BOT hàng loạt có nhãn riêng
+    expect(actionLabel('channel.new_group_mode_reset')).toBe('Nhóm mới của kênh chat về "Lắng nghe im lặng" (đổi tài khoản)');
     expect(actionLabel('agent.bound')).toBe('Gắn model cho agent');
     expect(actionLabel('agent.unbound')).toBe('Gỡ model khỏi agent');
     expect(actionLabel('directory.bulk_bot_set')).toBe('Chọn bộ nhận tin hàng loạt cho nhiều người');

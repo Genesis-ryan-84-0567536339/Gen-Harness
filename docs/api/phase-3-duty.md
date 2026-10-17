@@ -28,7 +28,7 @@ Một đơn vị ý nghĩa thuộc phạm vi agent khi **agent đang bật** (`a
 |---|---|
 | có dòng `agent.channel_scopes` `(agent_id, channel_id, group_id)` khớp nhóm của đơn vị, **hoặc** dòng cả kênh `(agent_id, channel_id, NULL)` khớp kênh của đơn vị, **hoặc** `core.groups.assigned_agent_id` = agent | `group_id NULL` = mọi nhóm của kênh **và** tin 1-1 trên kênh đó. Tin 1-1 chỉ tới agent có phạm vi cả kênh. |
 | `hours` (ca trực, `tstzrange[]`) rỗng/NULL hoặc chứa `observed_at` của đơn vị | |
-| nhóm đang nghe: `proactive`, `silent`; `tagged_only` chỉ với đơn vị có tin tag agent (`raw.events.mentions_agent`) | `off`, `paused` → không xét. Tin 1-1 đã được lọc ở ingest (`listen_direct`). |
+| nhóm chủ động: `proactive`; `tagged_only` chỉ với đơn vị có tin tag agent (`raw.events.mentions_agent`) | `silent` (Lắng nghe im lặng — mặc định sổ câu hỏi #22), `off`, `paused`, `pending` → không xét (tin `silent` vẫn được lưu và sàng lọc, chỉ không đưa cho agent trực). Tin 1-1 chỉ vào ứng viên khi kênh đặt `direct_mode = reply` (mặc định `silent`: lưu nhưng không đưa cho agent trực) HOẶC người gửi đã được gán BOT đích danh (`core.persons.attrs.agent_id`, Gán BOT ở Khách & Nhóm › Con người; v0.1.65, F080) — khi đó đúng agent đó phụ trách, kể cả khi kênh im lặng và agent không có phạm vi cả kênh, và agent đọc được tin 1-1 của người đó. |
 | chưa có quyết định của agent này cho đơn vị này | chống trùng |
 
 Dữ liệu đưa vào ngữ cảnh cũng chỉ lấy trong phạm vi ("tầm với") của agent: nhóm được gán (từng nhóm, cả kênh, hoặc
@@ -83,9 +83,18 @@ Mức hiệu lực `L` = `gh.biz.core.drafts.effective_level` (thấp nhất c�
 | `suggest` | L ≥ 3 → `suggest` / `suggested` (nội dung ở `proposal.text`); L ≤ 2 → `silent` / `blocked` |
 | `draft`, `send` | L ≤ 2 → `silent` / `blocked`. L = 3 → `suggest` / `suggested`. L ≥ 4 → `create_draft(kind="message", agent_id, sources=…)` → bản nháp **`pending`** (`hold_reason` "ghi ra ngoài phải chờ duyệt") → `draft`/`send` / `held`. **Mức 5–6 cũng vậy** (khoá cứng 3, quyết định Q2): không bao giờ có lệnh gửi tới bridge từ agent. |
 
+**Nhóm «Lắng nghe im lặng» (`silent`) KHÔNG BAO GIỜ trả lời — kể cả khi được tag** (Sếp chốt 17/10/2026): nhóm `silent`
+KHÔNG vào ứng viên agent trực (xem «Phạm vi»: không tốn lượt LLM, không có `agent.decisions` cho tin của nhóm đó; sàng lọc vẫn chạy). Phòng thủ: nếu
+nhóm vừa bị đặt sang `silent` giữa lúc chọn ứng viên / hỏi model và lúc `apply`, `apply` đọc lại `listen_mode` hiện tại; với tin của nhóm
+`silent` quyết định cho phép chỉ `silent`/`note` ở mọi mức tự trị (câu «Được chọn: silent, note.» trong lời nhắc); model nêu
+`suggest`/`draft`/`send` thì bị chặn: `decision = silent`, `requested = <điều model nêu>`, `outcome = blocked`, lý do «nhóm lắng
+nghe im lặng: không bao giờ trả lời, kể cả khi được tag». Áp cả khi agent được gán BOT cho nhóm đó hoặc BOT cho người gửi
+(gán BOT người chỉ áp cho tin 1-1 của họ — B8). Chế độ `tagged_only` («Nghe hết, chỉ trả lời khi được tag») giữ nguyên:
+được tag thì trả lời như bảng trên.
+
 Hạ `draft`/`send` xuống `suggest` (không tạo bản nháp, lý do ghi trong `rationale` trong ngoặc vuông) khi:
-tin do phía mình nói ra; nhóm ở chế độ nghe im lặng (`silent`) mà tin không tag agent; đã có bản nháp của agent
-đang chờ duyệt cho cùng nơi nhận (trừ tin tag); agent đã tạo ≥ `drafts_per_hour` bản nháp trong giờ qua.
+tin do phía mình nói ra; đã có bản nháp của agent đang chờ duyệt cho cùng nơi nhận (trừ tin tag); agent đã tạo
+≥ `drafts_per_hour` bản nháp trong giờ qua.
 
 Đích gửi của bản nháp: nhóm của đơn vị (`thread_type = group`) hoặc người gửi (`thread_type = user`) với tin 1-1.
 Đối tượng (`subject`) là người, không có người thì nhóm. Tiêu đề "Trả lời {người} · {nhóm}".
@@ -150,4 +159,4 @@ WebSocket (sau khi commit): `draft.new` (item danh sách, như Bàn làm việc)
    (nhóm/người mở hồ sơ, mục sổ tay mở Sổ tay nhận thức).
 2. Mức 0–2 với `note`: ARCHITECTURE xếp "ghi sổ tay" vào việc nội bộ tự làm ở mức 5–6, nhưng sổ tay cũng là trí nhớ
    lũy tiến mà sàng lọc ghi không qua mức tự trị. Tạm: agent ghi sổ tay ở mọi mức (mức 0 "Chỉ ghi nhận").
-3. Chế độ nghe "Nghe im lặng" (`silent`): tạm hiểu là agent được ghi chú / gợi ý nhưng chỉ soạn tin khi được tag.
+3. Chế độ nghe «Lắng nghe im lặng» (`silent`): Sếp chốt 17/10/2026 — agent KHÔNG BAO GIỜ soạn tin hay gợi ý trả lời, kể cả khi được tag (thay cách hiểu tạm «chỉ soạn tin khi được tag»); mặc định (sổ câu hỏi #22) nhóm `silent` còn không được đưa cho agent trực, nên cũng không `note`.

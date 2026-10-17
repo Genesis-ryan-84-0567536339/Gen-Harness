@@ -169,7 +169,7 @@ async def test_choose_model_and_effort_validated_with_real_flags(owner_api, app,
         await db.execute(text("UPDATE agent.providers SET is_enabled = (kind = 'antigravity_cli') WHERE org_id = :o"),
                          {"o": org})
         await db.commit()
-    # v0.1.62: Antigravity CLI mở cho mọi vai (không còn tham số allow_agy) — gọi như lượt Gen.
+    # Antigravity CLI không còn tham số allow_agy — gọi như lượt Gen của Owner (agy trong tiến trình).
     await app.state.model_router.generate(org, agent_key="core.gen", purpose="test",
                                           messages=[Message("user", "hi")], json_mode=False)
     assert _calls(clis)[-1] == {"model": "gemini-3.1-pro", "effort": "low"}

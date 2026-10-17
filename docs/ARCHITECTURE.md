@@ -129,7 +129,7 @@ Luật cứng:
 - Gửi đi chỉ nhận từ `gh.bridge.outbound` và chỉ thực hiện khi lệnh mang **permit** hợp lệ (§7.3). Tin đã gửi quay lại `gh.bridge.inbound` như tin `outbound` → cũng vào kho thô và được sàng lọc (handoff 03).
 - Đồng bộ danh sách nhóm/thành viên định kỳ → `gh.bridge.directory`.
 - Heartbeat mỗi 15s → `core.channel_sessions.last_heartbeat_at`; mất heartbeat → plugin kênh `degraded`.
-- Ranh giới `listen_authorized_only` (khoá, không tắt được): nhóm mới mặc định **Không nghe**. Tin của nhóm chưa bật bị bridge bỏ ngay, chỉ metadata nhóm được đồng bộ để Owner quyết định.
+- Ranh giới `listen_authorized_only` (khoá, không tắt được): tin của nhóm không nằm trong tập nghe (`off`, `paused`, `pending`) bị bridge bỏ ngay, chỉ metadata nhóm được đồng bộ. **Nhóm mới (Sếp chốt 17/10/2026): khi tài khoản được add vào một nhóm, MẶC ĐỊNH vào «Lắng nghe im lặng» (`silent`) — lưu hết tin, KHÔNG BAO GIỜ trả lời, kể cả khi được tag** (mọi bản cài, kể cả cũ; nhóm cũ đang `off` giữ nguyên). `settings.new_group_mode.<kênh>` đổi được: `silent` (mặc định) · `ask` (nhóm vào `pending` + hộp hỏi) · `off`. Thẻ kênh báo «N nhóm mới đã vào Lắng nghe im lặng».
 
 ### 4.2 Ingest → Kho thô
 Consumer `ingest` (trong api) đọc `gh.bridge.inbound`, trong **một transaction**: ánh xạ nhóm/người gửi (`core.groups`, `core.person_identities`, tạo mới nếu chưa có), `INSERT raw.events` (khử trùng `(channel_id, external_msg_id)` + `content_hash`), `INSERT refinery.event_state(state='pending')`, `NOTIFY raw_ingested`; rồi `XACK`. Đẩy dòng mới tới màn Kho dữ liệu thô qua WebSocket (mục tiêu ≤ 2 giây từ lúc tin đến — handoff 07).
@@ -154,7 +154,7 @@ Consumer `ingest` (trong api) đọc `gh.bridge.inbound`, trong **một transact
 
 ## 5. Agent trực kênh (R3)
 
-Một **Agent Identity** (`agent.identities` + `agent.channel_scopes`) được gán vào kênh/nhóm với chế độ nghe (Chỉ khi được tag · Nghe im lặng · Chủ động bắt tín hiệu). Khi `gh.clean.ready` có đơn vị ý nghĩa trong phạm vi:
+Một **Agent Identity** (`agent.identities` + `agent.channel_scopes`) được gán vào kênh/nhóm với chế độ nghe (Nghe hết, chỉ trả lời khi được tag · Lắng nghe im lặng — không bao giờ trả lời, kể cả khi được tag · Chủ động bắt tín hiệu). Khi `gh.clean.ready` có đơn vị ý nghĩa trong phạm vi:
 
 1. **Dựng ngữ cảnh** (tất định, có ghi lại):
    - danh tính agent: tên, vai trò, xưng hô, giọng, được nói khi, cấm, mức tự trị;
@@ -163,7 +163,7 @@ Một **Agent Identity** (`agent.identities` + `agent.channel_scopes`) được 
    - **dữ liệu sạch liên quan**: tối đa N `meaning_units` theo cửa sổ thời gian + độ tương đồng pgvector, trong phạm vi được phép;
    - **lịch sử tương quan**: tương tác trước giữa người ↔ nhóm ↔ agent ↔ nhân viên, cơ hội/việc/lời hứa đang mở;
    - **Sổ tay nhận thức** của ID người và ID nhóm (gồm mục ghim).
-2. **Quyết định** (LLM): `silent` · `note` (ghi sổ tay) · `suggest` · `draft` · `send`. Im lặng đúng lúc là năng lực (spec C3.3).
+2. **Quyết định** (LLM): `silent` · `note` (ghi sổ tay) · `suggest` · `draft` · `send`. Im lặng đúng lúc là năng lực (spec C3.3). Nhóm «Lắng nghe im lặng» không vào ứng viên agent trực (QD 17/10 + #22: không tốn lượt LLM; sàng lọc vẫn chạy); phòng thủ: nhóm vừa đổi sang `silent` giữa chừng thì `apply` đọc lại chế độ và chặn `suggest`/`draft`/`send` (chỉ còn `silent`/`note`); `tagged_only` được tag thì trả lời như thường.
 3. **Qua policy** (§7): `send`/`draft` thành hành động có cờ; chỉ tới bridge khi có permit.
 4. **Ghi vết**: bảng bổ sung `agent.decisions` lưu quyết định + danh sách ID ngữ cảnh đã dùng → màn "Agent đã nói gì, nhân danh gì" và khối "Dữ liệu agent đã dùng — không có chỗ nào bịa" ở Bàn làm việc đọc từ đây. Action Log ghi mọi quyết định.
 
@@ -230,7 +230,7 @@ Bàn làm việc: Duyệt và gửi · Sửa rồi gửi · Huỷ → `approved 
 **Mặc định mở hết, trừ quyền nguy hiểm nghiêm trọng.** Mọi giới hạn khác là cài đặt Owner tự bật/tắt (PIN + log).
 
 Khoá cứng, không tắt được bằng cài đặt:
-1. Chỉ lắng nghe nhóm Owner đã bật (`listen_authorized_only`).
+1. Chỉ lưu tin của nhóm Sếp đã chọn nghe (`listen_authorized_only`).
 2. Hệ thống không tự ra quyết định nhân sự.
 3. Gửi ra ngoài, vượt ngưỡng tiền, liên quan nhân sự → chờ duyệt (ngưỡng tiền Owner đặt).
 4. MCP: tool ghi qua duyệt; agent chỉ gọi tool Owner đã mở.
@@ -260,6 +260,7 @@ Mật khẩu argon2id (≥12 ký tự), TOTP tuỳ chọn *(chưa làm — ROADM
   1. quyền chức năng — `require(permission)`;
   2. phạm vi dữ liệu — mọi truy vấn qua `ScopeFilter(user)`: Manager = team mình; Operator = hàng đợi được giao; Agent nhân viên = khách được phân; Auditor = đọc, không có quyền ghi nào.
 - Đánh giá nhân sự: khoá mức Owner (yêu cầu của dự án, chip "Dữ liệu khoá ở cấp Owner", guard MCP "Dữ liệu nhân sự chỉ ở mức Owner"). Mặc định (quyết định Q4): chỉ Owner thấy nội dung; Auditor thấy nhật ký ai đã xem; Manager không thấy. Owner có thể tự cấp thêm cho vai trò khác trong Quyền hạn (PIN + log). Mọi lần xem vào Action Log.
+- Tin riêng 1-1 (`group_id IS NULL`, v0.1.65): chỉ Owner xem nguyên văn, vai khác chỉ khi người đó do chính mình phụ trách / được giao thẳng — dù phạm vi `all` (Vận hành, Kiểm soát). MỘT quy tắc `gh.biz.core.scope.direct_visible_sql` ghép vào Hộp thư, Kho thô, Kho sạch, hồ sơ, tìm kiếm, chứng cứ và sự kiện WebSocket `raw.new`; Gen của nhân viên đọc qua các API này nên theo cùng. Gán/bỏ BOT cho **người** (bỏ qua chế độ im lặng của tin 1-1) chỉ Owner + mã PIN `policy.change`.
 - Ranh giới "Ẩn dữ liệu nhạy cảm khỏi mọi vai trò dưới Owner" áp ở serializer (trường được gắn nhãn nhạy cảm bị che).
 - Row-Level Security Postgres bật ở giai đoạn hoàn thiện như lớp phòng thủ thứ hai (handoff 03).
   RLS chỉ là phòng thủ phụ (mỗi bản cài 1 tổ chức) — không mở rộng thêm.

@@ -183,7 +183,7 @@ export function CliCard({ canManage, showCredentials = true, kind = 'antigravity
           <div className="gh-card__title">{txt.title}</div>
           <div className="gh-card__kicker">{txt.kicker}</div>
           {txt.scope ? (
-            // v0.1.62 → gói G: phạm vi dùng theo lớp (core dùng được, ngoại giao chưa) + rủi ro còn lại của Antigravity CLI.
+            // v0.1.62 → gói G: phạm vi dùng theo chỗ chạy (core trong hệ thống, ngoại giao / người ngoài qua hộp riêng) + rủi ro còn lại của Antigravity CLI.
             <div className="gh-card__kicker" role="note" data-testid="cli-scope" style={{ color: 'var(--color-warn)', display: 'flex', gap: 6, alignItems: 'flex-start' }}>
               <Icon name="ph ph-shield-warning" size={13} color="var(--color-warn)" />
               <span>{txt.scope}</span>

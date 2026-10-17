@@ -148,6 +148,13 @@ def hmac_verify(message: bytes, signature: bytes) -> bool:
     return hmac.compare_digest(hmac_sign(message), signature)
 
 
+def keyed_digest(purpose: bytes, message: bytes) -> bytes:
+    """HMAC-SHA256 bằng khoá con của khoá MASTER (tách theo `purpose`) — cho băm của giá trị ngắn/đoán được (mã 6 số):
+    lộ DB mà thiếu khoá master thì không dò được. Khoá master không rời máy chủ (bridge không giữ)."""
+    subkey = hashlib.sha256(master_key() + b"gh-keyed-digest:" + purpose).digest()
+    return hmac.new(subkey, message, hashlib.sha256).digest()
+
+
 def transport_encrypt(plaintext: bytes, aad: str) -> str:
     nonce = os.urandom(12)
     ct = AESGCM(_bridge_subkey(b"transport")).encrypt(nonce, plaintext, aad.encode())

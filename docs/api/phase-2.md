@@ -11,8 +11,12 @@ Quyền: màn dữ liệu cần `data.read`; ghi (quy tắc, lịch, chạy ngay
 `GET /data/pipeline` →
 ```json
 {"channels_live": 2, "groups_listening": 42, "raw_total": 18412, "raw_pending": 4204,
- "interval_seconds": 900, "count_threshold": 500, "clean_total": 14208}
+ "raw_error": 0, "interval_seconds": 900, "count_threshold": 500, "clean_total": 14208}
 ```
+`raw_error` (v0.1.64): số tin ở trạng thái "Lỗi xử lý" (model trả sai định dạng đủ 3 lần). Bộ lập lịch tự đưa tin
+`error` về `pending` sau 30 phút, tối đa 3 lần; hết lần vẫn nằm ở `error` và hiện ở dải pipeline.
+Quy tắc sàng lọc có kết quả `set person_type` (R-05 …) ghi ngược vào `core.persons.person_type` — chỉ nâng từ
+`unknown` và không đè loại Sếp đã tự đặt ở hồ sơ.
 
 ## Kho dữ liệu thô (`raw`)
 
@@ -113,10 +117,14 @@ Loại điều kiện: `keyword_any {values}`, `keyword_all {values}`, `regex {p
   Luôn trả đủ 4 thẻ theo thiết kế: Zalo, WhatsApp, Telegram (`not_installed` nếu chưa có plugin kênh), LinkedIn (`identity_only`).
 - `POST /channels/{type}/login` 🔒 `channel.login` `{"account_label"?, "accept_risk": true}` → `202 {"session_id"}`; QR tới qua WS `channel.qr` `{"type","session_id","image","expires_at"}`, trạng thái qua `channel.status` `{"type","state","account_label","scanned"}`. Thiếu `accept_risk` → `422` (phải hiện cảnh báo rủi ro tài khoản cá nhân trước).
 - `POST /channels/{type}/logout` 🔒 `channel.logout` → 204. Zalo không có đăng xuất phía máy chủ: hệ thống xoá phiên đã lưu; Owner nên gỡ thiết bị trong ứng dụng Zalo.
-- `PATCH /channels/{type}` 🔒 `policy.change` `{"listen_direct": true|false}` → thẻ kênh. Bật/tắt nghe tin nhắn 1-1 (mặc định tắt).
+- `PATCH /channels/{type}` 🔒 `policy.change` `{"direct_mode"?: "off|silent|reply", "new_group_mode"?: "ask|silent|off"}` (v0.1.65; hoặc `{"listen_direct": true|false}` của bản cũ: true ⇒ `reply`, false ⇒ `off`) → thẻ kênh. Tin riêng 1-1: `silent` (MẶC ĐỊNH — lưu vào Kho thô, không tự trả lời, không đưa cho agent trực) · `reply` (agent trực được trả lời) · `off` (không lưu). Thẻ kênh có thêm `direct_mode`, `listen_direct` (= khác `off`) và `groups_pending`. **Nhóm mới sau này** (`new_group_mode`, F1d; `settings.new_group_mode.<kênh>`; Sếp chốt 17/10/2026 «khi được add vào một group thì MẶC ĐỊNH lắng nghe trong im lặng, KHÔNG trả lời cho dù được tag»): `silent` (MẶC ĐỊNH, kể cả mọi bản cài cũ chưa có khoá — nhóm mới vào «Lắng nghe im lặng» ngay: lưu hết tin, không bao giờ trả lời kể cả khi được tag) · `ask` (nhóm mới vào `pending` + hộp hỏi «Nhóm mới», không lưu tin cho tới khi Sếp chọn) · `off` (vào Không nghe: không lưu tin); cả ba vẫn thu danh sách thành viên. Chỉ áp cho nhóm tạo SAU khi đặt (ingest `upsert_group` đọc thiết lập; đổi thiết lập KHÔNG đổi nhóm đã có — nhóm cũ đang `off` giữ nguyên `off`, không tự bật nghe). Cần PIN như đổi tin 1-1; Nhật ký hành động `channel.new_group_mode_changed {new_group_mode, from}`. Thẻ kênh có thêm `new_group_mode`, `new_group_asked` (Sếp đã chọn ở hộp hỏi/thẻ kênh kể từ lần nối kênh gần nhất; `POST /channels/{type}/login` đặt lại `false`; chỉ còn để tương thích — ô «Áp dụng cho các nhóm mới sau này» KHÔNG còn bật sẵn) và `new_groups_silent` (số nhóm mới vừa tự vào Lắng nghe im lặng mà Sếp chưa bấm «Đã biết»; thẻ kênh hiện «N nhóm mới đã vào Lắng nghe im lặng»). Quét QR một tài khoản KHÁC tài khoản trước ⇒ `new_group_mode` về mặc định `silent` (+ `new_groups_silent = 0`; Nhật ký `channel.new_group_mode_reset` khi giá trị cũ khác mặc định). Body không có khoá nào trong ba khoá ⇒ `422`.
+- `POST /channels/{type}/groups/seen` (`system.manage`, không PIN; QD 17/10) → thẻ kênh: «Đã biết» — đặt `new_groups_silent` về 0, không đổi chế độ nhóm nào. `404` với kênh không phải Zalo/WhatsApp.
+- `POST /channels/{type}/groups/refresh` (`system.manage`, không PIN; v0.1.65) → `202 {"session_id","requested":true}`: bảo bridge quét lại danh bạ ngay (lệnh `directory.sync`). `503 BRIDGE_OFFLINE` khi bridge tắt · `409 CHANNEL_NOT_ACTIVE` khi kênh chưa đăng nhập · `429 REFRESH_TOO_SOON` khi vừa làm mới (giãn cách 30 giây).
+- `GET /channels/{type}/groups?pending=1` → chỉ nhóm đang chờ Sếp chọn (`listen_mode = pending`, chưa rời). `PATCH /channels/{type}/groups/{id}/mode` (`system.manage`) `{"mode": "off|tagged_only|silent|proactive|paused"}` → nhóm; `pending` không phải lựa chọn (Sếp không đặt lại về chờ). **Hộp hỏi (F1d; chỉ hiện khi Sếp đặt «Nhóm mới: Hỏi Sếp»)**: body thêm `"apply_to_new": true` (chỉ với `silent`/`off`, `422` với chế độ khác) = đồng thời lưu `new_group_mode` của kênh cho nhóm mới sau này; vì đổi chính sách nên cần PIN (`423 PIN_REQUIRED` — không đổi gì cả khi chưa có PIN, kể cả nhóm đang chọn). Không có `apply_to_new` ⇒ như cũ, không PIN. Mọi lượt chọn ở hộp hỏi đặt `new_group_asked = true`.
 - Bridge chưa chạy → `POST /channels/{type}/login` trả `503 BRIDGE_OFFLINE`.
-- `GET /channels/{type}/groups` → `[{"id","code","name","members":24,"kind":"internal|market|partner|customer|private","listen_mode":"off|tagged_only|silent|proactive|paused","view_scope":"owner|manager|all_members"}]`.
-- `PATCH /groups/{id}` (`system.manage`) `{listen_mode?, view_scope?, kind?}` → nhóm. Nhóm mới luôn `off` (khoá cứng).
+- `GET /channels/{type}/groups` → `[{"id","code","name","members":24,"kind":"internal|market|partner|customer|private","listen_mode":"pending|off|tagged_only|silent|proactive|paused","view_scope":"owner|manager|all_members","left":false}]`. `left: true` = Sếp đã rời nhóm (không đếm «đang lắng nghe»).
+- Chế độ nghe (hằng `ALL_LISTEN_MODES` ở `api/gh/data/common.py`, web `ListenMode`): ĐANG nghe = `tagged_only` («Nghe hết, chỉ trả lời khi được tag» — vẫn lưu mọi tin, chỉ việc trả lời cần tag) · `silent` («Lắng nghe im lặng — lưu hết, không bao giờ trả lời (kể cả khi được tag)»; MẶC ĐỊNH của nhóm mới, QD 17/10) · `proactive`; KHÔNG nghe = `off` · `paused` (Sếp tạm dừng) · `pending` (chỉ khi Sếp đặt «Nhóm mới: Hỏi Sếp» — chờ Sếp chọn Lắng nghe im lặng/Không nghe, chưa lưu tin, vẫn thu danh sách thành viên).
+- `PATCH /groups/{id}` (`system.manage`) `{listen_mode?, view_scope?, kind?}` → nhóm. Nhóm mới vào `silent` (QD 17/10, mặc định) — hoặc `pending` (hộp hỏi) / `off` nếu Sếp đã đặt `new_group_mode` của kênh là `ask` / `off`; nhóm đang `off` của bản cũ giữ nguyên `off`. Không đặt lại về `pending` được (`422`).
 
 ## Bộ não AI (provider, khoá, CLI) — màn cấu hình đầy đủ ở GĐ 4
 
@@ -135,7 +143,7 @@ Loại điều kiện: `keyword_any {values}`, `keyword_all {values}`, `regex {p
 
 - `PUT /setup/steps/4` `{"provider_ids": [ưu tiên trước → sau]}` → state. Cần ≥1 provider đã `test` OK (hoặc CLI có hồ sơ hoạt động) → nếu không `409 STEP_INCOMPLETE`.
 - `PUT /setup/steps/5` `{}` → cần ≥1 kênh `active`.
-- `PUT /setup/steps/6` `{"groups": [{"id","listen_mode","view_scope"}]}` → cần ≥1 nhóm khác `off`.
+- `PUT /setup/steps/6` `{"groups": [{"id","listen_mode","view_scope"}]}` → cần ≥1 nhóm đang nghe (`tagged_only`/`silent`/`proactive`; `off`, `paused`, `pending` không tính).
 - `PUT /setup/steps/7` `{"interval_seconds","count_threshold","min_confidence","rule_codes":["R-01",…],"weights":[{"dimension","value"}]}` → state.
 - `GET /setup/rule-presets` → bộ quy tắc khởi đầu R-01…R-06 (cùng hình dạng quy tắc, `enabled` gợi ý).
 - `GET /setup/first-run` → `{"raw_collected": 1244, "classifying": 250, "clean": 812, "lowconf": 31, "discarded": 120, "run": {…}|null}`; realtime qua WS `refinery.progress`.
@@ -152,6 +160,7 @@ Cùng cookie phiên (gửi qua proxy). Server đẩy `{"type": "…", "data": {�
 | `raw.new`, `raw.state` | `data.read` | xem trên |
 | `refinery.progress`, `refinery.run` | `data.read` | xem trên |
 | `channel.qr`, `channel.status` | `system.read` | xem trên |
+| `group.discovered` | `system.read` | `{id, code, name, channel, listen_mode: "pending"/"silent"/"off"}` — nhóm MỚI vừa phát hiện (v0.1.65); Console làm mới thẻ kênh: mở hộp «Nhóm mới — chọn Lắng nghe im lặng/Không nghe» chỉ khi `pending` (Sếp đặt Hỏi Sếp); `silent` ⇒ khối «N nhóm mới đã vào Lắng nghe im lặng». |
 | `cli.login` | `system.manage` | xem trên |
 | `header` | mọi người | `{channels_live, channels_connected, groups_listening, autonomy_level, data_confidence}` `data_confidence` (Owner chốt 24/09): số tin sàng lọc hôm nay (múi giờ tổ chức) vào thẳng Kho sạch ÷ (sạch + tin cậy thấp), không tính nhiễu; dạng 0–1, `null` khi hôm nay chưa sàng lọc tin nào. Gửi lại sau mỗi lượt sàng lọc. Cũng trả ở `GET /header`. |
 

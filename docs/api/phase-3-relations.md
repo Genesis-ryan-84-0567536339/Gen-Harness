@@ -65,7 +65,7 @@ BOT trực nhóm (`core.groups.assigned_agent_id`) + mức tự trị riêng nh�
             "priority": "P1", "bot": AgentRef | null, "autonomy_level": 3 | null,
             "owner_user_id": "uuid" | null}], "next_cursor", "total"}
 ```
-`POST /directory/people/{id}/bot` (`profile.write`) `{"agent_id"?: uuid|null, "autonomy_level"?: 0-6|null}` →
+`POST /directory/people/{id}/bot` (**chỉ Owner + mã PIN `policy.change`**, v0.1.65 — gán BOT bỏ qua chế độ im lặng của tin 1-1; `POST /directory/people/bulk-bot` cùng quyền; BOT của nhóm vẫn `profile.write`) `{"agent_id"?: uuid|null, "autonomy_level"?: 0-6|null}` →
 **Thiết lập BOT + tự trị riêng từng người**. Lưu vào `core.persons.attrs.agent_id` / `attrs.autonomy_level` —
 quyết định tự đưa ra vì `core.persons` không có cột `assigned_agent_id` như `core.groups` (spec chỉ nói "gán
 BOT cho từng người", không nói thêm cột); dùng `attrs` giữ đúng quy ước `attrs.autonomy_level` đã có từ
@@ -102,7 +102,10 @@ cụm `duty`, ngoài phạm vi cụm này; ở đây chỉ dựng chỗ lưu + m
   đúng lịch sử dù đang xem từ hồ sơ gốc hay hồ sơ đã gộp.
 
 `PATCH /profile/{person_id}` (`profile.write`) `{"owner_user_id"?: uuid|null, "autonomy_level"?: 0-6|null,
-"note"?: string|null}` → **Gán phụ trách**, **mức tự trị với đối tượng này**, **ghi chú tay của Sếp**. `note`
+"note"?: string|null, "person_type"?: customer|partner|staff|candidate|learner|supplier|unknown,
+"relation_to_owner"?: direct|via_staff|staff|stranger}` → **Gán phụ trách**, **mức tự trị với đối tượng này**,
+**ghi chú tay của Sếp**, **loại người / Liên quan Sếp** (v0.1.64: nút "Đánh dấu là nhân viên"; loại do Sếp đặt khoá
+bằng `attrs.person_type_locked` nên quy tắc sàng lọc không đè lại). `note`
 lưu ở `attrs.owner_note` — đây là ghi chú **tay**, không endpoint/mã nào khác của hệ thống (refinery, agent
 trực kênh, worker) từng ghi vào khoá này, nên "hệ thống không sửa" là bảo đảm kiến trúc, không chỉ quy ước UI.
 Trả về hồ sơ đầy đủ (như `GET`).

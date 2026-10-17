@@ -127,7 +127,7 @@ func (r *Redactor) LiteralCount() int {
 
 // SecretFileNames là các Docker secret trong <thư mục compose>/../secrets mà
 // genh che (gh_offsite_key — "Khoá khôi phục" — che cả dạng bỏ dấu '-').
-var SecretFileNames = []string{"gh_master_key", "gh_bridge_key", "gh_browser_key", "gh_offsite_key"}
+var SecretFileNames = []string{"gh_master_key", "gh_bridge_key", "gh_browser_key", "gh_agy_key", "gh_offsite_key"}
 
 // SecretsFromInstall gom literal bí mật của một bản cài: secretgen bundle
 // (config/secrets.json — CHỈ ĐỌC, không sinh/ghi gì) + nội dung

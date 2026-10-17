@@ -58,8 +58,8 @@ function renderWith(ui: ReactElement, qc: QueryClient) {
 }
 const freshClient = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
-// Gói G (16/10/2026): câu phạm vi theo lớp (apps/web/src/lib/agyLayers.ts::AGY_LAYERS_TEXT) thay câu "mọi việc" của v0.1.62.
-const SCOPE_RE = /Dùng được cho: Gen của Sếp, sàng lọc tin, Bản tin và agent nội bộ\. Chưa dùng cho việc trả lời người ngoài/;
+// Gói G + H2 (16/10/2026): câu phạm vi theo chỗ chạy (apps/web/src/lib/agyLayers.ts::AGY_LAYERS_TEXT) thay câu "mọi việc" của v0.1.62.
+const SCOPE_RE = /Dùng được cho: Gen của Sếp và agent nội bộ \(chạy trong hệ thống\); Bản tin, sàng lọc tin người lạ/;
 const OLD_RULE_RE = /chỉ dùng cho Gen|chỉ cho Gen|luật an toàn, không tắt được/i;
 
 const PROVIDERS: Provider[] = [
@@ -124,7 +124,7 @@ describe('v0.1.62 — Antigravity CLI dùng được cho mọi vai', () => {
     const agy = screen.getByTestId('cli-card-antigravity_cli');
     const claude = screen.getByTestId('cli-card-claude_code_cli');
     expect(within(agy).getByText(SCOPE_RE)).toBeInTheDocument();
-    expect(within(agy).getByText(/chạy cùng máy chủ với khoá hệ thống/)).toBeInTheDocument();
+    expect(within(agy).getByText(/dùng chung máy chủ với khoá hệ thống/)).toBeInTheDocument();
     expect(agy).not.toHaveTextContent(OLD_RULE_RE);
     expect(within(claude).queryByText(SCOPE_RE)).toBeNull();
   });

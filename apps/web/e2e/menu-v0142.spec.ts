@@ -174,8 +174,8 @@ test.describe('v0.1.42 · menu', () => {
     await expect(nav(page).getByText('Đánh giá con người')).toHaveCount(0);
     await expect(nav(page).getByText('Chất lượng chăm sóc')).toHaveCount(0);
     const note = page.getByRole('note').filter({ hasText: 'Chưa có nhân viên nào' });
-    await expect(note).toContainText('person_type = staff');
-    await expect(note.getByRole('link', { name: 'Mở Quy tắc sàng lọc' })).toHaveAttribute('href', '/rules');
+    await expect(note).toContainText('Đánh dấu là nhân viên');
+    await expect(note.getByRole('link', { name: 'Mở Khách & Nhóm' })).toHaveAttribute('href', '/directory');
     await expect(page.locator('.team-links').getByRole('link', { name: /Đánh giá con người/ })).toHaveAttribute('href', '/people');
     await expect(page.locator('.team-links').getByRole('link', { name: /Chất lượng chăm sóc/ })).toHaveAttribute('href', '/care');
     // Màn vẫn có route.

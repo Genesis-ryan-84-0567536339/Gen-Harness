@@ -71,21 +71,23 @@ def test_router_client_caps_timeout_only_for_background() -> None:
     cli = _Timed(300.0)
     router = ModelRouter(None, None, cli_factory=cli)       # type: ignore[arg-type]
     p = SimpleNamespace(kind="antigravity_cli")
-    assert router._client(p, None) is cli and cli.timeout == 300.0
-    router._client(p, None, background=True)
+    assert router._client(p, None, where="inproc") is cli and cli.timeout == 300.0
+    router._client(p, None, where="inproc", background=True)
     assert cli.timeout == AGY_BACKGROUND_TIMEOUT_S
     short = _Timed(30.0)                                    # timeout đã ngắn hơn trần thì giữ nguyên (không nới ra)
-    ModelRouter(None, None, cli_factory=short)._client(p, None, background=True)    # type: ignore[arg-type]
+    ModelRouter(None, None, cli_factory=short)._client(p, None, where="inproc", background=True)    # type: ignore[arg-type]
     assert short.timeout == 30.0
 
 
-async def test_generate_applies_the_cap_to_background_purposes_only(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+async def test_generate_applies_the_cap_to_background_purposes_only(  # type: ignore[no-untyped-def]
+        app, db, redis, boxctl) -> None:
     org = await org_id(db)
     await cli_provider(db, org, "antigravity_cli", 1)
     for purpose, expect in (("refinery.extract", AGY_BACKGROUND_TIMEOUT_S), ("duty_decide", AGY_BACKGROUND_TIMEOUT_S),
                             ("gen.briefing", AGY_BACKGROUND_TIMEOUT_S), ("gen.turn", 300.0)):
         cli = _Timed(300.0)
-        router = ModelRouter(sessionmaker(), redis, cli_factory=cli)
+        # core.refinery chạy qua hộp riêng (H2), core.gen trong tiến trình: trần thời gian áp cho cả hai client.
+        router = ModelRouter(sessionmaker(), redis, cli_factory=cli, box_factory=cli)
         await router.generate(org, agent_key="core.gen" if purpose == "gen.turn" else "core.refinery",
                               purpose=purpose, messages=[Message("user", "x")], json_mode=False)
         assert cli.seen == [expect], (purpose, cli.seen)
@@ -99,6 +101,14 @@ def test_token_expiry_and_needs_refresh() -> None:
     assert token_expiry(b'{"expires_at": "2026-10-16T10:00:00Z"}') == pytest.approx(1_792_144_800.0)
     claims = base64.urlsafe_b64encode(json.dumps({"exp": 4102444800}).encode()).decode().rstrip("=")
     assert token_expiry(json.dumps({"id_token": f"h.{claims}.s"}).encode()) == 4102444800.0
+    # định dạng thật của agy 1.2.9: expiry + refresh_token nằm trong "token" (không ở cấp đầu)
+    nested = json.dumps({"token": {"access_token": "a", "refresh_token": "r", "expiry": "2026-10-16T10:00:00.5Z"},
+                         "auth_method": "oauth"}).encode()
+    assert token_expiry(nested) == pytest.approx(1_792_144_800.5)
+    assert token_needs_refresh(nested, now=1_792_144_790.0) and not token_needs_refresh(nested, now=1_792_140_000.0)
+    no_exp = json.dumps({"token": {"refresh_token": "r"}}).encode()
+    assert token_expiry(no_exp) is None and token_needs_refresh(no_exp)  # có refresh, không rõ hạn ⇒ coi có thể làm mới
+    assert not token_needs_refresh(json.dumps({"token": {"access_token": "a"}}).encode())
     assert token_expiry(b"khong-phai-json") is None and token_expiry(b"[]") is None and token_expiry(b"{}") is None
     assert token_needs_refresh(_token(now + 30), now=now)                  # sắp hết
     assert token_needs_refresh(_token(now - 5), now=now)                   # đã hết

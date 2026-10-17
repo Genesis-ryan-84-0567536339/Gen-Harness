@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.auth import rbac, service
 from gh.auth.deps import current_user, require, require_owner
-from gh.biz.core.scope import scope_for
+from gh.biz.core.scope import direct_visible_sql, scope_for
 from gh.biz.queue import service as qsvc
 from gh.chassis import actionlog
 from gh.data.common import iso, mask_text, raw_code
@@ -60,7 +60,7 @@ async def get_summary(days: int = Query(7, ge=1, le=90), user: service.CurrentUs
                       db: AsyncSession = DB) -> dict[str, Any]:
     # Tôn trọng phạm vi queue.read (v0.1.27): phạm vi hẹp chỉ đếm mục người gọi thấy được trong Hộp thư.
     sc = await scope_for(db, user, "queue.read")
-    return await triage.summary(db, user.org_id, days, scope_sql=qsvc.item_scope_sql(sc, "i"),
+    return await triage.summary(db, user.org_id, days, scope_sql=qsvc.item_scope_sql(sc, "i", user),
                                scope=sc.level)
 
 
@@ -79,6 +79,9 @@ async def get_skipped(limit: int = Query(50, ge=1, le=200), days: int = Query(30
         pw, pp = sc.person_id_sql("p.id")
         gw, gp = sc.group_sql("g")
         where, params = f"(({pw}) OR ({gw}))", {**pp, **gp}
+    # Tin 1-1 chỉ Owner/người được giao đúng người đó xem nguyên văn (review v0.1.65 P2-2) — kể cả phạm vi `all`.
+    dm_sql, dm_params = direct_visible_sql(user, "e.group_id", "p.id")
+    where, params = f"({where}) AND {dm_sql}", {**params, **dm_params}
     base = f"""
         FROM refinery.event_state s
         JOIN raw.events e ON e.id = s.event_id AND e.received_at = s.event_received_at

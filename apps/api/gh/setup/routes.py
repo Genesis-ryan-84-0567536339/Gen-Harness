@@ -23,6 +23,7 @@ from gh.biz.people.routes import try_chat
 from gh.chassis import actionlog, policy
 from gh.crypto import hash_secret, token_digest
 from gh.crypto import temp_password as new_temp_password
+from gh.data.common import LISTENING_MODES
 from gh.data_api.routes import RuleIn, ScheduleIn, create_rule, save_schedule, save_weights
 from gh.db import DB
 from gh.errors import ApiError, conflict, field_errors, forbidden, pin_required, unauthenticated
@@ -57,7 +58,7 @@ CURRENT_PHASE = 4
 # Khoá cứng — ARCHITECTURE §7.4, không tắt được bằng cài đặt. Chỉ hiển thị lại ở bước 9 để Owner xác nhận đã đọc
 # (`ack_boundaries`) — trang Quyền hạn đầy đủ để BẬT/TẮT các giới hạn *tuỳ chọn* khác thuộc giai đoạn 4.
 HARD_BOUNDARIES = (
-    "Chỉ lắng nghe nhóm Owner đã bật",
+    "Chỉ lưu tin của nhóm Sếp đã chọn nghe",
     "Hệ thống không tự ra quyết định nhân sự",
     "Gửi ra ngoài, vượt ngưỡng tiền, liên quan nhân sự → luôn chờ duyệt ở Bàn làm việc",
     "MCP: tool ghi qua duyệt; agent chỉ gọi tool Owner đã mở",
@@ -568,9 +569,10 @@ async def step6(body: Step6In, request: Request, db: AsyncSession = DB,
     for g in body.groups:
         await update_group(db, request.app.state.redis, owner, g.id,
                            GroupPatch.model_validate(g.model_dump(exclude={"id"})))
+    # v0.1.65 (F066): "đang nghe" = LISTENING_MODES (không tính off, paused, pending) và chưa rời nhóm.
     listening = int((await db.execute(text("""SELECT count(*) FROM core.groups
-                                              WHERE org_id = :o AND listen_mode NOT IN ('off', 'paused')"""),
-                                      {"o": row.org_id})).scalar_one())
+                                              WHERE org_id = :o AND left_at IS NULL AND listen_mode = ANY(:m)"""),
+                                      {"o": row.org_id, "m": list(LISTENING_MODES)})).scalar_one())
     if listening == 0:
         raise incomplete("Cần bật lắng nghe ít nhất một nhóm")
     return await _mark_done(db, request, row, owner, 6, {"listening": listening})
@@ -862,16 +864,15 @@ async def step11(body: Step11In, request: Request, db: AsyncSession = DB,
 
 # Bước tuỳ chọn → màn Console làm tiếp (khớp FOLLOW_UP ở web). "done" suy từ DỮ LIỆU THẬT, không chỉ từ trạng thái
 # trình thiết lập: Owner để sau bước 5 rồi quét QR ở màn Kênh thì mục tự biến mất khỏi "Việc thiết lập tiếp".
+# v0.1.63 (B2, F010): bước 4 KHÔNG có SQL ở đây — "xong" = `readiness.ai_ready` (có nguồn AI DÙNG ĐƯỢC:
+# đang bật, có khoá
+# bật / phiên CLI chưa hết hạn, có model bật), không chỉ có dòng model. Xem `follow_up_status`.
+AI_STEP = 4
 FOLLOW_UP_SQL: dict[int, str] = {
-    # v0.1.29: bước 4 "Để sau" được → "Chưa có model". v0.1.55 (G2): bước 4 không còn ghi agent.bindings (hồ sơ tiêu
-    # chuẩn tự phủ) nên "xong" = có ít nhất một nhà cung cấp BẬT (không tính embedding / Jev) có model bật (không
-    # phải embedding).
-    4: """SELECT EXISTS (SELECT 1 FROM agent.providers p JOIN agent.models m ON m.provider_id = p.id
-                         WHERE p.org_id = :o AND p.is_enabled AND p.kind NOT IN ('embedding', 'system_one')
-                           AND m.is_enabled AND m.model_name NOT ILIKE '%embed%')""",
     5: """SELECT EXISTS (SELECT 1 FROM core.channel_sessions s JOIN core.channels c ON c.id = s.channel_id
                          WHERE c.org_id = :o AND s.state = 'active' AND s.ended_at IS NULL)""",
-    6: "SELECT EXISTS (SELECT 1 FROM core.groups WHERE org_id = :o AND listen_mode NOT IN ('off', 'paused'))",
+    6: ("SELECT EXISTS (SELECT 1 FROM core.groups WHERE org_id = :o AND left_at IS NULL "
+        f"AND listen_mode IN ({', '.join(repr(m) for m in LISTENING_MODES)}))"),   # một nguồn: gh.data.common
     7: "SELECT EXISTS (SELECT 1 FROM refinery.rules WHERE org_id = :o AND is_enabled)",
     8: "SELECT EXISTS (SELECT 1 FROM agent.identities WHERE org_id = :o)",
     # Mức tự trị đặt ngay trong form tạo/sửa agent ở Console → có agent là đã có mức tự trị.
@@ -906,10 +907,15 @@ async def follow_up_status(db: AsyncSession, row: Any) -> list[dict[str, Any]]:
     status = (row.completed or {}).get("steps", {})
     out = []
     for n, key, title, required, _phase in STEPS:
-        if required or n not in FOLLOW_UP_SQL:
+        if required or (n not in FOLLOW_UP_SQL and n != AI_STEP):
             continue
-        real = bool((await db.execute(text(FOLLOW_UP_SQL[n]), {"o": row.org_id})).scalar())
-        # Bước 4 chỉ theo dữ liệu thật: xoá nguồn (gỡ gán model) sau khi đã xong bước 4 thì lại "Chưa có model".
+        if n == AI_STEP:
+            from gh.providers import readiness
+
+            real = bool((await readiness.ai_ready(db, row.org_id))["ok"])
+        else:
+            real = bool((await db.execute(text(FOLLOW_UP_SQL[n]), {"o": row.org_id})).scalar())
+        # Bước 4 chỉ theo dữ liệu thật: tắt / gỡ khoá / hết phiên nguồn sau khi đã xong bước 4 thì lại "Chưa có model".
         done = real if n == 4 else status.get(str(n)) == "done" or real
         out.append({"n": n, "key": key, "title": title, "status": status.get(str(n), "todo"), "done": done})
     for n, key, title, sql in FOLLOW_UP_EXTRA:

@@ -8,6 +8,7 @@ export class FakeBus {
     this.events = [];
     this.listen = {}; // channel → Set(groupId)
     this.direct = {}; // channel → '1'
+    this.groupMode = {}; // channel → 'silent' | 'ask' | 'off' (cờ gh:bridge:new_group_mode; chưa có = null)
     this.nonces = new Set();
     this.heartbeatKey = null;
   }
@@ -19,7 +20,9 @@ export class FakeBus {
 
   async isListening(channel, groupId) { return Boolean(this.listen[channel]?.has(String(groupId))); }
 
-  async listenDirect(channel) { return this.direct[channel] === '1'; }
+  async listenDirect(channel) { return this.direct[channel] !== '0'; } // giống RedisBus: mặc định lưu, chỉ "0" mới chặn
+
+  async newGroupMode(channel) { return this.groupMode[channel] ?? null; }
 
   async claimNonce(nonce) {
     if (this.nonces.has(nonce)) return false;

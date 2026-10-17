@@ -82,11 +82,15 @@ test('toàn hệ thống: thiết lập 1–7, nhận tin, sàng lọc, màn d�
   await shot(page, '03-step5-active');
   await next.click();
 
-  // Bước 6: danh bạ nhóm do bridge gửi; bật một nhóm.
+  // Bước 6: danh bạ nhóm do bridge gửi. QD 17/10: nhóm mới mặc định «Lắng nghe im lặng» (không bao giờ trả lời, kể cả khi được
+  // tag) — Sếp đổi g-si sang «Nghe hết, chỉ trả lời khi được tag» (để agent soạn nháp ở live-phase3) và tắt hẳn g-noibo.
   await expect(page.getByRole('heading', { name: 'Chọn nhóm lắng nghe' })).toBeVisible();
   const mode = page.getByLabel('Chế độ lắng nghe của Chợ thép sỉ miền Nam');
-  await expect(mode).toHaveValue('off');
-  await mode.selectOption('silent');
+  await expect(mode).toHaveValue('silent');
+  await mode.selectOption('tagged_only');
+  const noibo = page.getByLabel('Chế độ lắng nghe của Nội bộ kinh doanh');
+  await expect(noibo).toHaveValue('silent');
+  await noibo.selectOption('off');
   await shot(page, '04-step6');
   await next.click();
 

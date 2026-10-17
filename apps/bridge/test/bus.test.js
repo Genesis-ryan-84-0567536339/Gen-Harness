@@ -55,13 +55,24 @@ test('publish: envelope chuẩn + MAXLEN ~', async () => {
   assert.deepEqual(opts, { TRIM: { strategy: 'MAXLEN', strategyModifier: '~', threshold: 500 } });
 });
 
+test('newGroupMode: đọc cờ gh:bridge:new_group_mode:<kênh>; chưa có khoá ⇒ null (lõi cũ chưa ghi cờ)', async () => {
+  const redis = fakeRedis();
+  const bus = new RedisBus({ redis });
+  assert.equal(await bus.newGroupMode('zalo'), null);
+  redis.kv.set('gh:bridge:new_group_mode:zalo', 'ask');
+  assert.equal(await bus.newGroupMode('zalo'), 'ask');
+  assert.equal(await bus.newGroupMode('whatsapp'), null);
+});
+
 test('tập nghe, listen_direct, nonce NX EX 600, khoá heartbeat TTL 45', async () => {
   const redis = fakeRedis();
   const bus = new RedisBus({ redis });
   redis.sets.set('gh:bridge:listen:zalo', new Set(['G1']));
   assert.equal(await bus.isListening('zalo', 'G1'), true);
   assert.equal(await bus.isListening('zalo', 'G2'), false);
-  assert.equal(await bus.listenDirect('zalo'), false);
+  assert.equal(await bus.listenDirect('zalo'), true); // chưa có khoá: mặc định lưu im lặng (v0.1.65)
+  redis.kv.set('gh:bridge:listen_direct:zalo', '0');
+  assert.equal(await bus.listenDirect('zalo'), false); // Sếp chọn không lưu tin 1-1
   redis.kv.set('gh:bridge:listen_direct:zalo', '1');
   assert.equal(await bus.listenDirect('zalo'), true);
   assert.equal(await bus.claimNonce('n1'), true);

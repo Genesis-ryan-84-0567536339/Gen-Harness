@@ -171,13 +171,13 @@ async def test_complete_recalls_once_with_valid_effort() -> None:
     fake = FakeAgy()
     p, m = SimpleNamespace(kind="antigravity_cli"), SimpleNamespace(model_name="gemini-3.8-flash")
     c = await _router(fake)._complete(p, None, m, [Message("user", "hi")], json_mode=False, temperature=0.2,
-                                      effort=None, implicit=False)
+                                      effort=None, implicit=False, where="inproc")
     assert c.text == "ok" and fake.calls == [("gemini-3.8-flash", None), ("gemini-3.8-flash", "medium")]
     # Lượt gọi lại vẫn bị từ chối ⇒ ném lỗi, KHÔNG gọi lần thứ ba.
     bad = FakeAgy(effort_error=True)
     with pytest.raises(ModelRejected):
         await _router(bad)._complete(p, None, m, [Message("user", "hi")], json_mode=False, temperature=0.2,
-                                     effort=None, implicit=False)
+                                     effort=None, implicit=False, where="inproc")
     assert len(bad.calls) == 2
 
 
@@ -186,7 +186,7 @@ async def test_complete_does_not_retry_for_api_sources_or_when_effort_was_sent()
     m = SimpleNamespace(model_name="gemini-3.8-flash")
     with pytest.raises(ModelRejected):          # đã gửi mức (không phải mức do hồ sơ tự thêm) ⇒ không thử lại
         await _router(fake)._complete(SimpleNamespace(kind="antigravity_cli"), None, m, [Message("user", "hi")],
-                                      json_mode=False, temperature=0.2, effort="high", implicit=False)
+                                      json_mode=False, temperature=0.2, effort="high", implicit=False, where="inproc")
     assert len(fake.calls) == 1
 
 
@@ -336,11 +336,12 @@ async def test_heal_that_hangs_is_cut_and_gen_turn_goes_on(owner_api, app, needs
     assert started == [pid]
 
 
-@pytest.mark.parametrize("agent_key,purpose", [("core.refinery", "refinery.extract"), ("core.briefing", "gen.briefing"),
-                                               ("core.gen", "gen.briefing"), ("agent:{id}", "duty_decide")])
-async def test_background_and_other_roles_also_self_heal_agy(owner_api, app, needs_effort, agent_key, purpose) -> None:  # type: ignore[no-untyped-def]
-    """v0.1.62: agy mở cho mọi vai ⇒ chuỗi rỗng ở việc nền / vai khác cũng tự lành (gọi thử một lần rồi lưu model) và
-    lượt gọi trả lời bằng agy — trước đây (F-22) các vai này không bao giờ tới agy."""
+@pytest.mark.parametrize("agent_key,purpose", [("core.gen", "gen.briefing"), ("agent:{id}", "agent.task")])
+async def test_background_and_other_roles_also_self_heal_agy(  # type: ignore[no-untyped-def]
+        owner_api, app, needs_effort, box, agent_key, purpose) -> None:
+    """Chuỗi rỗng ở việc nền / vai core cũng tự lành (gọi thử một lần rồi lưu model) và lượt gọi trả lời bằng agy. H2:
+    chỉ vai chạy agy TRONG TIẾN TRÌNH (Gen của Owner, agent nội bộ) — vai qua hộp (kể cả Bản tin, review v0.1.63 P2-3)
+    không kích hoạt lượt thử."""
     api = owner_api
     org, pid = await _boss_state(api)
     n0 = len(_calls(needs_effort))
@@ -351,7 +352,19 @@ async def test_background_and_other_roles_also_self_heal_agy(owner_api, app, nee
     assert [m.model_name for m in await _models(pid)] == ["gemini-3.8-flash"]    # và lưu đúng một model
 
 
-async def test_bindings_show_agy_model_for_every_role(owner_api, needs_effort) -> None:  # type: ignore[no-untyped-def]
+async def test_box_roles_do_not_self_heal_agy_inproc(  # type: ignore[no-untyped-def]
+        owner_api, app, needs_effort, box) -> None:
+    """Sàng lọc tin người lạ (core.refinery) qua hộp: chuỗi rỗng ⇒ hết chuỗi, KHÔNG gọi thử agy trong tiến trình."""
+    org, pid = await _boss_state(owner_api)
+    n0 = len(_calls(needs_effort))
+    for key, purpose in (("core.refinery", "refinery.extract"), ("core.briefing", "gen.briefing")):
+        with pytest.raises(ModelUnavailable):
+            await app.state.model_router.generate(org, agent_key=key, purpose=purpose,
+                                                  messages=[Message("user", "tin của người lạ")], json_mode=False)
+    assert len(_calls(needs_effort)) == n0 and box.calls == [] and await _models(pid) == []
+
+
+async def test_bindings_show_agy_model_for_every_role(owner_api, needs_effort, box) -> None:  # type: ignore[no-untyped-def]
     api = owner_api
     _org, pid = await _boss_state(api)
 
@@ -372,8 +385,13 @@ async def test_bindings_show_agy_model_for_every_role(owner_api, needs_effort) -
     for key in ("core.refinery", "core.briefing"):
         assert after[key]["standard"]["model_name"] == "gemini-3.8-flash", key
         assert after[key]["standard_reason"] is None, key
-    # Gói G: core.reply là lớp ngoại giao ⇒ chưa dùng agy; câu trung thực thay cho "cần khoá API".
-    assert after["core.reply"]["standard"] is None and "người ngoài" in after["core.reply"]["standard_reason"]
+    # H2: core.reply (ngoại giao) chạy agy qua hộp: hộp chạy ⇒ có model chuẩn; hộp tắt ⇒ câu trung thực.
+    assert after["core.reply"]["standard"]["model_name"] == "gemini-3.8-flash"
+    box.state = "down"
+    off = await items()
+    reply_off = off["core.reply"]
+    assert reply_off["standard"] is None and "Hộp riêng Antigravity chưa chạy" in reply_off["standard_reason"]
+    box.state = "ok"
     assert all(isinstance(i["standard_reason"], str | None) for i in after.values())
     assert "cần khoá API" not in json.dumps(after, ensure_ascii=False)
     # Mục "Về mặc định" dùng cùng lý do (một sự thật cho cả hai màn).

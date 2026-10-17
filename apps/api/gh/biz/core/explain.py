@@ -16,7 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.auth import rbac, service
-from gh.biz.core.scope import Scope, not_found, scope_for
+from gh.biz.core.scope import Scope, direct_visible, direct_visible_sql, not_found, scope_for
 from gh.data.common import RAW_SELECT, iso, mask_text, raw_code, raw_item
 
 MAX_UNITS = 20
@@ -58,11 +58,15 @@ def _person(r: Any, prefix: str) -> dict[str, Any] | None:
             "type": getattr(r, f"{prefix}_type", None), "org_name": getattr(r, f"{prefix}_org", None)}
 
 
-async def units_payload(db: AsyncSession, unit_ids: list[uuid.UUID], *, is_owner: bool) -> list[dict[str, Any]]:
-    """Đơn vị ý nghĩa (mới nhất trước, tối đa 20) kèm trích dẫn tới bản ghi thô."""
+async def units_payload(db: AsyncSession, unit_ids: list[uuid.UUID], *,
+                        viewer: service.CurrentUser) -> list[dict[str, Any]]:
+    """Đơn vị ý nghĩa (mới nhất trước, tối đa 20) kèm trích dẫn tới bản ghi thô. Đơn vị từ tin 1-1 chỉ trả cho Owner
+    hoặc người được giao đúng người đó (review v0.1.65 P2-2) — chỗ chung cho Hộp thư, chứng cứ, cảnh báo, bản nháp."""
     if not unit_ids:
         return []
-    rows = (await db.execute(text("""
+    is_owner = viewer.role_code == rbac.OWNER
+    dm_sql, dm_params = direct_visible_sql(viewer, "u.group_id", "u.person_id")
+    rows = (await db.execute(text(f"""
         SELECT u.id, u.event_type, u.conclusion, u.confidence, u.observed_at,
                g.id AS g_id, g.code AS g_code, g.name AS g_name, gc.type AS g_channel,
                p.id AS p_id, p.code AS p_code, p.display_name AS p_name, p.person_type AS p_type,
@@ -70,8 +74,8 @@ async def units_payload(db: AsyncSession, unit_ids: list[uuid.UUID], *, is_owner
         FROM clean.meaning_units u
         LEFT JOIN core.groups g ON g.id = u.group_id LEFT JOIN core.channels gc ON gc.id = g.channel_id
         LEFT JOIN core.persons p ON p.id = u.person_id
-        WHERE u.id = ANY(:ids) ORDER BY u.observed_at DESC LIMIT :n"""),
-        {"ids": list(dict.fromkeys(unit_ids)), "n": MAX_UNITS})).all()
+        WHERE u.id = ANY(:ids) AND {dm_sql} ORDER BY u.observed_at DESC LIMIT :n"""),  # noqa: S608 — biểu thức nội bộ
+        {"ids": list(dict.fromkeys(unit_ids)), "n": MAX_UNITS, **dm_params})).all()
     quotes = (await db.execute(text("""
         SELECT ev.meaning_unit_id, ev.quote, e.id AS raw_id, e.seq, e.occurred_at, c.type AS channel,
                sp.id AS s_id, sp.code AS s_code, sp.display_name AS s_name, sp.person_type AS s_type,
@@ -131,11 +135,11 @@ async def _meaning_unit(db: AsyncSession, user: service.CurrentUser, sc: Scope, 
     r = (await db.execute(text("""SELECT id, event_type, conclusion, confidence, person_id, group_id
                                    FROM clean.meaning_units WHERE id = :i AND org_id = :o"""),
                           {"i": uid, "o": user.org_id})).one_or_none()
-    if r is None or not await _unit_visible(db, sc, r.person_id, r.group_id):
+    if r is None or not await _unit_visible(db, sc, r.person_id, r.group_id) \
+            or not await direct_visible(db, user, r.group_id, r.person_id):
         raise not_found("Đơn vị ý nghĩa")
-    owner = user.role_code == rbac.OWNER
     return payload("meaning_unit", id, r.event_type, f"{r.event_type} · tin cậy {float(r.confidence):.2f}",
-                   method="rules+model", units=await units_payload(db, [uid], is_owner=owner))
+                   method="rules+model", units=await units_payload(db, [uid], viewer=user))
 
 
 SUBJECT_NAME = {
@@ -191,7 +195,7 @@ async def _score(db: AsyncSession, user: service.CurrentUser, sc: Scope, id: str
     return payload("score", id, title, statement, method=exp.get("method"),
                    factors=[{"label": mask_text(f.get("label"), owner), "value": f.get("value"),
                              "evidence": f.get("evidence") or []} for f in factors],
-                   units=await units_payload(db, ids, is_owner=owner), history=history)
+                   units=await units_payload(db, ids, viewer=user), history=history)
 
 
 async def _alert(db: AsyncSession, user: service.CurrentUser, sc: Scope, id: str) -> dict[str, Any]:
@@ -213,7 +217,7 @@ async def _alert(db: AsyncSession, user: service.CurrentUser, sc: Scope, id: str
         raise not_found("Cảnh báo")
     owner = user.role_code == rbac.OWNER
     return payload("alert", id, f"{r.code} · {mask_text(r.title, owner)}", f"Ưu tiên {r.priority}",
-                   method="rule", units=await units_payload(db, unit_ids_of(r.evidence), is_owner=owner))
+                   method="rule", units=await units_payload(db, unit_ids_of(r.evidence), viewer=user))
 
 
 async def _draft(db: AsyncSession, user: service.CurrentUser, sc: Scope, id: str) -> dict[str, Any]:
@@ -233,9 +237,8 @@ async def _draft(db: AsyncSession, user: service.CurrentUser, sc: Scope, id: str
     decision = (await db.execute(text("SELECT context_refs FROM agent.decisions WHERE draft_id = :d LIMIT 1"),
                                  {"d": did})).scalar_one_or_none()
     refs = [s.get("ref") for s in (r.sources or []) if isinstance(s, dict)] + list(decision or [])
-    owner = user.role_code == rbac.OWNER
     return payload("draft", id, f"{r.code} · {r.title or ''}", "Dữ liệu agent đã dùng", method="agent",
-                   units=await units_payload(db, unit_ids_of([x for x in refs if x]), is_owner=owner))
+                   units=await units_payload(db, unit_ids_of([x for x in refs if x]), viewer=user))
 
 
 async def raw_evidence(db: AsyncSession, user: service.CurrentUser, raw_id: uuid.UUID) -> dict[str, Any]:
@@ -250,12 +253,12 @@ async def raw_evidence(db: AsyncSession, user: service.CurrentUser, raw_id: uuid
         WHERE ev.raw_event_id = :r AND u.org_id = :o"""), {"r": raw_id, "o": user.org_id})).all()
     if not units:
         raise not_found("Bản ghi")
-    if not sc.is_all:
-        for u in units:
-            if await _unit_visible(db, sc, u.person_id, u.group_id):
-                break
-        else:
-            raise not_found("Bản ghi")
+    for u in units:
+        if (sc.is_all or await _unit_visible(db, sc, u.person_id, u.group_id)) \
+                and await direct_visible(db, user, u.group_id, u.person_id):
+            break
+    else:
+        raise not_found("Bản ghi")
     row = (await db.execute(text(RAW_SELECT + " WHERE e.id = :i"), {"i": raw_id})).one_or_none()
     if row is None:
         raise not_found("Bản ghi")

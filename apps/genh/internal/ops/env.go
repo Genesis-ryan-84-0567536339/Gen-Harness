@@ -215,7 +215,7 @@ func ensureAuxSecretsOp(composePath string) error {
 	if err := ensureAuxSecrets(composePath); err != nil {
 		return &OpError{
 			Code: ErrCodeComposeNotFound,
-			What: "Không chuẩn bị được khoá bí mật cho docker compose (gh_bridge_key/gh_browser_key)",
+			What: "Không chuẩn bị được khoá bí mật cho docker compose (gh_bridge_key/gh_browser_key/gh_agy_key)",
 			Why:  err.Error(),
 			Next: "Kiểm quyền ghi thư mục secrets/ cạnh deploy/ rồi thử lại.",
 			Err:  err,

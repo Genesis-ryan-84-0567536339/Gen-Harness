@@ -7,6 +7,24 @@ Ngày = ngày Release trên GitHub theo giờ Việt Nam; tiêu đề trong `doc
 (v0.1.32–v0.1.34, v0.1.40, v0.1.46) hoặc vài ngày (v0.1.47, v0.1.48: làm 03/10, phát hành 09/10).
 Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) ghi ở [ROADMAP › Bản phản ứng](docs/ROADMAP.md).
 
+## v0.1.65 — Chế độ nghe & danh bạ: nhóm mới tự vào Lắng nghe im lặng, thu thành viên mọi nhóm, tin 1-1 lưu im lặng; quyền xem tin 1-1 chặt hơn (17/10/2026)
+- **Nhóm mới mặc định Lắng nghe im lặng** (Sếp chốt 17/10): lưu hết tin, KHÔNG BAO GIỜ trả lời kể cả khi được tag (`tagged_only` mới trả lời khi tag); tin ĐẦU TIÊN của nhóm lạ cũng được lưu; nhóm cũ đang Không nghe giữ nguyên; đổi mặc định ở thẻ kênh (cần mã PIN). **Danh bạ** quét 2 giờ/lượt, thu thành viên MỌI nhóm (kể cả Không nghe), đánh dấu người/nhóm đã rời; nút «Cập nhật danh sách nhóm».
+- **Tin 1-1 lưu im lặng** (bản cài cũ đang tắt ⇒ nay lưu im lặng, đang bật giữ trả lời): ba mức Lưu im lặng / Lưu và cho trợ lý trả lời / Không lưu; «Gán BOT» cho một người có tác dụng với tin 1-1 của người đó. **THAY ĐỔI QUYỀN**: tin 1-1 chỉ Owner (hoặc người phụ trách/được giao đúng người đó) xem nguyên văn; gán/bỏ BOT cho một người chỉ Owner + mã PIN; SĐT/JID che với vai dưới Owner. Migration 0038 (sau 0037).
+- **Gộp ba bản lớn**: v0.1.63 (hộp riêng Antigravity) và v0.1.64 (Telegram 2 chiều, sàng lọc ghi loại người) **phát hành chung trong v0.1.65** — Sếp chỉ cần một lần `genh update`.
+- Chi tiết: [docs/releases/v0.1.65.md](docs/releases/v0.1.65.md)
+
+## v0.1.64 — Telegram 2 chiều: Sếp nhắn Gen qua Telegram; sàng lọc ghi loại người, Sếp tự đánh dấu nhân viên (17/10/2026)
+- **Telegram 2 chiều (Nợ #13)**: ghép Telegram bằng mã 6 số (`/start <mã>`, chỉ lưu băm HMAC, sống 10 phút), công tắc «Nhận tin từ Sếp» (mặc định TẮT); chỉ nhận chat riêng đúng tài khoản đã ghép; lệnh `/hom_nay` `/viec` `/suc_khoe` `/nhap` + câu hỏi tự do (Gen chỉ đọc/đề xuất, dữ liệu đã che); đề xuất chỉ có nút «Mở Console để Xác nhận» — không nút Duyệt, không nhận mã PIN qua Telegram. Migration 0037.
+- **Sàng lọc ghi loại người (B6)**: kết quả quy tắc ghi ngược vào hồ sơ (chỉ nâng từ «chưa rõ», không đè loại Sếp đã đặt); hồ sơ có nút «Đánh dấu là nhân viên»; tin lỗi không kẹt (tự nhận lại sau 30 phút, tối đa 3 lần), dải pipeline hiện số tin lỗi.
+- Phát hành chung trong v0.1.65 (không có bản v0.1.64 riêng). Chi tiết: [docs/releases/v0.1.64.md](docs/releases/v0.1.64.md)
+
+## v0.1.63 — Hộp riêng Antigravity: mỗi vai một chỗ chạy, "nguồn AI dùng được" một hàm duy nhất (17/10/2026)
+- **Hộp riêng `agy-box`**: container chạy Antigravity không có khoá master, DB hay Redis (chỉ khoá ký `gh_agy_key`, không volume — tệp phiên agy gửi theo từng lượt, mọi lượt agy chạy HOME tạm; chỉ mạng internal, ra Internet qua proxy `agy-egress` chặn IP nội bộ/LAN; sau mỗi lượt hộp giết mọi tiến trình agy để lại và xoá `/tmp`, `/dev/shm`); `genh update` tự sinh khoá và dựng hộp, `genh doctor` + thẻ Sức khoẻ có dòng "Hộp riêng Antigravity".
+- **Mỗi vai một chỗ chạy**: Gen của Sếp, agent nội bộ chạy agy trong tiến trình; Bản tin, sàng lọc tin người lạ, Soạn lại / Dịch nháp, trực việc, agent trực kênh (ngoại giao), Gen của nhân viên, lượt thử agent chạy qua hộp. Nên đăng nhập Antigravity bằng tài khoản Google riêng (token đi vào hộp). Hộp tắt ⇒ dùng nguồn AI kế, không bao giờ rơi về agy trong tiến trình; "Thử quy tắc" vẫn không dùng agy.
+- **Một hàm "nguồn AI dùng được"** (`providers.readiness`): bước 4 thiết lập, dòng "nguồn AI" ở Việc Sếp cần làm và nút Kiểm tra cùng hỏi nó (đóng F002/F010/F014/F035), có lý do `box_down`.
+- **Cổng phát hành**: `check_agy_box_isolation.py` + E2E `e2e_agy_box.sh` (cài mới và nâng cấp) trước khi ra bản chính thức.
+- Phát hành chung trong v0.1.65 (không có bản v0.1.63 riêng). Chi tiết: [docs/releases/v0.1.63.md](docs/releases/v0.1.63.md)
+
 ## v0.1.62 — Đợt A phần 2, Antigravity phân lớp theo kiến trúc, kênh bền, sức khoẻ, dev cục bộ (17/10/2026)
 - **Xem hết & tìm ở máy chủ**: Hộp thư, Việc, Nhật ký (câu tiếng Việt, ẩn `http.*`), Khách & Nhóm (con trỏ `(created_at, id)`, gán BOT hàng loạt theo bộ lọc, xuất/ẩn danh hoá một người); lỗi sao lưu và 403 nói tiếng người; Cung–Cầu không ghép bừa; che OTP/mật khẩu (kể cả mẫu Việt Nam) trước khi gửi model.
 - **Antigravity phân lớp**: agy dùng cho lớp core/nội bộ (Gen của Sếp, Bản tin, sàng lọc, agent không gắn kênh); chưa dùng cho ngoại giao (`core.reply`, agent giao tiếp người ngoài) và Gen nhân viên — chờ hộp riêng v0.1.63; thêm `prctl` che môi trường của chính api/worker (chưa phải cô lập thật — `/run/secrets` và tiến trình con còn đọc được, hộp riêng ở v0.1.63), `pg_dump`/`pg_restore` chỉ nhận môi trường tối thiểu, timeout việc nền + khoá tệp token, ca canary đọc `/proc/1/environ` (dự kiến báo hở, không chặn phát hành).

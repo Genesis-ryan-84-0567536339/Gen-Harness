@@ -185,7 +185,7 @@ test.describe('cụm Quan hệ & Đối tượng', () => {
   test('Nhóm & Con người: lọc theo độ nhiệt, bật/tắt BOT cho một người', async ({ page }) => {
     await page.goto('/directory');
     await expect(page.locator('.gh-card', { hasText: 'Vận hành Genesis — Quý 4' })).toBeVisible();
-    await expect(page.getByText('Chỉ khi được tag').first()).toBeVisible();
+    await expect(page.getByText('Nghe hết, chỉ trả lời khi được tag').first()).toBeVisible();
 
     await page.getByRole('tab', { name: 'Con người' }).click();
     await expect(page).toHaveURL(/dt=people/);
@@ -785,7 +785,7 @@ test.describe('giai đoạn 4.5/4.6: Điều khiển hệ thống', () => {
     test('Ranh giới có trách nhiệm: khoá cứng không bật/tắt được; 2 khoá không có công tắc hiện tĩnh', async ({ page }) => {
       await page.goto('/system?tab=roles');
       await expect(page.getByText('Ranh giới có trách nhiệm')).toBeVisible();
-      const lockedRow = page.locator('.boundary-row', { hasText: 'Chỉ lắng nghe nhóm Owner đã bật' });
+      const lockedRow = page.locator('.boundary-row', { hasText: 'Chỉ lưu tin của nhóm Sếp đã chọn nghe' });
       await expect(lockedRow.getByRole('switch')).toHaveAttribute('aria-disabled', 'true');
       await expect(page.getByText('Không có công tắc', { exact: true })).toHaveCount(2);
     });

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -63,7 +64,7 @@ func TestServicesStep_HappyPath_UpThenReady(t *testing.T) {
 	srv, _ := tlsReadyServer(t, 0)
 
 	fr := &fake.Runner{Responses: []fake.Response{
-		{Match: fake.MatchArgsContain("up", "-d", "api", "worker", "bridge", "browser-egress", "browser", "web", "proxy"), Output: []byte("")},
+		{Match: fake.MatchArgsContain("up", "-d", "api", "worker", "agy-egress", "agy-box", "bridge", "browser-egress", "browser", "web", "proxy"), Output: []byte("")},
 	}}
 
 	step := servicesStep{
@@ -91,6 +92,107 @@ func TestServicesStep_HappyPath_UpThenReady(t *testing.T) {
 
 	if len(fr.Calls) != 1 {
 		t.Fatalf("số lệnh docker compose up = %d, muốn đúng 1", len(fr.Calls))
+	}
+}
+
+// v0.1.63 (H3): Bước 7 khởi động cả hộp riêng agy-box — đứng sau api/worker (dùng chung
+// ảnh api) và trước web/proxy; không có agy-box thì ngoại giao không có model nào.
+func TestServicesStep_UpBaoGomAgyBox(t *testing.T) {
+	composePath := testComposePath(t)
+	srv, _ := tlsReadyServer(t, 0)
+	fr := &fake.Runner{Responses: []fake.Response{{Match: fake.MatchArgsContain("up", "-d"), Output: []byte("")}}}
+	step := servicesStep{
+		runner:    fr,
+		locate:    func(string) (string, error) { return composePath, nil },
+		client:    insecureClient(),
+		timeout:   time.Second,
+		pollEvery: time.Millisecond,
+	}
+	env := testEnvWithSecrets(t)
+	env.Port = portFromServerURL(t, srv)
+	if err := step.Run(context.Background(), env, ReporterFunc(func(Progress) {})); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var upArgs []string
+	for _, c := range fr.Calls {
+		if a := c.Cmd.Args; len(a) > 0 {
+			joined := strings.Join(a, " ")
+			if i := strings.Index(joined, " up -d "); i >= 0 {
+				upArgs = strings.Fields(joined[i+len(" up -d "):])
+			}
+		}
+	}
+	// Gói sửa review v0.1.63 (P2-2): proxy lối ra agy-egress lên trước hộp (hộp chỉ ra Internet qua nó).
+	want := []string{"api", "worker", "agy-egress", "agy-box", "bridge", "browser-egress", "browser", "web", "proxy"}
+	if strings.Join(upArgs, ",") != strings.Join(want, ",") {
+		t.Fatalf("docker compose up -d %v, muốn %v", upArgs, want)
+	}
+}
+
+// Gốc rễ của job CI "bản hỏng cố ý" (PR #75, chế độ pr): genh build từ mã đang xét nhúng compose.release.yaml của bản
+// chính thức CŨ (v0.1.62 — chưa có agy-box/agy-egress). `docker compose up -d <dịch vụ>` với tên không có trong compose
+// thì thoát 1 "no such service" ⇒ cài đặt chết ở Bước 7 trước khi tới phần kiểm rollback. Dịch vụ thêm sau (agy-egress,
+// agy-box, browser-egress, browser) mà compose đang dùng không khai thì phải bị bỏ khỏi danh sách `up`, các dịch vụ
+// còn lại giữ nguyên thứ tự.
+func TestServicesStep_ComposeCuKhongCoAgyBox_BoQuaDichVuThieu(t *testing.T) {
+	composePath := testComposePath(t)
+	const composeCu = `name: gen-harness
+services:
+  db: {image: "x/db@sha256:1"}
+  api: {image: "x/api@sha256:2"}
+  worker: {image: "x/api@sha256:2"}
+  bridge: {image: "x/bridge@sha256:3"}
+  web: {image: "x/web@sha256:4"}
+  proxy: {image: "x/proxy@sha256:5"}
+`
+	if err := os.WriteFile(composePath, []byte(composeCu), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	srv, _ := tlsReadyServer(t, 0)
+	fr := &fake.Runner{Responses: []fake.Response{{Match: fake.MatchArgsContain("up", "-d"), Output: []byte("")}}}
+	step := servicesStep{
+		runner:    fr,
+		locate:    func(string) (string, error) { return composePath, nil },
+		client:    insecureClient(),
+		timeout:   time.Second,
+		pollEvery: time.Millisecond,
+	}
+	env := testEnvWithSecrets(t)
+	env.Port = portFromServerURL(t, srv)
+	if err := step.Run(context.Background(), env, ReporterFunc(func(Progress) {})); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var upArgs []string
+	for _, c := range fr.Calls {
+		joined := strings.Join(c.Cmd.Args, " ")
+		if i := strings.Index(joined, " up -d "); i >= 0 {
+			upArgs = strings.Fields(joined[i+len(" up -d "):])
+		}
+	}
+	want := []string{"api", "worker", "bridge", "web", "proxy"}
+	if strings.Join(upArgs, ",") != strings.Join(want, ",") {
+		t.Fatalf("docker compose up -d %v, muốn %v (dịch vụ compose không khai phải bị bỏ)", upArgs, want)
+	}
+}
+
+// Dịch vụ lõi (api...) thiếu trong compose KHÔNG được âm thầm bỏ: để docker báo "no such service" đúng chỗ.
+func TestServicesStep_ComposeThieApi_VanDeDockerBaoLoi(t *testing.T) {
+	composePath := testComposePath(t)
+	if err := os.WriteFile(composePath, []byte("name: gen-harness\nservices:\n  web: {image: \"x/web@sha256:4\"}\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	fr := &fake.Runner{Responses: []fake.Response{{Match: fake.MatchArgsContain("up", "-d"), Err: errors.New("no such service: api")}}}
+	step := servicesStep{
+		runner: fr,
+		locate: func(string) (string, error) { return composePath, nil },
+		client: insecureClient(), timeout: time.Second, pollEvery: time.Millisecond,
+	}
+	if err := step.Run(context.Background(), testEnvWithSecrets(t), ReporterFunc(func(Progress) {})); err == nil {
+		t.Fatal("thiếu api trong compose mà Run không lỗi")
+	}
+	joined := strings.Join(fr.Calls[0].Cmd.Args, " ")
+	if !strings.Contains(joined, " api ") && !strings.Contains(joined, " api") {
+		t.Fatalf("lệnh up không còn api: %s", joined)
 	}
 }
 

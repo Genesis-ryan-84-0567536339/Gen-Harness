@@ -23,7 +23,19 @@ from gh.boss_checks import service as boss_service
 from gh.chassis import actionlog
 from gh.chassis.bus import BRIDGE_CONTROL
 from gh.chassis.mcp_client import McpBlockedNetwork, McpError, pin_endpoint
-from gh.data.common import CHANNEL_NAME, LISTENING_MODES, iso, org_settings
+from gh.data.common import (
+    ALL_LISTEN_MODES,
+    CHANNEL_NAME,
+    DIRECT_MODES,
+    LISTENING_MODES,
+    NEW_GROUP_MODES,
+    NEW_SILENT_KEY,
+    direct_mode,
+    iso,
+    new_group_mode,
+    org_settings,
+    set_channel_setting,
+)
 from gh.data.ingest import close_sessions, publish_resume, sync_listen_sets, uptime_pct
 from gh.db import DB
 from gh.errors import ApiError, conflict, field_errors, forbidden, not_found, pin_required
@@ -45,9 +57,11 @@ ROLES_MANAGE = require("roles.manage")
 AUDIT_READ = require("audit.read")
 DATA_MANAGE = require("data.manage")
 
+REFRESH_GAP_S = 30   # giãn cách giữa hai lần "Cập nhật danh sách nhóm" của một kênh
 CHANNEL_TYPES = ("zalo", "whatsapp", "telegram", "linkedin")
 QR_CHANNELS = ("zalo", "whatsapp")
-LISTEN_MODES = ("off", "tagged_only", "silent", "proactive", "paused")
+#: v0.1.65: một nguồn ở `gh.data.common` (trước đây mỗi nơi viết một kiểu — F066). Giữ tên cũ làm bí danh.
+LISTEN_MODES = ALL_LISTEN_MODES
 VIEW_SCOPES = ("owner", "manager", "all_members")
 GROUP_KINDS = ("internal", "market", "partner", "customer", "private")
 
@@ -68,7 +82,8 @@ async def channel_card(db: AsyncSession, redis: Any, org_id: uuid.UUID, type_: s
                            {"o": org_id, "t": type_})).one_or_none()
     base: dict[str, Any] = {"type": type_, "name": CHANNEL_NAME[type_], "installed": ch is not None,
                             "id": str(ch.id) if ch else None, "account_label": None, "started_at": None,
-                            "groups_listening": 0, "outbound_queued": 0, "last_heartbeat_at": None, "qr": None,
+                            "groups_listening": 0, "groups_pending": 0, "outbound_queued": 0,
+                            "last_heartbeat_at": None, "qr": None,
                             "resumable": False, "bridge_online": None,
                             "stats": {"msgs_24h": None, "tagged_24h": None, "latency_ms": None, "uptime_pct": None}}
     if ch is None:
@@ -84,10 +99,14 @@ async def channel_card(db: AsyncSession, redis: Any, org_id: uuid.UUID, type_: s
     counts = (await db.execute(text("""
         SELECT count(*) AS msgs, count(*) FILTER (WHERE mentions_agent) AS tagged FROM raw.events
         WHERE channel_id = :c AND received_at > now() - interval '24 hours'"""), {"c": ch.id})).one()
-    listening = (await db.execute(text("""SELECT count(*) FROM core.groups WHERE channel_id = :c
-                                          AND listen_mode = ANY(:m)"""),
-                                  {"c": ch.id, "m": list(LISTENING_MODES)})).scalar_one()
+    # v0.1.65 (F066): "đang nghe" = LISTENING_MODES và chưa rời nhóm; "chờ chọn" = pending và chưa rời.
+    listening, pending = (await db.execute(text("""
+        SELECT count(*) FILTER (WHERE listen_mode = ANY(:m)), count(*) FILTER (WHERE listen_mode = 'pending')
+        FROM core.groups WHERE channel_id = :c AND left_at IS NULL"""),
+                                           {"c": ch.id, "m": list(LISTENING_MODES)})).one()
     state = s.state if s is not None else "logged_out"
+    settings = await org_settings(db, org_id)
+    dmode = direct_mode(settings, type_)
     meta = (s.meta or {}) if s is not None else {}
     qr = None
     if s is not None and state == "pending_qr":
@@ -106,15 +125,35 @@ async def channel_card(db: AsyncSession, redis: Any, org_id: uuid.UUID, type_: s
     return {**base, "state": state, "session_id": str(s.id) if s else None,
             "account_label": s.account_label if s else None, "started_at": iso(s.started_at) if s else None,
             "ended_at": iso(s.ended_at) if s else None, "groups_listening": listening,
+            "groups_pending": pending,
             "outbound_queued": int(meta.get("queued") or 0),
             "last_heartbeat_at": iso(s.last_heartbeat_at) if s else None, "qr": qr, "error": meta.get("error"),
             # v0.1.62 (F046): phiên 'error' còn credential ⇒ nối lại được bằng phiên đã lưu (không cần quét QR);
             # `bridge_online` = bộ nhận tin còn nhịp tim (khoá TTL 45 giây) — false ⇒ thẻ hiện "Mất liên lạc".
             "resumable": bool(s is not None and state == "error" and s.has_credential),
             "bridge_online": bool(await redis.get("gh:bridge:heartbeat")) if type_ in QR_CHANNELS else None,
-            "listen_direct": bool((await org_settings(db, org_id)).get("listen_direct", {}).get(type_, False)),
+            # v0.1.65: tin 1-1 ba mức (off | silent | reply), mặc định silent; `listen_direct` cho web cũ (khác off).
+            "direct_mode": dmode, "listen_direct": dmode != "off",
+            # F1d: nhóm MỚI sau này (ask | silent | off, MẶC ĐỊNH silent theo QD 17/10); `new_group_asked` = Sếp đã
+            # chọn ở hộp hỏi hoặc thẻ kênh kể từ lần nối kênh gần nhất (chỉ còn để tương thích — ô «Áp dụng cho các
+            # nhóm mới sau này» không còn bật sẵn). `new_groups_silent` = số nhóm mới tự vào Lắng nghe im lặng mà Sếp
+            # chưa bấm «Đã biết».
+            "new_group_mode": new_group_mode(settings, type_),
+            "new_group_asked": _asked(settings, type_),
+            "new_groups_silent": _count(settings, NEW_SILENT_KEY, type_),
             "stats": {"msgs_24h": counts.msgs, "tagged_24h": counts.tagged, "latency_ms": meta.get("latency_ms"),
                       "uptime_pct": await uptime_pct(redis, type_, first_up) if first_up is not None else None}}
+
+
+def _count(settings: dict[str, Any], key: str, type_: str) -> int:
+    block = settings.get(key)
+    v = block.get(type_) if isinstance(block, dict) else None
+    return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else 0
+
+
+def _asked(settings: dict[str, Any], type_: str) -> bool:
+    block = settings.get("new_group_asked")
+    return bool(isinstance(block, dict) and block.get(type_) is True)
 
 
 @router.get("/channels")
@@ -159,6 +198,8 @@ async def channel_login(type_: str, body: LoginIn, request: Request, user: servi
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id, action="channel.login",
                            target_type="channel", target_id=type_, target_label=body.account_label,
                            detail={"session_id": str(sid), "accept_risk": True}, ip=user.ip)
+    # F1d: nối kênh = bắt đầu lại — hộp hỏi nhóm mới lần đầu sau đó bật sẵn «Áp dụng cho các nhóm mới sau này».
+    await set_channel_setting(db, user.org_id, "new_group_asked", type_, False)
     await db.commit()
     # v0.1.62 (F067): phiên chờ QR cũ bị huỷ trong CSDL thì bridge cũng phải bỏ vòng xin QR của nó.
     await close_sessions(request.app.state.bus, user.org_id, type_, list(cancelled), actor=user.actor_id)
@@ -233,7 +274,14 @@ async def channel_logout(type_: str, request: Request, user: service.CurrentUser
 
 
 class ChannelPatch(BaseModel):
-    listen_direct: bool
+    """Tin riêng 1-1 của kênh: `direct_mode` (off | silent | reply). `listen_direct` là khoá cũ của web ≤ 0.1.64:
+    true ⇒ reply (như trước: agent trực được trả lời), false ⇒ off. F1d: `new_group_mode` (ask | silent | off; mặc định
+    silent — QD 17/10) = chế độ cho nhóm MỚI phát hiện sau này (không đổi nhóm đã có). Đổi gì cũng cần mã PIN
+    (`policy.change`)."""
+
+    listen_direct: bool | None = None
+    direct_mode: Literal["off", "silent", "reply"] | None = None
+    new_group_mode: Literal["ask", "silent", "off"] | None = None
 
 
 @router.patch("/channels/{type_}")
@@ -241,26 +289,43 @@ async def channel_patch(type_: str, body: ChannelPatch, request: Request, user: 
                         _pin: Any = Depends(require_pin("policy.change")),
                         db: AsyncSession = DB) -> dict[str, Any]:
     await _qr_channel(db, user.org_id, type_)
-    await db.execute(text("""
-        UPDATE core.organizations SET settings = jsonb_set(
-          CASE WHEN settings ? 'listen_direct' THEN settings ELSE settings || '{"listen_direct": {}}' END,
-          ARRAY['listen_direct', :t], to_jsonb(CAST(:v AS boolean))) WHERE id = :o"""),
-        {"t": type_, "v": body.listen_direct, "o": user.org_id})
+    if body.direct_mode is None and body.listen_direct is None and body.new_group_mode is None:
+        raise field_errors({"direct_mode": "Chọn một trong: off, silent, reply",
+                            "new_group_mode": "Hoặc chọn nhóm mới: ask, silent, off"})
+    if body.direct_mode is not None or body.listen_direct is not None:
+        mode = body.direct_mode or ("reply" if body.listen_direct else "off")
+        assert mode in DIRECT_MODES
+        before = direct_mode(await org_settings(db, user.org_id), type_)
+        await set_channel_setting(db, user.org_id, "direct_mode", type_, mode)
+        await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                               action="channel.listen_direct_changed", target_type="channel", target_id=type_,
+                               detail={"direct_mode": mode, "from": before, "listen_direct": mode != "off"},
+                               ip=user.ip)
+    if body.new_group_mode is not None:
+        await _save_new_group_mode(db, user, type_, body.new_group_mode)
     await sync_listen_sets(db, request.app.state.redis, user.org_id)
-    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
-                           action="channel.listen_direct_changed", target_type="channel", target_id=type_,
-                           detail={"listen_direct": body.listen_direct}, ip=user.ip)
     return await channel_card(db, request.app.state.redis, user.org_id, type_)
+
+
+async def _save_new_group_mode(db: AsyncSession, user: service.CurrentUser, type_: str, mode: str) -> None:
+    """Lưu `new_group_mode` của kênh (+ đánh dấu «Sếp đã chọn kể từ lần nối kênh này») và ghi Nhật ký hành động."""
+    assert mode in NEW_GROUP_MODES
+    before = new_group_mode(await org_settings(db, user.org_id), type_)
+    await set_channel_setting(db, user.org_id, "new_group_mode", type_, mode)
+    await set_channel_setting(db, user.org_id, "new_group_asked", type_, True)
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action="channel.new_group_mode_changed", target_type="channel", target_id=type_,
+                           detail={"new_group_mode": mode, "from": before}, ip=user.ip)
 
 
 def _group_out(r: Any) -> dict[str, Any]:
     return {"id": str(r.id), "code": r.code, "name": r.name, "members": r.member_count, "kind": r.kind,
             "listen_mode": r.listen_mode, "view_scope": r.view_scope, "msgs_24h": r.msgs,
-            "channel": r.channel_type}
+            "channel": r.channel_type, "left": r.left_at is not None}
 
 
 GROUP_SELECT = """
-SELECT g.id, g.code, g.name, g.member_count, g.kind, g.listen_mode, g.view_scope, c.type AS channel_type,
+SELECT g.id, g.code, g.name, g.member_count, g.kind, g.listen_mode, g.view_scope, g.left_at, c.type AS channel_type,
        (SELECT count(*) FROM raw.events e
          WHERE e.group_id = g.id AND e.received_at > now() - interval '24 hours') AS msgs
 FROM core.groups g JOIN core.channels c ON c.id = g.channel_id
@@ -268,15 +333,87 @@ FROM core.groups g JOIN core.channels c ON c.id = g.channel_id
 
 
 @router.get("/channels/{type_}/groups")
-async def channel_groups(type_: str, user: service.CurrentUser = Depends(READ),
-                         db: AsyncSession = DB) -> list[dict[str, Any]]:
-    rows = (await db.execute(text(GROUP_SELECT + " WHERE c.org_id = :o AND c.type = :t ORDER BY g.name"),
+async def channel_groups(type_: str, pending: int = Query(default=0, ge=0, le=1),
+                         user: service.CurrentUser = Depends(READ), db: AsyncSession = DB) -> list[dict[str, Any]]:
+    """Nhóm của kênh (nhóm đã rời xếp cuối, có `left: true`). `?pending=1` = chỉ nhóm mới đang CHỜ Sếp chọn."""
+    only = " AND g.listen_mode = 'pending' AND g.left_at IS NULL" if pending else ""
+    rows = (await db.execute(text(GROUP_SELECT + " WHERE c.org_id = :o AND c.type = :t" + only
+                                  + " ORDER BY (g.left_at IS NOT NULL), g.name"),  # noqa: S608 — `only` là hằng
                              {"o": user.org_id, "t": type_})).all()
     return [_group_out(r) for r in rows]
 
 
+@router.post("/channels/{type_}/groups/refresh", status_code=202)
+async def channel_groups_refresh(type_: str, request: Request, user: service.CurrentUser = Depends(MANAGE),
+                                 db: AsyncSession = DB) -> dict[str, Any]:
+    """v0.1.65 (F056) "Cập nhật danh sách nhóm": bảo bridge quét lại danh bạ ngay (`directory.sync`) thay vì chờ
+    chu kỳ 2 giờ. Giãn cách 30 giây mỗi kênh để không dồn dập lên tài khoản cá nhân của Sếp. Không đổi quyền truy cập
+    nên không đòi PIN."""
+    ch = await _qr_channel(db, user.org_id, type_)
+    redis = request.app.state.redis
+    if not await redis.get("gh:bridge:heartbeat"):
+        raise _bridge_offline()
+    sid = (await db.execute(text("""SELECT id FROM core.channel_sessions WHERE channel_id = :c AND state = 'active'
+                                    AND ended_at IS NULL ORDER BY started_at DESC NULLS LAST LIMIT 1"""),
+                            {"c": ch.id})).scalar_one_or_none()
+    if sid is None:
+        raise conflict("CHANNEL_NOT_ACTIVE", "Kênh chưa đăng nhập — đăng nhập xong mới cập nhật được danh sách nhóm")
+    if not await redis.set(f"gh:groups:refresh:{user.org_id}:{type_}", "1", nx=True, ex=REFRESH_GAP_S):
+        raise ApiError(429, "REFRESH_TOO_SOON", "Vừa cập nhật danh sách nhóm xong — chờ vài giây rồi thử lại")
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action="channel.groups_refresh", target_type="channel", target_id=type_,
+                           detail={"session_id": str(sid)}, ip=user.ip)
+    await db.commit()
+    await request.app.state.bus.publish(BRIDGE_CONTROL, "directory.sync", {"channel": type_, "session_id": str(sid)},
+                                        actor=user.actor_id, org_id=user.org_id)
+    return {"session_id": str(sid), "requested": True}
+
+
+@router.post("/channels/{type_}/groups/seen")
+async def channel_groups_seen(type_: str, request: Request, user: service.CurrentUser = Depends(MANAGE),
+                              db: AsyncSession = DB) -> dict[str, Any]:
+    """QD 17/10: Sếp bấm «Đã biết» ở khối «N nhóm mới đã vào Lắng nghe im lặng» ⇒ đặt lại bộ đếm của kênh về 0.
+    Không đổi chế độ nhóm nào, không đổi quyền truy cập nên không đòi PIN. Trả thẻ kênh."""
+    await _qr_channel(db, user.org_id, type_)
+    await set_channel_setting(db, user.org_id, NEW_SILENT_KEY, type_, 0)
+    return await channel_card(db, request.app.state.redis, user.org_id, type_)
+
+
+class GroupModeIn(BaseModel):
+    mode: Literal["off", "tagged_only", "silent", "proactive", "paused"]
+    # F1d — ô «Áp dụng cho các nhóm mới sau này» của hộp hỏi: chỉ với Im lặng / Không nghe, lưu `new_group_mode`
+    # của kênh cùng lúc. Đổi chính sách cho nhóm tương lai nên cần mã PIN như đổi ở thẻ kênh. None/False = chỉ nhóm này.
+    apply_to_new: bool = False
+
+
+@router.patch("/channels/{type_}/groups/{gid}/mode")
+async def channel_group_mode(type_: str, gid: uuid.UUID, body: GroupModeIn, request: Request,
+                             user: service.CurrentUser = Depends(MANAGE), db: AsyncSession = DB) -> dict[str, Any]:
+    """v0.1.65: Sếp chọn chế độ cho một nhóm (hộp «Nhóm mới»). `pending` không phải lựa chọn. `apply_to_new` (F1d):
+    đồng thời đặt chế độ cho nhóm mới sau này (`silent`/`off`; 422 với chế độ khác, 423 PIN_REQUIRED khi chưa có PIN —
+    không đổi gì cả khi lỗi). Có chọn ở hộp hỏi (dù có tick hay không) ⇒ `new_group_asked` = true."""
+    ok = (await db.execute(text("""SELECT 1 FROM core.groups g JOIN core.channels c ON c.id = g.channel_id
+                                   WHERE g.id = :i AND c.type = :t AND c.org_id = :o"""),
+                           {"i": gid, "t": type_, "o": user.org_id})).first()
+    if ok is None:
+        raise not_found("Nhóm")
+    if body.apply_to_new:
+        if body.mode not in ("silent", "off"):
+            raise field_errors({"apply_to_new": "Chỉ áp dụng cho nhóm mới được với Im lặng hoặc Không nghe"})
+        if not user.pin_active():
+            raise pin_required()
+        await _save_new_group_mode(db, user, type_, body.mode)
+        # cờ «nhóm mới» của bridge, làm mới cả khi nhóm này không đổi chế độ
+        await sync_listen_sets(db, request.app.state.redis, user.org_id)
+    else:
+        await set_channel_setting(db, user.org_id, "new_group_asked", type_, True)
+    return await update_group(db, request.app.state.redis, user, gid, GroupPatch(listen_mode=body.mode))
+
+
 class GroupPatch(BaseModel):
-    listen_mode: Literal["off", "tagged_only", "silent", "proactive", "paused"] | None = None
+    # "pending" chỉ được NHẬN LẠI nguyên trạng (web cũ gửi lại chế độ hiện tại của mọi nhóm ở bước 6); đổi một nhóm đã
+    # chọn về "pending" bị từ chối trong `update_group`. Khớp `ALL_LISTEN_MODES` (có test).
+    listen_mode: Literal["pending", "off", "tagged_only", "silent", "proactive", "paused"] | None = None
     view_scope: Literal["owner", "manager", "all_members"] | None = None
     kind: Literal["internal", "market", "partner", "customer", "private"] | None = None
 
@@ -288,6 +425,9 @@ async def update_group(db: AsyncSession, redis: Any, user: service.CurrentUser, 
     if cur is None:
         raise not_found("Nhóm")
     changes = {k: v for k, v in body.model_dump().items() if v is not None and getattr(cur, k) != v}
+    if changes.get("listen_mode") == "pending":
+        raise field_errors({"listen_mode": "Không đặt lại nhóm về «Chờ Sếp chọn» — hãy chọn Lắng nghe im lặng, "
+                                           "Không nghe hoặc chế độ khác"})
     if changes:
         sets = ", ".join(f"{k} = :{k}" for k in changes)
         await db.execute(text(f"UPDATE core.groups SET {sets} WHERE id = :i"), {**changes, "i": gid})  # noqa: S608
@@ -1017,9 +1157,11 @@ async def patch_permissions(body: PermissionPatch, user: service.CurrentUser = D
 
 @router.get("/listening-groups")
 async def listening_groups(user: service.CurrentUser = Depends(READ), db: AsyncSession = DB) -> list[dict[str, Any]]:
-    """Nhóm đang lắng nghe (khoá cứng #1 `listen_authorized_only` — chỉ nhóm Owner đã bật mới vào đây)."""
-    rows = (await db.execute(text(GROUP_SELECT + " WHERE c.org_id = :o AND g.listen_mode <> 'off' ORDER BY g.name"),
-                             {"o": user.org_id})).all()
+    """Nhóm đang lắng nghe (khoá cứng #1 `listen_authorized_only` — chỉ nhóm Sếp đã chọn nghe mới vào đây): chế độ thuộc
+    LISTENING_MODES (không gồm off / paused / pending) và Sếp chưa rời nhóm."""
+    rows = (await db.execute(text(GROUP_SELECT + " WHERE c.org_id = :o AND g.listen_mode = ANY(:m) "
+                                  "AND g.left_at IS NULL ORDER BY g.name"),
+                             {"o": user.org_id, "m": list(LISTENING_MODES)})).all()
     return [_group_out(r) for r in rows]
 
 
@@ -1027,7 +1169,7 @@ async def listening_groups(user: service.CurrentUser = Depends(READ), db: AsyncS
 # có mặt ở đây dưới dạng `is_locked=true` — 2 khoá còn lại (#5 kho thô/nhật ký chỉ-INSERT, #6 PIN+mã hoá bí mật)
 # là bất biến ở tầng DB/code, không phải công tắc nên không có dòng `ops.policy_boundaries` tương ứng.
 BOUNDARY_LABELS: dict[str, str] = {
-    "listen_authorized_only": "Chỉ lắng nghe nhóm Owner đã bật",
+    "listen_authorized_only": "Chỉ lưu tin của nhóm Sếp đã chọn nghe",
     "disclose_staff_observation": "Công khai nội bộ khi dùng để đánh giá nhân sự",
     "hide_sensitive_below_owner": "Ẩn dữ liệu nhạy cảm khỏi vai trò dưới Owner",
     "personnel_alert_requires_evidence": "Điểm số, cảnh báo nhân sự phải có chứng cứ",

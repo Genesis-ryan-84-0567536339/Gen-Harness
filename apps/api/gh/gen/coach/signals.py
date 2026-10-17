@@ -195,7 +195,7 @@ TODO_COPY: dict[str, tuple[str, str]] = {
     "followup.5": ("Kết nối Zalo / WhatsApp",
                    "Có kênh em mới đọc được tin nhắn trong các nhóm chat của Sếp."),
     "followup.6": ("Chọn nhóm cho agent lắng nghe",
-                   "Mọi nhóm mới đều ở chế độ Không nghe — Sếp chọn nhóm nào em được nghe."),
+                   "Nhóm mới em mặc định Lắng nghe im lặng, không bao giờ trả lời — Sếp chọn nhóm em được trả lời."),
     "followup.7": ("Bật sàng lọc dữ liệu",
                    "Tin thô được lọc và chấm điểm trước khi vào kho sạch — agent chỉ dùng dữ liệu đã lọc."),
     "followup.8": ("Tạo agent đầu tiên",
@@ -408,7 +408,7 @@ async def _src_followup(db: AsyncSession, redis: Any, org: uuid.UUID) -> dict[st
     state: dict[str, bool] = {}
     for it in await follow_up_status(db, row):
         n = it.get("n")
-        if n == 4:    # bước 4 "Bộ não AI": cùng điều kiện với NoModelBanner (FOLLOW_UP_SQL[4])
+        if n == 4:    # bước 4 "Bộ não AI": `follow_up_status` lấy `readiness.ai_ready` (nguồn AI dùng được)
             state["model.bound"] = bool(it.get("done"))
         elif n in FOLLOWUP_NS:
             state[f"followup.{n}.done"] = bool(it.get("done"))

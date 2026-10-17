@@ -43,6 +43,7 @@ func doctorInstall(t *testing.T) (*Env, []string) {
 		"gh_master_key":  wdMasterHex,
 		"gh_bridge_key":  "QnJpZGdlS2V5VmFsdWVGb3JUZXN0T25seTAxMjM0NTY3OA==",
 		"gh_browser_key": "QnJvd3NlcktleVZhbHVlRm9yVGVzdE9ubHkwMTIzNDU2Nzg=",
+		"gh_agy_key":     "QWd5Qm94S2V5VmFsdWVGb3JUZXN0T25seTAxMjM0NTY3ODk=",
 		"gh_offsite_key": "K7QX2-ABCDE-FGHIJ-KLMNO-PQRST-UVWXY",
 	}
 	dir := filepath.Join(env.InstallDir, "secrets")

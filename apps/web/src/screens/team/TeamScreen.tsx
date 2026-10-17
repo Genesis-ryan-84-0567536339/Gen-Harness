@@ -15,7 +15,7 @@ const STAFF_LINKS = [
 /**
  * v0.1.42 (F-7): Đội ngũ — người dùng Console (mời, đổi vai trò, khoá; trước ở Điều khiển hệ thống › Người dùng) và
  * lối vào Đánh giá con người / Chất lượng chăm sóc. Thanh bên ẩn hai mục này khi chưa có nhân viên, nhưng ở đây vẫn
- * giữ link (màn tự giải thích cách đánh dấu nhân viên) để không thành ngõ cụt.
+ * giữ link (màn tự giải thích cách đánh dấu nhân viên ở hồ sơ người) để không thành ngõ cụt.
  */
 export function TeamScreen() {
   const meta = SCREEN_BY_KEY.team;
@@ -25,7 +25,7 @@ export function TeamScreen() {
     return hit ? [{ ...l, noStaff: !!hit.item.hidden }] : [];
   });
   const noStaff = links.some((l) => l.noStaff);
-  const canRules = !!findActive(nav.data, 'rules');
+  const canDirectory = !!findActive(nav.data, 'directory');
   return (
     <div className="screen">
       <ScreenHead title={meta.title} description={meta.description} maxWidth={meta.descMaxWidth} />
@@ -52,7 +52,7 @@ export function TeamScreen() {
             {noStaff ? (
               <p className="muted-note team-note" role="note">
                 Chưa có nhân viên nào nên thanh bên tạm ẩn Đánh giá và Chăm sóc. {STAFF_HOWTO}{' '}
-                {canRules ? <Link to="/rules">Mở Quy tắc sàng lọc</Link> : null}
+                {canDirectory ? <Link to="/directory">Mở Khách &amp; Nhóm</Link> : null}
               </p>
             ) : null}
           </>

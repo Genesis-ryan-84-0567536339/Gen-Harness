@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.auth import rbac, service
 from gh.auth.deps import require, require_pin
+from gh.biz.core.scope import direct_visible, direct_visible_sql
 from gh.chassis import actionlog
 from gh.data.common import (
     CHANNEL_NAME,
@@ -72,9 +73,11 @@ async def pipeline(user: service.CurrentUser = Depends(READ), db: AsyncSession =
         SELECT
           (SELECT count(DISTINCT c.id) FROM core.channels c JOIN core.channel_sessions s ON s.channel_id = c.id
              WHERE c.org_id = :o AND s.state = 'active' AND s.ended_at IS NULL) AS channels_live,
-          (SELECT count(*) FROM core.groups WHERE org_id = :o AND listen_mode = ANY(:modes)) AS groups_listening,
+          (SELECT count(*) FROM core.groups
+            WHERE org_id = :o AND left_at IS NULL AND listen_mode = ANY(:modes)) AS groups_listening,
           (SELECT count(*) FROM raw.events WHERE org_id = :o) AS raw_total,
           (SELECT count(*) FROM refinery.event_state WHERE org_id = :o AND state = 'pending') AS raw_pending,
+          (SELECT count(*) FROM refinery.event_state WHERE org_id = :o AND state = 'error') AS raw_error,
           (SELECT count(*) FROM clean.meaning_units WHERE org_id = :o AND superseded_by IS NULL) AS clean_total"""),
         {"o": o, "modes": list(LISTENING_MODES)})).one()
     sched = await load_schedule(db, o)
@@ -83,10 +86,14 @@ async def pipeline(user: service.CurrentUser = Depends(READ), db: AsyncSession =
 
 # ─── Kho thô ────────────────────────────────────────────────────────────────
 
-def _raw_filters(channel: str | None, group_id: str | None, state: str | None, since: str | None,
-                 label: str | None, min_confidence: float | None) -> tuple[str, dict[str, Any]]:
+def _raw_filters(user: service.CurrentUser, channel: str | None, group_id: str | None, state: str | None,
+                 since: str | None, label: str | None, min_confidence: float | None) -> tuple[str, dict[str, Any]]:
     where: list[str] = ["e.org_id = :o"]
-    params: dict[str, Any] = {}
+    # Tin 1-1 (không nhóm) chỉ Owner hoặc người được giao đúng người đó xem nguyên văn (review v0.1.65 P2-2).
+    dm_sql, params = direct_visible_sql(
+        user, "e.group_id",
+        "(SELECT pi2.person_id FROM core.person_identities pi2 WHERE pi2.id = e.sender_identity_id)")
+    where.append(dm_sql)
     if channel:
         where.append("c.type = :ch")
         params["ch"] = channel
@@ -120,7 +127,7 @@ async def raw_list(request: Request, cursor: str | None = None, limit: int = Que
                    since: str | None = "24h", label: str | None = None,
                    min_confidence: float | None = Query(None, ge=0, le=1),
                    user: service.CurrentUser = Depends(READ), db: AsyncSession = DB) -> dict[str, Any]:
-    where, params = _raw_filters(channel, group_id, state, since, label, min_confidence)
+    where, params = _raw_filters(user, channel, group_id, state, since, label, min_confidence)
     params["o"] = user.org_id
     total = (await db.execute(text(f"""
         SELECT count(*) FROM raw.events e JOIN core.channels c ON c.id = e.channel_id
@@ -158,7 +165,7 @@ async def raw_export(channel: Literal["zalo", "whatsapp", "telegram"] | None = N
                      min_confidence: float | None = Query(None, ge=0, le=1),
                      user: service.CurrentUser = Depends(MANAGE), _pin: Any = Depends(require_pin("data.export")),
                      db: AsyncSession = DB) -> Response:
-    where, params = _raw_filters(channel, group_id, state, since, label, min_confidence)
+    where, params = _raw_filters(user, channel, group_id, state, since, label, min_confidence)
     rows = (await db.execute(text(RAW_SELECT + where + " ORDER BY e.seq DESC LIMIT 100000"),
                              {**params, "o": user.org_id})).all()
     buf = io.StringIO()
@@ -184,7 +191,8 @@ async def raw_detail(event_id: uuid.UUID, user: service.CurrentUser = Depends(RE
                      db: AsyncSession = DB) -> dict[str, Any]:
     r = await fetch_raw(db, event_id)
     if r is None or (await db.execute(text("SELECT org_id FROM raw.events WHERE id = :i"),
-                                      {"i": event_id})).scalar() != user.org_id:
+                                      {"i": event_id})).scalar() != user.org_id \
+            or not await direct_visible(db, user, r.group_id, r.person_id):
         raise not_found("Bản ghi thô")
     out = _raw_out(r, user, with_payload=True)
     units = (await db.execute(text("""
@@ -407,7 +415,7 @@ async def test_rule(body: RuleTestIn, request: Request, user: service.CurrentUse
     """Thử quy tắc trên một tin — không ghi gì vào kho (chỉ lượt gọi model được tính hạn mức)."""
     if body.raw_event_id:
         r = await fetch_raw(db, body.raw_event_id)
-        if r is None:
+        if r is None or not await direct_visible(db, user, r.group_id, r.person_id):
             raise not_found("Bản ghi thô")
         msg, kind, code = r.body_text or "", r.kind, raw_code(r.seq)
         group = ref(r.group_id, r.group_code, r.group_name)
@@ -576,8 +584,9 @@ LEFT JOIN refinery.runs r ON r.id = m.run_id
 async def clean_list(cursor: str | None = None, limit: int = Query(50, ge=1, le=200), group_id: str | None = None,
                      person_id: str | None = None, since: str | None = "7d",
                      user: service.CurrentUser = Depends(READ), db: AsyncSession = DB) -> dict[str, Any]:
-    where = ["m.org_id = :o", "m.superseded_by IS NULL"]
-    params: dict[str, Any] = {"o": user.org_id}
+    dm_sql, dm_params = direct_visible_sql(user, "m.group_id", "m.person_id")   # tin 1-1: chỉ Owner/người được giao
+    where = ["m.org_id = :o", "m.superseded_by IS NULL", dm_sql]
+    params: dict[str, Any] = {"o": user.org_id, **dm_params}
     if (gid := _uuid(group_id, "group_id")) is not None:
         where.append("m.group_id = :g")
         params["g"] = gid
@@ -648,15 +657,17 @@ async def agent_params(group_id: str | None = None, person_id: str | None = None
 @router.get("/clean/{unit_id}/evidence")
 async def clean_evidence(unit_id: uuid.UUID, user: service.CurrentUser = Depends(READ),
                          db: AsyncSession = DB) -> list[dict[str, Any]]:
-    rows = (await db.execute(text("""
+    dm_sql, dm_params = direct_visible_sql(user, "m.group_id", "m.person_id")
+    rows = (await db.execute(text(f"""
         SELECT x.raw_event_id, x.quote FROM clean.evidence x JOIN clean.meaning_units m ON m.id = x.meaning_unit_id
-        WHERE x.meaning_unit_id = :u AND m.org_id = :o"""), {"u": unit_id, "o": user.org_id})).all()
+        WHERE x.meaning_unit_id = :u AND m.org_id = :o AND {dm_sql}"""),  # noqa: S608 — biểu thức nội bộ
+        {"u": unit_id, "o": user.org_id, **dm_params})).all()
     if not rows:
         raise not_found("Đơn vị ý nghĩa")
     out = []
     for r in rows:
         raw = await fetch_raw(db, r.raw_event_id)
-        if raw is not None:
+        if raw is not None and await direct_visible(db, user, raw.group_id, raw.person_id):
             out.append({"raw": _raw_out(raw, user), "quote": _mask(r.quote, user)})
     return out
 
@@ -829,9 +840,13 @@ async def identity_candidates(status: Literal["pending", "merged", "rejected"] =
 @router.get("/identity/candidates/{cid}/evidence")
 async def identity_evidence(cid: uuid.UUID, user: service.CurrentUser = Depends(READ),
                             db: AsyncSession = DB) -> list[dict[str, Any]]:
-    out = await identity.evidence(db, user.org_id, cid)
-    for item in out:
-        item["raw"]["text"] = _mask(item["raw"]["text"], user)
+    out = []
+    for item in await identity.evidence(db, user.org_id, cid):
+        raw = item["raw"]
+        if not await direct_visible(db, user, (raw["group"] or {}).get("id"), (raw["person"] or {}).get("id")):
+            continue   # tin 1-1: chỉ Owner/người được giao đúng người đó (review v0.1.65 P2-2)
+        raw["text"] = _mask(raw["text"], user)
+        out.append(item)
     return out
 
 

@@ -38,7 +38,9 @@ async function loadLibs() {
 
 function createAdapter(channel, opts) {
   if (!libs[channel]) throw new Error(`CHANNEL_UNAVAILABLE:${channel}`);
-  return channel === 'zalo' ? new ZaloAdapter({ lib: libs.zalo, ...opts }) : new WhatsAppAdapter({ lib: libs.whatsapp, ...opts });
+  return channel === 'zalo'
+    ? new ZaloAdapter({ lib: libs.zalo, directoryGapMs: cfg.directoryGapMs, ...opts })
+    : new WhatsAppAdapter({ lib: libs.whatsapp, ...opts });
 }
 
 const manager = new SessionManager({

@@ -117,12 +117,14 @@ async def _recompute_interacts(db: AsyncSession, org_id: uuid.UUID, window_days:
     return await _run_upsert(db, _INTERACTS_UPSERT, org_id, window_days)
 
 
+# v0.1.65 (F058): nhóm Sếp đã rời (`core.groups.left_at`) không còn tham gia thành viên chung / người nắm / cầu nối.
+
 # ─── Nhóm↔Nhóm: thành viên chung ───────────────────────────────────────────────────────────────────────────
 
 _SHARES_SQL = """
 WITH gm AS (
   SELECT gm.group_id, gm.person_id FROM core.group_members gm
-  JOIN core.groups g ON g.id = gm.group_id WHERE g.org_id = :o AND gm.left_at IS NULL
+  JOIN core.groups g ON g.id = gm.group_id WHERE g.org_id = :o AND gm.left_at IS NULL AND g.left_at IS NULL
 ),
 totals AS (SELECT group_id, count(*) AS total FROM gm GROUP BY group_id),
 activity AS (
@@ -159,7 +161,7 @@ _OWNS_SQL = """
 WITH admins AS (
   SELECT gm.group_id, gm.person_id FROM core.group_members gm
   JOIN core.groups g ON g.id = gm.group_id
-  WHERE g.org_id = :o AND gm.left_at IS NULL AND gm.role = 'admin'
+  WHERE g.org_id = :o AND gm.left_at IS NULL AND g.left_at IS NULL AND gm.role = 'admin'
 ),
 activity AS (
   SELECT pi.person_id, e.group_id, count(*) AS n, max(e.occurred_at) AS last_at
@@ -187,7 +189,7 @@ async def _recompute_owns(db: AsyncSession, org_id: uuid.UUID, window_days: int)
 
 _MEMBERS_SQL = """
 SELECT gm.group_id, gm.person_id FROM core.group_members gm
-JOIN core.groups g ON g.id = gm.group_id WHERE g.org_id = :o AND gm.left_at IS NULL
+JOIN core.groups g ON g.id = gm.group_id WHERE g.org_id = :o AND gm.left_at IS NULL AND g.left_at IS NULL
 """
 _MEMBER_ACTIVITY_SQL = """
 SELECT pi.person_id, e.group_id, max(e.occurred_at) AS last_at

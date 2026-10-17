@@ -7,10 +7,12 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/compose"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/hostlink"
 )
@@ -216,6 +218,11 @@ func collectDoctorLines(ctx context.Context, env *Env, deps DoctorDeps, runner d
 		lines = append(lines, diagLine{"Kết nối kênh (bridge)", bridgeStatus == "ok", "bridge: " + bridgeStatus})
 	}
 
+	// 6b. Hộp riêng Antigravity (v0.1.63, H3): chỉ khi compose.yaml có agy-box.
+	if l, ok := agyBoxDiagLine(ctx, env, runner); ok {
+		lines = append(lines, l)
+	}
+
 	// 7–8. Tự chạy lại khi bật máy (v0.1.37, F-73): Docker + linger — ghi kèm
 	// run/autostart-status.json cho Console (bên gọi ghi).
 	as := CheckAutostart(ctx, AutostartDeps{Runner: runner, GOOS: deps.GOOS, UID: deps.UID})
@@ -231,4 +238,81 @@ func mustAbsDir(path string) string {
 		return "."
 	}
 	return dir
+}
+
+// agyBoxDiagLine kiểm dịch vụ agy-box (hộp riêng cho agent ngoại giao: chạy Antigravity không
+// có khoá, CSDL hay bí mật). ok=false (không có dòng) khi compose.yaml chưa khai agy-box
+// (bản cài v0.1.62) hoặc không đọc được compose. Hộp hỏng KHÔNG làm cả hệ thống hỏng — Gen
+// chỉ mất model cho agent ngoại giao — nên đây là dòng chẩn đoán, không phải lỗi chặn.
+func agyBoxDiagLine(ctx context.Context, env *Env, runner dockercli.Runner) (diagLine, bool) {
+	const check = "Hộp Antigravity (agy-box)"
+	composePath, err := env.LocatePath()
+	if err != nil {
+		return diagLine{}, false
+	}
+	data, err := os.ReadFile(composePath)
+	if err != nil {
+		return diagLine{}, false
+	}
+	cf, err := compose.Parse(data)
+	if err != nil {
+		return diagLine{}, false
+	}
+	if _, has := cf.Services["agy-box"]; !has {
+		return diagLine{}, false
+	}
+	// Gói sửa review v0.1.63 (P2-2): hộp chỉ ra Internet qua proxy agy-egress — compose có proxy thì kiểm cả proxy.
+	_, hasEgress := cf.Services["agy-egress"]
+	names := []string{"agy-box"}
+	if hasEgress {
+		names = append(names, "agy-egress")
+	}
+	bundle, err := env.LoadSecrets()
+	if err != nil {
+		return diagLine{check, false, "không đọc được bí mật để hỏi trạng thái — chạy `genh status`"}, true
+	}
+	psArgs := compose.BaseArgs(composePath, append([]string{"ps", "--all", "--format", "json"}, names...)...)
+	psOut, err := runner.Output(ctx, dockercli.Cmd{Name: "docker", Args: psArgs, Env: EnvOverlay(bundle), Dir: composeDir(composePath)})
+	if err != nil {
+		return diagLine{check, false, "không hỏi được docker compose: " + err.Error()}, true
+	}
+	statuses, err := compose.ParsePS(psOut)
+	if err != nil {
+		return diagLine{check, false, "không đọc được trạng thái: " + err.Error()}, true
+	}
+	byName := map[string]compose.ContainerStatus{}
+	for _, s := range statuses {
+		byName[s.Service] = s
+	}
+	healthy := func(s compose.ContainerStatus) bool {
+		return s.State == "running" && (s.Health == "" || s.Health == "healthy")
+	}
+	stateOf := func(s compose.ContainerStatus) string {
+		if s.Health != "" {
+			return s.State + "/" + s.Health
+		}
+		return s.State
+	}
+	box, ok := byName["agy-box"]
+	if !ok {
+		return diagLine{check, false, "chưa có container — `genh start`, rồi xem `genh logs agy-box` nếu vẫn lỗi"}, true
+	}
+	if !healthy(box) {
+		return diagLine{check, false, stateOf(box) + " — agent ngoại giao tạm không dùng được Antigravity; xem `genh logs agy-box`"}, true
+	}
+	info := "đang chạy"
+	if box.Health != "" {
+		info += " (" + box.Health + ")"
+	}
+	if hasEgress {
+		eg, ok := byName["agy-egress"]
+		switch {
+		case !ok:
+			return diagLine{check, false, info + " nhưng proxy lối ra agy-egress chưa có container — `genh start`, rồi xem `genh logs agy-egress`"}, true
+		case eg.State != "running" || eg.Health == "unhealthy":
+			return diagLine{check, false, info + " nhưng proxy lối ra agy-egress " + stateOf(eg) + " — Antigravity trong hộp không ra được Internet; xem `genh logs agy-egress`"}, true
+		}
+		info += " · proxy lối ra đang chạy"
+	}
+	return diagLine{check, true, info}, true
 }

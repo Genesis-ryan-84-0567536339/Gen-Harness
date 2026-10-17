@@ -396,6 +396,9 @@ async def test_brief_ai_ready_and_channels_connected(owner: Api, db: Any) -> Non
                                     VALUES (:o, 'gemini', 'Gemini', 'ok') RETURNING id"""), {"o": org})).scalar_one()
     await db.execute(text("INSERT INTO agent.models (provider_id, model_name) VALUES (:p, 'gemini-2.5-flash')"),
                      {"p": pid})
+    # B2 (F010): "ai_ready" cần nguồn DÙNG ĐƯỢC — nguồn khoá API phải có khoá bật.
+    await db.execute(text("""INSERT INTO agent.provider_keys (provider_id, label, secret_enc, last4)
+                             VALUES (:p, 'K', :s, '1234')"""), {"p": pid, "s": b"\x00e"})
     zalo = await channel(db, org, "zalo")
     tele = await channel(db, org, "telegram")
     fb = await channel(db, org, "facebook")

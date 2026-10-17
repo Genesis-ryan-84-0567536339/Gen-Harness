@@ -67,6 +67,7 @@ export class ZaloAdapter extends EventEmitter {
   constructor({
     lib, sessionId, logger = silentLogger, qrMax = 5, now = Date.now, reconnectDelayMs = 5000,
     retryMaxMs = ZALO_RETRY_MAX_MS, retryNoticeAfter = ZALO_RETRY_NOTICE_AFTER, unknownRetryMax = ZALO_UNKNOWN_RETRY_MAX,
+    directoryGapMs = 0,
   } = {}) {
     super();
     this.lib = lib;
@@ -86,6 +87,8 @@ export class ZaloAdapter extends EventEmitter {
     this.api = null;
     this.ownId = '';
     this.groupNames = new Map();
+    this.directoryGapMs = directoryGapMs;
+    this.lastSyncComplete = true;
     this.recent = new RecentIds(2000);
     this.qrCount = 0;
     this.qrActions = null;
@@ -319,42 +322,73 @@ export class ZaloAdapter extends EventEmitter {
     return id === undefined || id === null ? null : String(id);
   }
 
+  /** Giãn cách giữa hai lần hỏi nền tảng khi quét danh bạ (tránh dồn dập; 0 = không chờ, dùng trong test). */
+  #gap() {
+    return this.directoryGapMs > 0 ? new Promise((r) => { setTimeout(r, this.directoryGapMs); }) : Promise.resolve();
+  }
+
+  /**
+   * Danh bạ: MỌI nhóm kèm MỌI thành viên (Sếp chốt Q5=2 — kể cả nhóm "Không nghe"), có giãn cách giữa các lần hỏi.
+   * `this.lastSyncComplete` = false nếu có nhóm lỗi/thiếu ⇒ lõi KHÔNG được coi nhóm vắng là "đã rời".
+   * Mỗi thành viên có `role` ('admin' | 'member') khi nền tảng cho biết người tạo/quản trị (creatorId, adminIds).
+   */
   async syncGroups() {
     const api = this.api;
     const all = await api.getAllGroups();
     const ids = Object.keys(all?.gridVerMap || {});
     const groups = [];
+    // Nền tảng trả lỗi (có thể là hãm tốc) ⇒ DỪNG cả lượt, không hỏi tiếp: hỏi dồn khi đang bị từ chối chỉ làm tệ thêm.
+    // Lõi nhận phần đã quét kèm `groups_complete=false` (không coi nhóm vắng là "đã rời"); bridge lùi lịch quét kế tiếp.
+    let halted = false;
+    let missing = false; // nền tảng không trả thông tin của một nhóm (không phải lỗi): chưa đủ nhưng không cần dừng
+    let first = true;
     for (const part of chunk(ids, 20)) {
+      if (halted) break;
+      if (!first) await this.#gap();
+      first = false;
       let info;
       try { info = await api.getGroupInfo(part); } catch (err) {
-        this.log.warn('zalo: getGroupInfo lỗi', { error: errorCode(err) });
-        continue;
+        this.log.warn('zalo: getGroupInfo lỗi — dừng lượt quét', { error: errorCode(err) });
+        halted = true;
+        break;
       }
       for (const id of part) {
         const g = info?.gridInfoMap?.[id];
-        if (!g) continue;
+        if (!g) { missing = true; continue; }
         const memberIds = (Array.isArray(g.memberIds) && g.memberIds.length
           ? g.memberIds : (g.memVerList || []).map((s) => String(s).split('_')[0])).map(String);
         const profiles = {};
         for (const ids2 of chunk(memberIds, 100)) {
+          if (halted) break;
+          await this.#gap();
           try {
             const r = await api.getGroupMembersInfo(ids2);
             Object.assign(profiles, r?.profiles || {});
-          } catch { break; } // tên thành viên không bắt buộc
+          } catch (err) { // tên thành viên không bắt buộc, nhưng nền tảng đã lỗi ⇒ không hỏi thêm ở lượt này
+            this.log.warn('zalo: getGroupMembersInfo lỗi — dừng lượt quét', { error: errorCode(err) });
+            halted = true;
+          }
         }
         const name = g.name || '';
         this.groupNames.set(String(id), name);
+        const count = Number(g.totalMember ?? memberIds.length) || memberIds.length;
+        const admins = new Set([g.creatorId, ...(Array.isArray(g.adminIds) ? g.adminIds : [])].filter(Boolean).map(String));
         groups.push({
           external_id: String(id),
           name,
-          member_count: Number(g.totalMember ?? memberIds.length) || memberIds.length,
+          member_count: count,
+          // Đủ khi nhận được ít nhất bằng số thành viên nền tảng báo — lõi mới dám đánh dấu người vắng là đã rời.
+          members_complete: memberIds.length > 0 && memberIds.length >= count,
           members: memberIds.map((uid) => {
             const pr = profiles[uid] || profiles[`${uid}_0`];
-            return { external_id: uid, name: pr?.displayName || pr?.zaloName || '' };
+            const m = { external_id: uid, name: pr?.displayName || pr?.zaloName || '' };
+            if (admins.size) m.role = admins.has(uid) ? 'admin' : 'member';
+            return m;
           }),
         });
       }
     }
+    this.lastSyncComplete = !halted && !missing;
     return groups;
   }
 

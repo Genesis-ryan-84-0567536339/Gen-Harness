@@ -20,8 +20,34 @@ import (
 // liệt kê trong docs/handoff/05-installer.md — tên trùng khớp 1-1 với
 // deploy/compose.yaml (api, worker, bridge, web, proxy đều là tên service
 // thật, không cần đổi). v0.1.29 thêm browser-egress + browser (Gen đọc mạng
-// xã hội — container riêng, không DB, không khoá master).
-var startupServices = []string{"api", "worker", "bridge", "browser-egress", "browser", "web", "proxy"}
+// xã hội — container riêng, không DB, không khoá master). v0.1.63 thêm agy-box (hộp
+// riêng Antigravity cho agent ngoại giao: không DB, không khoá master, chỉ gh_agy_key). Gói sửa review v0.1.63 (P2-2)
+// thêm agy-egress — proxy lối ra của hộp (cùng ảnh api; hộp chỉ ra Internet qua nó), lên trước hộp.
+var startupServices = []string{"api", "worker", "agy-egress", "agy-box", "bridge", "browser-egress", "browser", "web", "proxy"}
+
+// optionalStartupServices là các dịch vụ THÊM SAU bản đầu: compose.yaml đang dùng không khai thì bỏ khỏi `up -d` thay vì
+// để docker chết "no such service". Máy thật không bao giờ gặp (genh và compose nhúng cùng một bản), nhưng genh build từ
+// mã mới mà nhúng compose.release.yaml của bản chính thức cũ (E2E chế độ pr, bản hỏng cố ý; GENH_COMPOSE_FILE trỏ bản
+// cũ) thì có — cài đặt chết ở Bước 7 trước khi kịp chạy phép kiểm. Dịch vụ lõi (api, worker, bridge, web, proxy) thiếu
+// thì vẫn để docker báo lỗi đúng chỗ, không âm thầm bỏ.
+var optionalStartupServices = map[string]bool{"agy-egress": true, "agy-box": true, "browser-egress": true, "browser": true}
+
+// startupServicesFor lọc startupServices theo compose.yaml đã đọc: bỏ dịch vụ tuỳ chọn không được khai. Không đọc được
+// compose hoặc compose không khai dịch vụ nào → giữ nguyên danh sách đầy đủ (để docker tự báo lỗi). skipped: tên bị bỏ.
+func startupServicesFor(composePath string) (services, skipped []string) {
+	cf, err := compose.Load(composePath)
+	if err != nil || len(cf.Services) == 0 {
+		return append([]string(nil), startupServices...), nil
+	}
+	for _, name := range startupServices {
+		if _, ok := cf.Services[name]; !ok && optionalStartupServices[name] {
+			skipped = append(skipped, name)
+			continue
+		}
+		services = append(services, name)
+	}
+	return services, skipped
+}
 
 // readyPath là endpoint readiness thật của apps/api — xem
 // apps/api/gh/shell/routes.py (@router.get("/ready"), mount ở
@@ -167,15 +193,20 @@ func (s servicesStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 		return se
 	}
 
-	rep.Report(Progress{Status: StatusRunning, Percent: 5, Detail: "khởi động api, worker, bridge, web, proxy"})
+	services, skipped := startupServicesFor(composePath)
+	detail := "khởi động " + strings.Join(services, ", ")
+	if len(skipped) > 0 {
+		detail += " (compose.yaml này chưa khai " + strings.Join(skipped, ", ") + " — bỏ qua)"
+	}
+	rep.Report(Progress{Status: StatusRunning, Percent: 5, Detail: detail})
 
-	upArgs := compose.BaseArgs(composePath, append([]string{"up", "-d"}, startupServices...)...)
+	upArgs := compose.BaseArgs(composePath, append([]string{"up", "-d"}, services...)...)
 	if _, err := runner.Output(ctx, dockercli.Cmd{
 		Name: "docker", Args: upArgs, Env: envOverlay, Dir: filepath.Dir(composePath),
 	}); err != nil {
 		se := &StepError{
 			Code: ErrCodeServicesUpFailed,
-			What: "`docker compose up -d` cho api/worker/bridge/web/proxy thất bại",
+			What: "`docker compose up -d` cho api/worker/agy-egress/agy-box/bridge/web/proxy thất bại",
 			Why:  err.Error(),
 			Next: "Xem log ở trên rồi bấm r để thử lại — dữ liệu đã có không bị mất.",
 			Err:  err,
@@ -226,14 +257,14 @@ func (s servicesStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 			Code: ErrCodeServiceNotReady,
 			What: readyPath + " không trả 200 trước khi hết thời gian chờ",
 			Why:  waitErr.Error(),
-			Next: "Xem `docker compose logs api worker bridge web proxy` rồi bấm r để thử lại.",
+			Next: "Xem `docker compose logs api worker agy-egress agy-box bridge web proxy` rồi bấm r để thử lại.",
 			Err:  waitErr,
 		}
 		rep.Report(Progress{Status: StatusError, Percent: 100, Err: se})
 		return se
 	}
 
-	rep.Report(Progress{Status: StatusOK, Percent: 100, Detail: "api, worker, bridge, web, proxy đã sẵn sàng"})
+	rep.Report(Progress{Status: StatusOK, Percent: 100, Detail: "api, worker, agy-box, bridge, web, proxy đã sẵn sàng"})
 	return nil
 }
 

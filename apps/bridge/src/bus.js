@@ -49,8 +49,20 @@ export class RedisBus {
     return Boolean(await this.redis.sIsMember(`gh:bridge:listen:${channel}`, String(groupId)));
   }
 
+  /**
+   * Tin 1-1 mặc định được LƯU (im lặng — v0.1.65): chỉ khoá "0" (Sếp chọn không lưu) mới chặn. Khoá chưa có
+   * (lõi chưa đồng bộ) cho qua; lõi kiểm lần hai ở ingest nên không rò tin khi Sếp đã tắt.
+   */
   async listenDirect(channel) {
-    return (await this.redis.get(`gh:bridge:listen_direct:${channel}`)) === '1';
+    return (await this.redis.get(`gh:bridge:listen_direct:${channel}`)) !== '0';
+  }
+
+  /**
+   * Cờ «nhóm mới» của kênh (`gh:bridge:new_group_mode:<kênh>` = silent | ask | off, lõi ghi cùng tập nghe). Chưa có khoá
+   * (lõi cũ / lõi chưa đồng bộ) ⇒ null.
+   */
+  async newGroupMode(channel) {
+    return (await this.redis.get(`gh:bridge:new_group_mode:${channel}`)) ?? null;
   }
 
   /** SET gh:permit:used:<nonce> 1 NX EX 600 → true nếu lần đầu. */

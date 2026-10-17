@@ -23,7 +23,12 @@ import (
 // install/steps_pull.go pullServiceOrder, đã bỏ "objects" — MinIO không còn
 // trong compose.yaml), viết lại ở đây vì đó là biến không xuất của package
 // khác.
-var updateServiceOrder = []string{"db", "redis", "proxy", "api", "web", "bridge", "browser"}
+//
+// v0.1.63 (H3): thêm agy-box — hộp riêng Antigravity, bản phát hành ghim CÙNG digest với api
+// (chung api.Dockerfile) nên đứng ngay sau api; `docker compose pull` tự bỏ qua ảnh đã/đang tải.
+// agy-box KHÔNG ghi CSDL ⇒ không thuộc updateWriterServices/rollbackStopServices. Gói sửa review v0.1.63 (P2-2):
+// thêm agy-egress (proxy lối ra của hộp, cùng ảnh api, không ghi CSDL).
+var updateServiceOrder = []string{"db", "redis", "proxy", "api", "agy-box", "agy-egress", "web", "bridge", "browser"}
 
 // updateWriterServices là các nguồn GHI vào CSDL ngoài api — tạm dừng trước
 // khi sao lưu nếu bản mới có thay đổi CSDL (F-10), để bản sao lưu không lỡ

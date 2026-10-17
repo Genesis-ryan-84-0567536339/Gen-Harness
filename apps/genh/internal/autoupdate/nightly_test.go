@@ -68,9 +68,16 @@ var errExit1 = errors.New("exit status 1")
 func nightlyDeps(t *testing.T, rr *recRunner) Deps {
 	t.Helper()
 	root := t.TempDir()
+	home := t.TempDir()
+	// Cô lập HOME: unit cũ (không có --install-dir) coi chủ là config.HomeRoot() = $HOME/.gen-harness. Không đặt
+	// HOME thì test đọc HOME THẬT của máy chạy — máy Sếp có bản cài sống ở ~/.gen-harness nên unit bị coi là
+	// "của bản khác" và RefreshUnits không sửa gì (TestRefreshUnits_* đỏ, CI GitHub xanh vì runner không có bản cài).
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
 	return Deps{
 		Runner: rr, GenhPath: "/g/bin/genh", LogFile: filepath.Join(root, "logs", "auto-update.log"),
-		HomeDir: t.TempDir(), GOOS: "linux", UID: "1000", Location: time.UTC,
+		HomeDir: home, GOOS: "linux", UID: "1000", Location: time.UTC,
 		LookPath:   func(string) (string, error) { return "/usr/bin/systemctl", nil },
 		InstallDir: root, Nightly: NightlyJob{InstallDir: root},
 	}

@@ -8,6 +8,10 @@
 - `POST /find-chat` — đọc getUpdates (token trong thân hoặc token đã lưu; token trong thân KHÔNG được lưu).
 - `POST /test` — Gửi thử bằng cấu hình đã lưu, ghi boss_checks 'telegram', và để lại run/request/watchdog.json cho
   genh gửi tin thử thứ hai từ máy chủ (`host_requested`).
+- v0.1.64 (Telegram 2 chiều, T3): `POST /pair/start` (PIN) cấp mã ghép 6 số sống 10 phút (trả MỘT lần) ·
+  `PUT /inbound` (PIN) bật/tắt "Nhận tin từ Sếp" (bật cần đã ghép) · `DELETE /pair` (PIN) gỡ ghép. GET có khối `inbound`
+  (không mã, không id Telegram đầy đủ). Khi đang nhận tin (hoặc có mã ghép sống), `find-chat` không gọi getUpdates riêng
+  (tránh tranh offset với vòng nhận tin của worker).
 Action Log chỉ có chat_id đã che + bot_username.
 """
 
@@ -22,6 +26,7 @@ from gh.auth.deps import require, require_owner, require_pin
 from gh.chassis import actionlog
 from gh.db import DB, sessionmaker
 from gh.telegram import client as tg
+from gh.telegram import inbound, poller
 from gh.telegram import service as tsvc
 
 router = APIRouter(prefix="/notify/telegram", tags=["notify"])
@@ -37,6 +42,10 @@ class TelegramIn(BaseModel):
     reminders: bool | None = None
 
 
+class InboundIn(BaseModel):
+    enabled: bool
+
+
 class FindChatIn(BaseModel):
     token: str | None = Field(None, max_length=128)
 
@@ -45,15 +54,21 @@ def client(request: Request) -> tg.TelegramClient:
     return tg.client_for(getattr(request.app.state, "telegram_transport", None))
 
 
-async def _payload(db: AsyncSession, org_id: Any) -> dict[str, Any]:
+async def _payload(db: AsyncSession, org_id: Any, redis: Any = None) -> dict[str, Any]:
     row = await tsvc.get_config(db, org_id)
-    return {**tsvc.view(row), "last_test": await tsvc.last_test(db, org_id), "host": tsvc.host_status()}
+    ib = inbound.view(await inbound.load(db, org_id))
+    status = await poller.read_status(redis, org_id) if redis is not None else None
+    code = status.get("error_code") if status else None
+    ib["error_code"] = code if isinstance(code, str) else None
+    ib["message"] = tsvc.message_for(ib["error_code"])
+    return {**tsvc.view(row), "last_test": await tsvc.last_test(db, org_id), "host": tsvc.host_status(),
+            "inbound": ib}
 
 
 @router.get("")
-async def get_telegram(_m: service.CurrentUser = Depends(MANAGE), user: service.CurrentUser = Depends(require_owner),
-                       db: AsyncSession = DB) -> dict[str, Any]:
-    return await _payload(db, user.org_id)
+async def get_telegram(request: Request, _m: service.CurrentUser = Depends(MANAGE),
+                       user: service.CurrentUser = Depends(require_owner), db: AsyncSession = DB) -> dict[str, Any]:
+    return await _payload(db, user.org_id, request.app.state.redis)
 
 
 @router.put("")
@@ -73,11 +88,12 @@ async def put_telegram(body: TelegramIn, request: Request, _m: service.CurrentUs
                                    "reminders": bool(row.reminders)}, ip=user.ip)
     await db.commit()
     await tsvc.sync_host_file(sessionmaker())
-    return await _payload(db, user.org_id)
+    return await _payload(db, user.org_id, request.app.state.redis)
 
 
 @router.delete("")
-async def delete_telegram(_m: service.CurrentUser = Depends(MANAGE), user: service.CurrentUser = Depends(require_owner),
+async def delete_telegram(request: Request, _m: service.CurrentUser = Depends(MANAGE),
+                          user: service.CurrentUser = Depends(require_owner),
                           _p: service.CurrentUser = Depends(require_pin("notify.change")),
                           db: AsyncSession = DB) -> dict[str, Any]:
     row = await tsvc.get_config(db, user.org_id)
@@ -89,7 +105,53 @@ async def delete_telegram(_m: service.CurrentUser = Depends(MANAGE), user: servi
                                    "bot_username": row.bot_username if row else None}, ip=user.ip)
     await db.commit()
     await tsvc.sync_host_file(sessionmaker())
-    return await _payload(db, user.org_id)
+    return await _payload(db, user.org_id, request.app.state.redis)
+
+
+@router.post("/pair/start")
+async def pair_start(request: Request, _m: service.CurrentUser = Depends(MANAGE),
+                     user: service.CurrentUser = Depends(require_owner),
+                     _p: service.CurrentUser = Depends(require_pin("notify.change")),
+                     db: AsyncSession = DB) -> dict[str, Any]:
+    """Cấp mã ghép 6 số (sống 10 phút). Mã chỉ có trong phản hồi này — DB chỉ lưu băm, Action Log không có mã."""
+    code, expires = await inbound.start_pairing(db, user.org_id, user.id)
+    row = await tsvc.get_config(db, user.org_id)
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action=inbound.ACTION_PAIR_START, target_type="notify_channel", target_id="telegram",
+                           target_label=row.bot_username if row else None,
+                           detail={"expires_at": tsvc._iso(expires)}, ip=user.ip)
+    await db.commit()
+    return {**await _payload(db, user.org_id, request.app.state.redis),
+            "pair": {"code": code, "expires_at": tsvc._iso(expires),
+                     "bot_username": row.bot_username if row else None}}
+
+
+@router.put("/inbound")
+async def put_inbound(body: InboundIn, request: Request, _m: service.CurrentUser = Depends(MANAGE),
+                      user: service.CurrentUser = Depends(require_owner),
+                      _p: service.CurrentUser = Depends(require_pin("notify.change")),
+                      db: AsyncSession = DB) -> dict[str, Any]:
+    """Bật/tắt "Nhận tin từ Sếp". Bật cần đã ghép (409 TELEGRAM_NOT_PAIRED)."""
+    await inbound.set_inbound(db, user.org_id, body.enabled)
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action=inbound.ACTION_INBOUND, target_type="notify_channel", target_id="telegram",
+                           detail={"enabled": body.enabled}, ip=user.ip)
+    await db.commit()
+    return await _payload(db, user.org_id, request.app.state.redis)
+
+
+@router.delete("/pair")
+async def unpair(request: Request, _m: service.CurrentUser = Depends(MANAGE),
+                 user: service.CurrentUser = Depends(require_owner),
+                 _p: service.CurrentUser = Depends(require_pin("notify.change")),
+                 db: AsyncSession = DB) -> dict[str, Any]:
+    """Gỡ ghép + tắt nhận tin + huỷ mã đang chờ."""
+    await inbound.unpair(db, user.org_id)
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action=inbound.ACTION_UNPAIRED, target_type="notify_channel", target_id="telegram",
+                           detail={}, ip=user.ip)
+    await db.commit()
+    return await _payload(db, user.org_id, request.app.state.redis)
 
 
 @router.post("/find-chat")
@@ -97,6 +159,13 @@ async def find_chat(request: Request, body: FindChatIn | None = None, _m: servic
                     user: service.CurrentUser = Depends(require_owner), db: AsyncSession = DB) -> dict[str, Any]:
     """Chỉ đọc — không lưu token, không ghi Action Log (thao tác tra cứu)."""
     actionlog.exempt()
+    # Vòng nhận tin của worker đang giữ offset của bot — gọi getUpdates riêng (kể cả token dán trong thân) sẽ tranh/làm
+    # mất tin và Telegram trả 409. Kiểm theo TỔ CHỨC cho cả hai nhánh.
+    ib = await inbound.load(db, user.org_id)
+    if ib is not None and (ib.inbound_enabled or inbound.pair_active(ib)):
+        return {"chats": [], "error_code": "TELEGRAM_INBOUND_ACTIVE",
+                "message": "Đang bật nhận tin từ Sếp nên không tìm chat_id kiểu cũ — dùng nút Ghép Telegram "
+                           "(mã 6 số) hoặc tắt \"Nhận tin từ Sếp\" rồi tìm lại"}
     token = (body.token or "").strip() if body else ""
     if token:
         token = tsvc.validate_token(token)

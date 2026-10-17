@@ -331,8 +331,8 @@ function BindingsPanel({ canManage }: { canManage: boolean }) {
 
 /**
  * Lỗi khi lưu gán model — câu thân thiện (title của ApiError) + phần mã/lý do để trong "Chi tiết kỹ thuật". Luôn trả
- * chuỗi (không bao giờ đưa đối tượng vào JSX). v0.1.62: model của Antigravity CLI gán được cho mọi khoá, trừ lớp ngoại giao ở gói G (422, xem `agy_blocked_reason`; không còn
- * lỗi 409 AGY_OWNER_GEN_ONLY).
+ * chuỗi (không bao giờ đưa đối tượng vào JSX). Model của Antigravity CLI gán được cho mọi khoá (không còn lỗi 409 AGY_OWNER_GEN_ONLY); riêng khoá chạy agy qua hộp riêng
+ * mà hộp chưa chạy / chưa cài thì máy chủ trả 422 (xem `agy_blocked_reason`).
  */
 function bindingErrorView(e: unknown): { message: string; detail: string | null } {
   const message = errorText(e);
@@ -353,8 +353,8 @@ function BindingEditDialog({ slot, models, onClose }: { slot: AgentBindingSlot; 
   const set = useSetBinding();
   const providers = useProviders();
   // v0.1.55: slot chưa gán chọn sẵn đúng model hồ sơ chuẩn đang phủ (nếu có trong danh sách), rồi mới tới model đầu tiên.
-  // Gói G: dòng ngoại giao (core.reply, agent gắn kênh / nhóm / người) chưa dùng agy ⇒ model agy bị làm mờ + giải thích;
-  // lý do do máy chủ trả (`agy_blocked_reason`), máy chủ từ chối 422 nếu vẫn gán.
+  // Dòng chạy agy qua hộp riêng (core.reply, core.refinery, agent gắn kênh / nhóm / người) mà hộp chưa chạy / chưa cài ⇒ model agy
+  // bị làm mờ + giải thích; lý do do máy chủ trả (`agy_blocked_reason`), máy chủ từ chối 422 nếu vẫn gán.
   const agyBlocked = agyBlockedReason(slot);
   const usable = (m: BindableModel) => !(agyBlocked && isAgyModel(m));
   const std = slot.standard;

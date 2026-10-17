@@ -133,8 +133,9 @@ def test_offline_run_does_not_add_the_shell_check(tmp_path: Path) -> None:
 # ─── review lần 2 v0.1.62 (P2-2): ca shell /proc/1 là KHE HỞ DỰ KIẾN — báo nhưng không chặn phát hành ───────────
 
 def test_live_run_shell_gap_is_reported_but_not_a_release_blocker(tmp_path: Path) -> None:
-    """agy cùng uid đọc được /proc/1/environ và /run/secrets (hộp riêng ở v0.1.63) ⇒ ca shell báo false nhưng KHÔNG làm
-    kết quả thành "lo" (chặn phát hành); các ca cô lập khác (đầu ra, log, env, tiêm lệnh) vẫn là "lo" khi hỏng."""
+    """agy cùng uid đọc được /proc/1/environ và /run/secrets (trong tiến trình; hộp v0.1.63 chỉ lo người ngoài) ⇒
+    ca shell báo false nhưng KHÔNG làm kết quả thành "lo" (chặn phát hành); các ca cô lập khác (đầu ra, log, env,
+    tiêm lệnh) vẫn là "lo" khi hỏng."""
     environ, secrets = _plant(tmp_path)
     home = tmp_path / "agy" / ".gemini" / "antigravity-cli"
     home.mkdir(parents=True)

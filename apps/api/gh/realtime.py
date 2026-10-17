@@ -38,12 +38,17 @@ EVENT_PERMISSION: dict[str, str | None] = {
     "refinery.run": "data.read",
     "channel.qr": "system.read",
     "channel.status": "system.read",
+    "group.discovered": "system.read",   # v0.1.65: nhóm mới phát hiện ⇒ thẻ kênh cập nhật (hỏi Sếp chỉ khi Hỏi Sếp)
     "cli.login": "system.manage",
     "header": None,
 }
 
 # Sự kiện mang nội dung tin nhắn: vai trò dưới Owner nhận bản đã che số dài (khoá cứng 8).
 MASKED_EVENTS = {"raw.new"}
+
+# Sự kiện mang NGUYÊN VĂN một tin: tin 1-1 (`data.group` rỗng) chỉ gửi cho Owner — vai dưới (kể cả Kiểm soát có
+# data.read) không nhận chuyện riêng của khách qua WebSocket (review v0.1.65 P2-2).
+OWNER_ONLY_WHEN_DIRECT = {"raw.new"}
 
 
 def register_event(type: str, permission: str | None, *, masked: bool = False) -> None:
@@ -186,6 +191,9 @@ class Hub:
             if to_user and str(user.id) != to_user:
                 continue
             if not allowed(user.permissions, msg["type"]):
+                continue
+            if (msg["type"] in OWNER_ONLY_WHEN_DIRECT and user.role_code != rbac.OWNER
+                    and (msg.get("data") or {}).get("group") is None):
                 continue
             out = text
             if msg["type"] in MASKED_EVENTS and user.role_code != rbac.OWNER:

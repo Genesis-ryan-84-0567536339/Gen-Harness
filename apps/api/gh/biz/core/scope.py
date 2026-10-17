@@ -101,6 +101,38 @@ class Scope:
         return f"(({type_col} = 'person' AND {pw}) OR ({type_col} = 'group' AND {gw}))", {**pp, **gp}
 
 
+# ─── Tin 1-1: chỉ Owner (hoặc người được giao ĐÚNG người đó) ─────────────────────────────────────────────────────────
+# Tin riêng 1-1 của khách (`group_id IS NULL`) là chuyện riêng giữa khách và Sếp. Migration 0038 bật lưu 1-1 cho bản cũ
+# nên Vận hành (queue.read/profile.read ALL) hay Kiểm soát (data.read ALL) — vốn "thấy hết" — không được đọc nguyên văn.
+# Quy tắc MỘT chỗ, mọi API đọc tin/đơn vị ghép vào (review v0.1.65 P2-2):
+#   · Owner: thấy hết.
+#   · Vai khác: dòng thuộc nhóm (`group_id` không NULL) theo phạm vi thường; dòng 1-1 chỉ khi người đó (`person_id`) do
+#     chính mình phụ trách (`core.persons.owner_user_id`) hoặc được giao thẳng cho mình (`core.assignments` đang hiệu
+#     lực). Giao cho team không đủ: phải đúng người dùng này. Dòng 1-1 không rõ người ⇒ chỉ Owner.
+
+_DM_PERSON_SQL = ("EXISTS (SELECT 1 FROM core.persons dmp WHERE dmp.id = {person} AND (dmp.owner_user_id = :dm_user"
+                  " OR EXISTS (SELECT 1 FROM core.assignments dma WHERE dma.subject_type = 'person'"
+                  " AND dma.subject_id = dmp.id AND dma.active_to IS NULL AND dma.user_id = :dm_user)))")
+
+
+def direct_visible_sql(user: service.CurrentUser, group_col: str, person_col: str) -> tuple[str, dict[str, Any]]:
+    """Điều kiện SQL "dòng này người xem được phép đọc nguyên văn" trên cặp cột (nhóm, người) của một tin/đơn vị."""
+    if user.role_code == rbac.OWNER:
+        return "TRUE", {}
+    return f"({group_col} IS NOT NULL OR {_DM_PERSON_SQL.format(person=person_col)})", {"dm_user": user.id}
+
+
+async def direct_visible(db: AsyncSession, user: service.CurrentUser, group_id: Any, person_id: Any) -> bool:
+    """Bản một dòng của `direct_visible_sql` (đã biết `group_id`, `person_id` của dòng)."""
+    if group_id is not None or user.role_code == rbac.OWNER:
+        return True
+    if person_id is None:
+        return False
+    where, params = direct_visible_sql(user, "CAST(:dm_g AS uuid)", ":dm_p")
+    return bool((await db.execute(text(f"SELECT {where}"),  # noqa: S608 — biểu thức nội bộ
+                                  {"dm_g": None, "dm_p": uuid.UUID(str(person_id)), **params})).scalar())
+
+
 async def team_users(db: AsyncSession, team_id: uuid.UUID) -> tuple[uuid.UUID, ...]:
     """Thành viên của team và các team con."""
     rows = (await db.execute(text("""

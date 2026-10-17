@@ -122,8 +122,8 @@ test('QR: mỗi mã qr → session.qr data URL; ghép cặp → scanned; restart
   assert.deepEqual(cred.creds.noiseKey.public, { type: 'Buffer', data: 'AQID' });
   const dir = await waitFor(() => bus.of(STREAMS.directory, 'groups')[0]);
   assert.deepEqual(dir.payload.groups[0].members, [
-    { external_id: '84901111111@s.whatsapp.net', name: '', phone: '+84901111111' },
-    { external_id: '5555@lid', name: '', phone: '+84902222222' },
+    { external_id: '84901111111@s.whatsapp.net', name: '', phone: '+84901111111', role: 'admin' },
+    { external_id: '5555@lid', name: '', phone: '+84902222222', role: 'member' },
   ]);
   mgr.shutdown();
 });

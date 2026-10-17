@@ -60,12 +60,14 @@ from gh.hub_link import service as hub_link
 from gh.identity import service as identity
 from gh.memory import notebook
 from gh.providers import cli as climod
+from gh.providers import clients
 from gh.providers.router import ModelRouter
 from gh.refinery.runner import Refinery
 from gh.refinery.scheduler import Scheduler
 from gh.social import service as social
 from gh.social import session_watch
 from gh.telegram import service as telegram
+from gh.telegram.poller import JOBS as TELEGRAM_JOBS
 
 log = logging.getLogger("gh.worker")
 
@@ -102,6 +104,7 @@ JOB_LABELS = {
     "scheduled_backup_scan": "Sao lưu theo lịch",
     "gen_briefing": "Bản tin Gen",
     "telegram_flush": "Gửi tin Telegram",
+    "telegram_inbound": "Nhận tin Telegram của Sếp",
     "hub_breaker_watch": "Theo dõi Gen-hub",
     "gen_kho_release": "Đề xuất ghi Phiên vào Kho",
     "gen_coach": "Gen hướng dẫn",
@@ -224,6 +227,8 @@ async def startup(ctx: dict[str, Any]) -> None:
     # /proc/<pid>/environ. Đặt ở đây (không ở mức nhập mô-đun) để test nhập gh.worker không đổi trạng thái pytest.
     set_not_dumpable()
     configure_logging()
+    # Review lần 2 v0.1.63 (P3-5): HOME tạm agy (có token) còn sót khi tiến trình worker trước bị SIGKILL.
+    clients.sweep_stale_turn_dirs()
     async with sessionmaker()() as db:
         await bootstrap(db, mint_setup_code=False)   # P2-2: chỉ api sinh / giao mã thiết lập, worker không sinh lại
         await db.commit()
@@ -408,7 +413,7 @@ async def telegram_flush(ctx: dict[str, Any]) -> dict[str, int]:
     return await telegram.flush_outbox(sessionmaker(), redis=ctx.get("redis_bus"))
 
 
-_BIZ_JOBS = [*biz.jobs(), *BACKUP_JOBS]  # PLAN §5.6 — gh.backup.scheduled_backup_scan cùng mẫu CronJob
+_BIZ_JOBS = [*biz.jobs(), *BACKUP_JOBS, *TELEGRAM_JOBS]  # PLAN §5.6 — cùng mẫu CronJob; v0.1.64: + telegram_inbound
 
 
 class WorkerSettings:

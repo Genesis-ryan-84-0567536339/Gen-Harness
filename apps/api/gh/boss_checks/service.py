@@ -59,7 +59,7 @@ DETAIL_KEYS = frozenset({"latency_ms", "probe_model", "models_count", "models_so
                          "expected_masked", "account_match", "code_shape", "credentials_file", "job_status",
                          "exposed_tools", "missing_tools", "target_profile", "from_profile",
                          "login_source", "bot_username", "chat_masked", "opened_from", "access_mode",
-                         "read_scopes", "read_missing", "write_scopes", "write_missing"})
+                         "read_scopes", "read_missing", "write_scopes", "write_missing", "provider_id"})
 
 SOCIAL_FAILED_MSG = "Lượt đọc Facebook chưa thành công — mở trang Mạng xã hội xem lý do rồi bấm Đọc ngay lần nữa"
 SOCIAL_HALTED_MSG = ("Đọc mạng xã hội đang bị dừng (Dừng tất cả) — bật lại ở trang Tài khoản mạng xã hội rồi bấm "
@@ -255,34 +255,102 @@ def _passed(results: dict[str, dict[str, Any] | None], key: str) -> bool:
 #: Số ngày nhìn lại tìm lượt gọi model thành công để coi "đã có nguồn AI chạy được".
 AI_SOURCE_DAYS = 30
 
+#: Mã lỗi của dòng "nguồn AI" theo `readiness.reason_code` (giữ các mã cũ AI_NO_SOURCE / AI_KEY_MISSING /
+# *_NOT_LOGGED_IN
+#: mà web, test và Gen hướng dẫn đã biết).
+AI_ERROR_CODES = {"no_source": "AI_NO_SOURCE", "no_key": "AI_KEY_MISSING", "cli_expired": "AI_CLI_EXPIRED",
+                  "disabled": "AI_DISABLED", "no_model": "AI_NO_MODEL", "error": "AI_ERROR",
+                  "box_down": "AI_BOX_DOWN"}
+CLI_NOT_LOGGED_IN = {"antigravity_cli": "AGY_NOT_LOGGED_IN", "claude_code_cli": "CLAUDE_NOT_LOGGED_IN"}
+#: Kiểm tra gọi thử CLI đạt (`agy_call` / `claude_call`) chỉ là bằng chứng khi nguồn CLI đó còn dùng được.
+CALL_CHECK_KIND = {"agy_call": "antigravity_cli", "claude_call": "claude_code_cli"}
 
-async def ai_source_evidence(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any] | None:
+
+def ai_error_code(verdict: dict[str, Any]) -> str:
+    """Mã lỗi của `readiness.explain(...)` (chưa ok) cho bản ghi / kết quả `ai_source`."""
+    src = verdict.get("source")
+    if verdict["reason_code"] == "no_key" and src is not None and src["kind"] in CLI_NOT_LOGGED_IN:
+        return CLI_NOT_LOGGED_IN[src["kind"]]
+    return AI_ERROR_CODES[str(verdict["reason_code"])]
+
+
+async def ai_source_evidence(db: AsyncSession, org_id: uuid.UUID,
+                             usable_ids: list[str] | None = None) -> dict[str, Any] | None:
     """Bằng chứng có nguồn AI chạy được từ lượt gọi THẬT: `agent.model_calls` status 'ok' trong 30 ngày (không tính
     embedding / Jev — không sinh văn bản). Trả bản ghi giả dạng kết quả kiểm (status 'pass', `runs` 0) hoặc None.
-    Chỉ cần LƯỢT MỚI NHẤT (ORDER BY at DESC LIMIT 1 trên chỉ mục (org_id, at DESC)) — không đếm cả 30 ngày mỗi lần
-    `overview` chạy (Hôm nay, Việc Sếp cần làm, coach cùng gọi)."""
+    v0.1.63 (F014): CHỈ tính lượt gọi của nguồn còn DÙNG ĐƯỢC (`usable_ids` = id nguồn của `readiness.usable_sources`;
+    bỏ trống = tự tra) — lượt gọi thành công của nguồn đã tắt / gỡ khoá / hết phiên không chứng minh Gen trả lời được
+    hôm nay. Chỉ cần LƯỢT MỚI NHẤT (ORDER BY at DESC LIMIT 1 trên chỉ mục (org_id, at DESC)) — không đếm cả 30 ngày mỗi
+    lần `overview` chạy (Hôm nay, Việc Sếp cần làm, coach cùng gọi)."""
+    from gh.providers import readiness
+
+    if usable_ids is None:
+        usable_ids = [s["provider_id"] for s in await readiness.usable_sources(db, org_id, readiness.READY_ROLE)]
+    if not usable_ids:
+        return None
     r = (await db.execute(text("""
         SELECT c.at
         FROM agent.model_calls c
-        LEFT JOIN agent.models m ON m.id = c.model_id
-        LEFT JOIN agent.providers p ON p.id = m.provider_id
+        JOIN agent.models m ON m.id = c.model_id
+        JOIN agent.providers p ON p.id = m.provider_id
         WHERE c.org_id = :o AND c.status = 'ok' AND c.at > now() - make_interval(days => :d)
-          AND c.purpose <> 'embedding' AND COALESCE(p.kind, '') NOT IN ('system_one', 'embedding')
-        ORDER BY c.at DESC LIMIT 1"""), {"o": org_id, "d": AI_SOURCE_DAYS})).one_or_none()
+          AND c.purpose <> 'embedding' AND p.kind NOT IN ('system_one', 'embedding')
+          AND p.id = ANY(CAST(:ids AS uuid[]))
+        ORDER BY c.at DESC LIMIT 1"""), {"o": org_id, "d": AI_SOURCE_DAYS, "ids": usable_ids})).one_or_none()
     if r is None:
         return None
     return {"key": "ai_source", "status": "pass", "error_code": None, "message": None,
             "detail": {"via": "model_calls"}, "checked_at": _iso(r.at), "runs": 0}
 
 
-def _derived_ai(results: dict[str, dict[str, Any] | None]) -> dict[str, Any] | None:
-    """Claude / Google đã gọi thử ĐẠT (lượt gọi thật tới CLI) ⇒ coi như có nguồn AI chạy được."""
+def _derived_ai(results: dict[str, dict[str, Any] | None], usable_kinds: set[str]) -> dict[str, Any] | None:
+    """Claude / Google đã gọi thử ĐẠT (lượt gọi thật tới CLI) VÀ nguồn CLI đó còn dùng được ⇒ coi như có nguồn AI chạy
+    được."""
     for key in ("claude_call", "agy_call"):
         r = results.get(key)
-        if r is not None and r["status"] == "pass":
+        if r is not None and r["status"] == "pass" and CALL_CHECK_KIND[key] in usable_kinds:
             return {"key": "ai_source", "status": "pass", "error_code": None, "message": None,
                     "detail": {"via": key}, "checked_at": r["checked_at"], "runs": 0}
     return None
+
+
+async def _resolve_ai(db: AsyncSession, org_id: uuid.UUID,
+                      results: dict[str, dict[str, Any] | None]) -> dict[str, Any] | None:
+    """Kết quả cuối của dòng 0 "nguồn AI" (v0.1.63, F014): bằng chứng chỉ có giá trị khi Gen trả lời được BÂY GIỜ.
+
+    - `readiness.explain` không ok (không có nguồn nào dùng được) ⇒ dù trước đó có lượt gọi / lần Kiểm tra
+    đạt, kết quả là
+      'fail' kèm đúng lý do hiện tại (nguồn tắt, gỡ khoá, hết phiên, hết model…) — dòng bắt buộc duy nhất
+      phải nói sự thật;
+    - ok ⇒ một lần Kiểm tra 'pass' đã ghi nguồn (`detail.provider_id`) mà nguồn đó không còn dùng được thì KHÔNG tính;
+      bằng chứng ngầm (lượt gọi model thật, Claude / Google gọi thử đạt) chỉ tính của nguồn còn dùng được, và chỉ thay
+      kết quả ĐÃ GHI khi nó MỚI HƠN (Sếp vừa bấm Kiểm tra mà lỗi thì lượt gọi thành công của 20 ngày trước
+      không che nó)."""
+    from gh.providers import readiness
+
+    states = await readiness.source_states(db, org_id, readiness.READY_ROLE)
+    verdict = readiness.explain(states)
+    ai = results.get("ai_source")
+    if not verdict["ok"]:
+        if verdict["reason_code"] == "no_source" and (ai is None or ai["status"] != "pass"):
+            return ai          # máy mới chưa thêm nguồn nào: chưa kiểm lần nào (hoặc lần kiểm lỗi đã nói đúng)
+        return {"key": "ai_source", "status": "fail", "error_code": ai_error_code(verdict),
+                "message": verdict["reason_vi"], "detail": {"via": "ai_ready", "fix_to": verdict["fix_to"]},
+                "checked_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                "runs": ai["runs"] if ai else 0}
+    usable = [s for s in states if s["usable"]]
+    usable_ids = {s["provider_id"] for s in usable}
+    if ai is not None and ai["status"] == "pass":
+        recorded = ai["detail"].get("provider_id")
+        if recorded is not None and str(recorded) not in usable_ids:
+            ai = None                      # nguồn đã đạt không còn dùng được
+    if ai is None or ai["status"] != "pass":
+        found = (await ai_source_evidence(db, org_id, sorted(usable_ids)),
+                 _derived_ai(results, {s["kind"] for s in usable}))
+        best = max((e for e in found if e is not None), key=lambda e: _ts(e["checked_at"]), default=None)
+        if best is not None and (ai is None or _ts(best["checked_at"]) > _ts(ai["checked_at"])):
+            return best
+    return ai
 
 
 async def overview(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
@@ -293,14 +361,8 @@ async def overview(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
     `switch_passes` vẫn trả kèm (tương thích web cũ / Kết nối): `results.agy_switch.runs` đếm MỌI bản ghi, cả lỗi."""
     results = await latest(db, org_id)
     switches = await switch_passes(db, org_id)
-    ai = results.get("ai_source")
-    if ai is None or ai["status"] != "pass":
-        # Bằng chứng ngầm chỉ thay kết quả ĐÃ GHI khi nó MỚI HƠN: Sếp vừa bấm Kiểm tra mà lỗi (khoá bị thu hồi…) thì
-        # lượt gọi thành công của 20 ngày trước không được che nó — dòng bắt buộc duy nhất phải nói đúng sự thật.
-        found = (await ai_source_evidence(db, org_id), _derived_ai(results))
-        best = max((e for e in found if e is not None), key=lambda e: _ts(e["checked_at"]), default=None)
-        if best is not None and (ai is None or _ts(best["checked_at"]) > _ts(ai["checked_at"])):
-            results["ai_source"] = best
+    ai = await _resolve_ai(db, org_id, results)
+    results["ai_source"] = ai
     rows: list[dict[str, Any]] = []
     for row in ROWS:
         if row["key"] == "agy":

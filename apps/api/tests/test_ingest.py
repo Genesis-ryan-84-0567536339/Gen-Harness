@@ -1,4 +1,5 @@
-"""Nhận tin vào Kho thô: nhóm chưa bật bị bỏ, trùng tin bị bỏ, tin 1-1 theo cài đặt, đường nhanh, chỉ-INSERT."""
+"""Nhận tin vào Kho thô: nhóm chưa bật (chờ chọn) bị bỏ, trùng tin bị bỏ, tin 1-1 theo cài đặt (mặc định im lặng),
+đường nhanh, chỉ-INSERT."""
 
 import pytest
 from sqlalchemy import text
@@ -8,12 +9,24 @@ from gh.db import sessionmaker
 from tests.phase2 import listen, msg, org_id, put
 
 
-async def test_new_group_is_off_and_drops_messages(app, db) -> None:  # type: ignore[no-untyped-def]
+async def test_new_group_is_silent_by_default_and_stores_messages(app, db) -> None:  # type: ignore[no-untyped-def]
     org = await org_id(db)
+    [eid] = await put(sessionmaker(), org, msg("Còn hàng không chị?", group="g-new"))
+    assert eid is not None
+    g = (await db.execute(text("SELECT listen_mode FROM core.groups WHERE external_id = 'g-new'"))).one()
+    assert g.listen_mode == "silent"        # QD 17/10: nhóm mới MẶC ĐỊNH lắng nghe im lặng — lưu hết tin, không trả lời
+    assert (await db.execute(text("SELECT count(*) FROM raw.events"))).scalar() == 1
+
+
+async def test_new_group_with_ask_is_pending_and_drops_messages(app, db) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    await db.execute(text("""UPDATE core.organizations SET settings = settings
+                             || '{"new_group_mode": {"zalo": "ask"}}'::jsonb"""))
+    await db.commit()
     [eid] = await put(sessionmaker(), org, msg("Còn hàng không chị?", group="g-new"))
     assert eid is None
     g = (await db.execute(text("SELECT listen_mode FROM core.groups WHERE external_id = 'g-new'"))).one()
-    assert g.listen_mode == "off"           # khoá cứng: nhóm mới luôn "Không nghe"
+    assert g.listen_mode == "pending"       # Sếp chọn «Hỏi Sếp»: nhóm mới CHỜ Sếp chọn — chưa lưu tin nào
     assert (await db.execute(text("SELECT count(*) FROM raw.events"))).scalar() == 0
 
 
@@ -43,15 +56,23 @@ async def test_mention_takes_fast_path(app, db) -> None:  # type: ignore[no-unty
 async def test_direct_messages_follow_owner_setting(app, db) -> None:  # type: ignore[no-untyped-def]
     org = await org_id(db)
     sm = sessionmaker()
-    [dropped] = await put(sm, org, msg("Chào anh", group=None))
-    assert dropped is None                  # mặc định không nghe tin 1-1
+    [first] = await put(sm, org, msg("Chào anh", group=None))
+    assert first is not None                # v0.1.65: tin 1-1 mặc định LƯU IM LẶNG (silent)
+    assert (await db.execute(text("SELECT fast FROM refinery.event_state"))).scalar() is False   # không đi đường nhanh
     await db.execute(text("""UPDATE core.organizations
-                             SET settings = settings || '{"listen_direct": {"zalo": true}}'::jsonb WHERE id = :o"""),
+                             SET settings = settings || '{"direct_mode": {"zalo": "off"}}'::jsonb WHERE id = :o"""),
+                     {"o": org})
+    await db.commit()
+    [dropped] = await put(sm, org, msg("Chào anh", group=None))
+    assert dropped is None                  # Sếp chọn "off" ⇒ không lưu
+    await db.execute(text("""UPDATE core.organizations
+                             SET settings = settings || '{"direct_mode": {"zalo": "reply"}}'::jsonb WHERE id = :o"""),
                      {"o": org})
     await db.commit()
     [eid] = await put(sm, org, msg("Chào anh", group=None))
     assert eid is not None
-    assert (await db.execute(text("SELECT fast FROM refinery.event_state"))).scalar() is True
+    assert (await db.execute(text("SELECT fast FROM refinery.event_state WHERE event_id = :e"),
+                             {"e": eid})).scalar() is True
 
 
 async def test_raw_store_is_insert_only(app, db) -> None:  # type: ignore[no-untyped-def]
@@ -74,10 +95,11 @@ async def test_directory_and_listen_sets(app, db, redis) -> None:  # type: ignor
         {"external_id": "gB", "name": "Nội bộ", "member_count": 5}]})
     await db.commit()
     rows = (await db.execute(text("SELECT external_id, listen_mode, member_count FROM core.groups ORDER BY 1"))).all()
-    assert [(r.external_id, r.listen_mode, r.member_count) for r in rows] == [("gA", "off", 40), ("gB", "off", 5)]
+    got = [(r.external_id, r.listen_mode, r.member_count) for r in rows]
+    assert got == [("gA", "silent", 40), ("gB", "silent", 5)]        # QD 17/10: nhóm mới mặc định silent
     phone = (await db.execute(text("SELECT phone_e164 FROM core.person_identities"))).scalar()
     assert phone == "+84901234567"
-    await db.execute(text("UPDATE core.groups SET listen_mode = 'silent' WHERE external_id = 'gA'"))
+    await db.execute(text("UPDATE core.groups SET listen_mode = 'off' WHERE external_id = 'gB'"))
     await sync_listen_sets(db, redis, org)
     assert await redis.smembers("gh:bridge:listen:zalo") == {b"gA"}
-    assert await redis.get("gh:bridge:listen_direct:zalo") == b"0"
+    assert await redis.get("gh:bridge:listen_direct:zalo") == b"1"   # tin 1-1 mặc định lưu im lặng

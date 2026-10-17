@@ -1143,7 +1143,7 @@ func TestResolveUpdateServices_SplitsPullableAndSkipped(t *testing.T) {
 		t.Errorf("thiếu trong pullable: %v", wantPullable)
 	}
 
-	wantSkipped := map[string]bool{"api": true, "web": true, "bridge": true, "db": true, "browser": true}
+	wantSkipped := map[string]bool{"api": true, "web": true, "bridge": true, "db": true, "browser": true, "agy-box": true, "agy-egress": true}
 	for _, s := range skipped {
 		if !wantSkipped[s] {
 			t.Errorf("skipped chứa %q không mong đợi", s)

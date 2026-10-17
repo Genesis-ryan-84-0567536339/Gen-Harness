@@ -2,12 +2,15 @@
 # Sinh deploy/compose.release.yaml từ deploy/compose.yaml: thay từng dòng
 # "build: { context: .., dockerfile: ... }" bằng "image: <tham chiếu đã ghim
 # digest>" cho các service hiện build cục bộ (web, migrate, api, worker,
-# bridge, db, browser, browser-egress) — xem docs/handoff/05-installer.md mục "Phát hành":
+# bridge, db, browser, browser-egress, agy-box, agy-egress) — xem docs/handoff/05-installer.md mục "Phát hành":
 # "compose.yaml nhúng trong genh ghim đúng digest của bản phát hành đó."
 #
-# migrate/api/worker dùng CHUNG deploy/images/api.Dockerfile (xem
-# deploy/compose.yaml) => CHUNG một ảnh (--api); mỗi dòng build: trùng văn
-# bản của cả 3 service đều được thay bằng cùng một image ref. Tương tự
+# migrate/api/worker/agy-box (v0.1.63, hộp riêng Antigravity) dùng CHUNG
+# deploy/images/api.Dockerfile (xem deploy/compose.yaml) => CHUNG một ảnh (--api);
+# mỗi dòng build: trùng văn bản của cả 4 service đều được thay bằng cùng một
+# image ref. (agy-box PHẢI khai build theo đúng dạng một dòng
+# `build: { context: .., dockerfile: deploy/images/api.Dockerfile }` thì mới được
+# ghim; release.yml kiểm lại bằng check_agy_box_isolation.py --release.) Tương tự
 # browser/browser-egress (v0.1.29) dùng chung deploy/images/browser.Dockerfile
 # => chung một ảnh (--browser).
 #
@@ -86,7 +89,7 @@ cp "$IN" "$OUT"
 
 # replace_build_line <dockerfile path như xuất hiện trong compose.yaml> <image ref thay vào>
 # Thay MỌI dòng khớp (sed xử lý từng dòng của cả file) — đúng ý muốn cho
-# api.Dockerfile xuất hiện ở 3 service (migrate/api/worker).
+# api.Dockerfile xuất hiện ở 5 service (migrate/api/worker/agy-box/agy-egress — proxy lối ra của hộp, review v0.1.63 P2-2).
 replace_build_line() {
 	local dockerfile="$1" image="$2"
 	local pattern="build: { context: .., dockerfile: ${dockerfile} }"
@@ -111,8 +114,8 @@ replace_build_line "deploy/images/bridge.Dockerfile" "$IMG_BRIDGE"
 replace_build_line "deploy/images/db.Dockerfile" "$IMG_DB"
 replace_build_line "deploy/images/browser.Dockerfile" "$IMG_BROWSER"
 
-# Không còn "build:" cục bộ nào sót lại cho 8 service trên — nếu còn thì một
-# trong 4 lần thay ở trên đã không khớp đủ số dòng mong đợi.
+# Không còn "build:" cục bộ nào sót lại cho 9 service trên — nếu còn thì một
+# trong 5 lần thay ở trên đã không khớp đủ số dòng mong đợi.
 remaining=$(grep -c "build: { context: \.\." "$OUT" || true)
 if [ "$remaining" -ne 0 ]; then
 	echo "pin-compose-images: còn $remaining dòng build: chưa được thay trong $OUT — kiểm lại danh sách service." >&2

@@ -191,5 +191,5 @@ Tối thiểu để trình thiết lập đi hết được (PLAN Q1 "trình thi
   chỉ để Owner biết trước khi vào Console, không phải một cài đặt). `ack_boundaries` sai/thiếu → `422`. Chưa có
   agent (bước 8 chưa xong) → `409 STEP_INCOMPLETE`.
   ```json
-  {..., "agent": {"id", "name", "autonomy_level": 4}, "hard_boundaries": ["Chỉ lắng nghe nhóm Owner đã bật", …]}
+  {..., "agent": {"id", "name", "autonomy_level": 4}, "hard_boundaries": ["Chỉ lưu tin của nhóm Sếp đã chọn nghe", …]}
   ```

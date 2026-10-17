@@ -821,13 +821,19 @@ async def test_fresh_machine_shows_first_three_by_table_then_done_row_vanishes(
     # giả lập Gen-hub đạt + nguồn AI đạt ⇒ lần tải sau (xoá cache tín hiệu) gợi ý boss.hub biến mất, x/N tăng
     async with admin_sessionmaker()() as adm:
         await boss_service.record(adm, org, "hub", "pass")
+        # B2: "nguồn AI đạt" chỉ đúng khi có nguồn dùng được (khoá bật + model) — dựng nguồn thật rồi ghi lần kiểm.
+        pid = (await adm.execute(text("""INSERT INTO agent.providers (org_id, kind, name) VALUES (:o, 'gemini', 'G')
+                                         RETURNING id"""), {"o": org})).scalar_one()
+        await adm.execute(text("""INSERT INTO agent.provider_keys (provider_id, label, secret_enc, last4)
+                                  VALUES (:p, 'K', :s, '1234')"""), {"p": pid, "s": b"\x00e"})
+        await adm.execute(text("INSERT INTO agent.models (provider_id, model_name) VALUES (:p, 'm')"), {"p": pid})
         await boss_service.record(adm, org, "ai_source", "pass")
         await adm.commit()
     assert 0 < await redis.ttl(sg.CACHE_KEY.format(org)) <= 60
     assert todo_keys(await today(owner_api)) == ["model.missing", "backup.unset", "boss.hub"]   # còn trong cache
     await redis.delete(sg.CACHE_KEY.format(org))
     d2 = await today(owner_api)
-    assert todo_keys(d2) == ["model.missing", "backup.unset", "followup.5"]
+    assert todo_keys(d2) == ["backup.unset", "followup.5", "followup.6"]   # có nguồn dùng được ⇒ model.missing hết
     assert d2["progress"]["required_done"] == 1 and d2["progress"]["required_total"] == 1
 
 

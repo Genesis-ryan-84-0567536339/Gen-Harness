@@ -57,9 +57,9 @@ function mockFetch(handler: (c: Call) => Response | Promise<Response>) {
 const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 
 /** Đặt /auth/me với bảng quyền cho trước (gợi ý khi rỗng phụ thuộc quyền mời người / tạo agent). */
-function meWith(permissions: Record<string, string>) {
+function meWith(permissions: Record<string, string>, roleCode = 'custom') {
   const me = {
-    id: USER_IDS.owner, email: 'x@genesis.local', display_name: 'X', role: { code: 'custom', name: 'Tuỳ biến' },
+    id: USER_IDS.owner, email: 'x@genesis.local', display_name: 'X', role: { code: roleCode, name: 'Tuỳ biến' },
     org: { id: 'o', name: 'x', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
     addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null, permissions,
   };
@@ -361,6 +361,48 @@ describe('Nhóm & Con người › Gán BOT trực nhóm', () => {
     expect(call.body).toEqual({ agent_id: AGENT_IDS.hc });
   });
 
+  it('nhóm «Lắng nghe im lặng» (review v0.1.65): chọn BOT thì cảnh báo BOT sẽ không trả lời; bỏ chọn / nhóm khác thì không cảnh báo', async () => {
+    const me = meWith(DIR_WRITER);
+    const silentGroups: DirCursorPage<DirGroup> = { ...GROUPS, items: [{ ...GROUPS.items[0]!, listen_mode: 'silent' }] };
+    mockFetch((c) => {
+      if (c.url.includes('/auth/me')) return json(200, me);
+      if (c.url.includes('/pickers/agents')) return json(200, AGENTS);
+      if (c.url.includes('/directory/channels')) return json(200, CHANNELS);
+      if (c.url.includes('/directory/groups')) return json(200, silentGroups);
+      return json(404);
+    });
+    const user = userEvent.setup();
+    renderScreen(<DirectoryScreen />);
+    const row = (await screen.findByText('GRP-ZL-0114')).closest('tr') as HTMLElement;
+    await user.click(within(row).getByRole('button', { name: /Đổi|Gán/ }));
+    const dlg = await screen.findByRole('dialog', { name: 'Gán BOT trực nhóm' });
+    const warn = await within(dlg).findByTestId('group-bot-silent-warning');
+    expect(warn).toHaveTextContent('BOT sẽ không trả lời trong nhóm Lắng nghe im lặng');
+    expect(warn).toHaveTextContent('Nghe hết, chỉ trả lời khi được tag');
+    await user.click(within(dlg).getByText('Chưa gán'));
+    expect(within(dlg).queryByTestId('group-bot-silent-warning')).toBeNull();
+    await user.click(within(dlg).getByText('Admin hậu cần'));
+    expect(within(dlg).getByTestId('group-bot-silent-warning')).toBeInTheDocument();
+  });
+
+  it('nhóm «Nghe hết, chỉ trả lời khi được tag»: không cảnh báo', async () => {
+    const me = meWith(DIR_WRITER);
+    mockFetch((c) => {
+      if (c.url.includes('/auth/me')) return json(200, me);
+      if (c.url.includes('/pickers/agents')) return json(200, AGENTS);
+      if (c.url.includes('/directory/channels')) return json(200, CHANNELS);
+      if (c.url.includes('/directory/groups')) return json(200, GROUPS);
+      return json(404);
+    });
+    const user = userEvent.setup();
+    renderScreen(<DirectoryScreen />);
+    const row = (await screen.findByText('GRP-ZL-0114')).closest('tr') as HTMLElement;
+    await user.click(within(row).getByRole('button', { name: /Đổi|Gán/ }));
+    const dlg = await screen.findByRole('dialog', { name: 'Gán BOT trực nhóm' });
+    await within(dlg).findByText('Key Account junior (đã tắt)');
+    expect(within(dlg).queryByTestId('group-bot-silent-warning')).toBeNull();
+  });
+
   it.each([
     ['có system.manage → chỉ đường Agent & Model › Danh tính Agent', { 'profile.write': 'all', 'system.manage': 'all' }, EMPTY_AGENTS_TEXT],
     ['không system.manage → nhờ Owner tạo', { 'profile.write': 'team' }, EMPTY_AGENTS_TEXT_ASK],
@@ -413,7 +455,7 @@ describe('Nhóm & Con người › Thiết lập BOT cho nhóm đã lọc', () =
   }
 
   it('mặc định «Giữ nguyên BOT hiện tại»: chỉ đổi tự trị thì KHÔNG gửi agent_id (không gỡ BOT của ai)', async () => {
-    const calls = mockDir(meWith(DIR_WRITER), () => json(200, AGENTS));
+    const calls = mockDir(meWith(DIR_WRITER, 'owner'), () => json(200, AGENTS));
     useUrlStateStore.setState({ params: { dt: 'people' } });
     const user = userEvent.setup();
     renderScreen(<DirectoryScreen />);
@@ -432,7 +474,7 @@ describe('Nhóm & Con người › Thiết lập BOT cho nhóm đã lọc', () =
   });
 
   it('/pickers/agents lỗi → vẫn mặc định giữ nguyên, nút Áp dụng tắt cho tới khi chọn mức tự trị', async () => {
-    mockDir(meWith(DIR_WRITER), () => problem(503, 'DB_UNAVAILABLE', 'Cơ sở dữ liệu đang không phản hồi'));
+    mockDir(meWith(DIR_WRITER, 'owner'), () => problem(503, 'DB_UNAVAILABLE', 'Cơ sở dữ liệu đang không phản hồi'));
     useUrlStateStore.setState({ params: { dt: 'people' } });
     const user = userEvent.setup();
     renderScreen(<DirectoryScreen />);
@@ -445,7 +487,7 @@ describe('Nhóm & Con người › Thiết lập BOT cho nhóm đã lọc', () =
   });
 
   it('gỡ BOT chủ động → gửi agent_id: null', async () => {
-    const calls = mockDir(meWith(DIR_WRITER), () => json(200, AGENTS));
+    const calls = mockDir(meWith(DIR_WRITER, 'owner'), () => json(200, AGENTS));
     useUrlStateStore.setState({ params: { dt: 'people' } });
     const user = userEvent.setup();
     renderScreen(<DirectoryScreen />);
@@ -460,6 +502,15 @@ describe('Nhóm & Con người › Thiết lập BOT cho nhóm đã lọc', () =
 
   it('vai trò chỉ đọc (Auditor: không profile.write) → không có nút "Đổi" và nút thiết lập hàng loạt', async () => {
     mockDir(meWith({ 'profile.read': 'all', 'profile.write': 'none' }), () => json(200, AGENTS));
+    useUrlStateStore.setState({ params: { dt: 'people' } });
+    renderScreen(<DirectoryScreen />);
+    const row = (await screen.findByText('Trịnh Mỹ Duyên')).closest('tr') as HTMLElement;
+    expect(within(row).queryByRole('button', { name: 'Đổi' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Thiết lập BOT cho nhóm đã lọc' })).toBeNull();
+  });
+
+  it('Vận hành có profile.write nhưng KHÔNG phải Owner → không thấy nút gán BOT cho người (máy chủ chỉ cho Owner + PIN)', async () => {
+    mockDir(meWith(DIR_WRITER, 'operator'), () => json(200, AGENTS));
     useUrlStateStore.setState({ params: { dt: 'people' } });
     renderScreen(<DirectoryScreen />);
     const row = (await screen.findByText('Trịnh Mỹ Duyên')).closest('tr') as HTMLElement;

@@ -1,4 +1,4 @@
-import type { TelegramConfig, TelegramHostStatus } from '@gen-harness/contracts';
+import type { TelegramConfig, TelegramHostStatus, TelegramInbound } from '@gen-harness/contracts';
 import { friendlyError } from '../../lib/friendlyError';
 import { REQUEST_UNDELETABLE_CODE, REQUEST_UNDELETABLE_TEXT } from '../../lib/genhCodes';
 
@@ -39,9 +39,18 @@ export const TELEGRAM_ERROR_TEXT: Record<string, string> = {
   [REQUEST_UNDELETABLE_CODE]: REQUEST_UNDELETABLE_TEXT,
 };
 
+/** v0.1.64 — câu lỗi của phần "Nhận tin từ Sếp" (không đưa vào "Việc Sếp cần làm"). */
+export const INBOUND_ERROR_TEXT: Record<string, string> = {
+  TELEGRAM_NOT_PAIRED: 'Chưa ghép tài khoản Telegram của Sếp — bấm Ghép Telegram trước rồi mới bật nhận tin.',
+  TELEGRAM_POLL_CONFLICT:
+    'Bot đang bị nơi khác giữ kênh nhận tin (đã đặt webhook, hoặc một máy khác đang chạy cùng bot) nên Gen chưa nhận được tin của Sếp.',
+  TELEGRAM_INBOUND_ACTIVE: 'Đang bật nhận tin từ Sếp nên không tìm chat_id kiểu cũ — dùng nút Ghép Telegram (mã 6 số).',
+};
+
 /** Câu thân thiện theo mã (mã lạ → câu máy chủ đã lọc qua friendlyError). Luôn là chuỗi. */
 export function telegramErrorText(code: string | null | undefined, message?: string | null): string {
   if (code && TELEGRAM_ERROR_TEXT[code]) return TELEGRAM_ERROR_TEXT[code];
+  if (code && INBOUND_ERROR_TEXT[code]) return INBOUND_ERROR_TEXT[code];
   return friendlyError(message ?? null, 'Chưa gửi được — thử lại sau ít phút.').message;
 }
 
@@ -75,7 +84,47 @@ export function telegramKicker(t: Pick<TelegramConfig, 'configured' | 'briefing'
 
 /** Câu cảnh báo cố định của thẻ. */
 export const TELEGRAM_WARNING =
-  'Token là chìa khoá của bot — không gửi cho ai. Gen-Harness lưu mã hoá; tin chỉ đi một chiều, mọi thao tác Sếp vẫn xác nhận trong Console.';
+  'Token là chìa khoá của bot — không gửi cho ai. Gen-Harness lưu mã hoá. Qua Telegram Gen chỉ đọc và đề xuất; mọi thao tác ghi Sếp vẫn xác nhận (kèm mã PIN) trong Console — không bao giờ gõ mã PIN vào Telegram.';
+
+// ─── v0.1.64 — Nhận tin từ Sếp (Telegram 2 chiều) ───────────────────────────────────────────────────────────────
+
+export const INBOUND_TITLE = 'Nhận tin từ Sếp';
+export const INBOUND_NOTE =
+  'Sếp nhắn bot được các lệnh /hom_nay · /viec · /suc_khoe · /nhap <ý> hoặc hỏi tự do. Gen chỉ đọc và đề xuất — bot chỉ trả lời tài khoản Telegram đã ghép, tin của người khác bị bỏ im lặng. Muốn ghi hay gửi đi, Sếp mở Console bấm Xác nhận và nhập mã PIN.';
+export const INBOUND_UNPAIRED_HINT = 'Chưa ghép tài khoản Telegram của Sếp — bấm Ghép Telegram, rồi gửi mã 6 số cho bot.';
+export const PAIR_CODE_HINT = 'Mã sống 10 phút và chỉ dùng được một lần. Bot không trả lời nếu mã sai hoặc đã hết hạn — bấm Ghép Telegram để lấy mã mới.';
+/** Hỏi lại mỗi 3 giây trong lúc chờ Sếp gửi mã cho bot — thấy "Đã ghép" ngay mà không phải tải lại trang. */
+export const PAIR_POLL_MS = 3_000;
+
+/** Câu hướng dẫn gửi mã ghép cho bot. */
+export function pairInstruction(bot: string | null | undefined, code: string): string {
+  return `Mở bot ${bot ? `@${bot}` : 'trên Telegram'} bằng tài khoản Telegram của Sếp và gửi đúng dòng: /start ${code}`;
+}
+
+/** Mã ghép 6 số hiển thị cách quãng "123 456" cho dễ đọc. */
+export function spacedCode(code: string): string {
+  return /^\d{6}$/.test(code) ? `${code.slice(0, 3)} ${code.slice(3)}` : code;
+}
+
+/** `refetchInterval` khi đang chờ ghép (có mã sống): PAIR_POLL_MS; ngược lại false. */
+export function pairPollMs(t: Pick<TelegramConfig, 'inbound'> | null | undefined): number | false {
+  return t?.inbound?.pair_pending === true ? PAIR_POLL_MS : false;
+}
+
+/** Dòng trạng thái ghép dưới công tắc. */
+export function inboundStatusText(i: TelegramInbound, fmtTime: (iso: string) => string): string {
+  if (!i.paired) return INBOUND_UNPAIRED_HINT;
+  const who = `Đã ghép với tài khoản Telegram ${i.owner_masked ?? '•••'}${i.paired_at ? ` · từ ${fmtTime(i.paired_at)}` : ''}`;
+  return i.enabled ? `${who} · đang nhận tin` : `${who} · đang TẮT nhận tin`;
+}
+
+/** Khối `inbound` của GET /notify/telegram có đúng khuôn (máy chủ cũ không có ⇒ null ⇒ ẩn phần Nhận tin). */
+export function asInbound(t: TelegramConfig | null | undefined): TelegramInbound | null {
+  const i = t?.inbound;
+  if (!i || typeof i !== 'object' || Array.isArray(i)) return null;
+  if (typeof i.paired !== 'boolean' || typeof i.enabled !== 'boolean') return null;
+  return i;
+}
 
 export const TEST_OK_TEXT = 'Đã gửi — kiểm tra Telegram trên điện thoại (sẽ có thêm 1 tin từ trực canh máy chủ trong ~1 phút)';
 export const TEST_OK_NO_HOST_TEXT = 'Đã gửi — kiểm tra Telegram trên điện thoại';

@@ -146,8 +146,9 @@ export function createMock(opts: P4ApiOptions) {
     return out;
   }
 
-  /** Gói G (16/10/2026): như `gh.providers.agy_policy.decide` — core.reply (lớp ngoại giao) chưa dùng agy; khoá khác dùng được. */
-  const AGY_DIPLOMATIC_REASON = 'Antigravity chưa dùng cho việc trả lời người ngoài — chờ hộp riêng (bản sau)';
+  /** Như `gh.providers.agy_policy.decide` khi hộp riêng chưa chạy — core.reply (qua hộp) chưa dùng được agy; khoá khác dùng được. */
+  const AGY_DIPLOMATIC_REASON =
+    'Hộp riêng Antigravity chưa chạy — việc có người ngoài (trả lời khách, sàng lọc tin, Gen của nhân viên) tạm dùng nguồn AI kế, không dùng Antigravity trong tiến trình';
   const agyBlockedFor = (agentKey: string): string | null => (agentKey === 'core.reply' ? AGY_DIPLOMATIC_REASON : null);
 
   /** Model "Chuẩn" cho một khoá: model đầu tiên của nguồn đầu tiên dùng được (agy cho khoá core, trừ lớp ngoại giao); không có ⇒ null. */

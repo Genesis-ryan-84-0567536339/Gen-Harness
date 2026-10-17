@@ -34,8 +34,9 @@ const TECHNICAL = /[[\]{}]|errno|exception|traceback|error:|http\s?\d{3}|\b[a-z]
 
 export const MODEL_UNAVAILABLE_TEXT = 'Chưa có model AI hoạt động — chọn hoặc sửa model ở Agent & Model (Hướng dẫn bước 4).';
 
-// v0.1.62: luật v0.1.38 (F-22) "Antigravity CLI chỉ dùng cho Gen của Sếp" đã gỡ (Owner chọn mở cho mọi vai ngày 16/10/2026)
-// — máy chủ không còn trả câu/lý do riêng cho "chuỗi chỉ có agy" nên web bỏ luôn các dấu nhận diện (AGY_ONLY_*).
+// v0.1.62: luật v0.1.38 (F-22) "Antigravity CLI chỉ dùng cho Gen của Sếp" đã gỡ — máy chủ không còn trả câu/lý do riêng
+// cho "chuỗi chỉ có agy" nên web bỏ luôn các dấu nhận diện (AGY_ONLY_*). v0.1.63: vai có người ngoài chạy agy qua hộp riêng;
+// hộp chưa chạy thì máy chủ trả lý do "Hộp riêng Antigravity chưa chạy / chưa được cài" ở `reasons` / `agy_blocked_reason`.
 
 /** Lý do kỹ thuật dạng `{reasons: [...]}` (máy chủ ≤ v0.1.29) hoặc mảng chuỗi — null nếu không phải. */
 export function reasonsOf(value: unknown): string[] | null {

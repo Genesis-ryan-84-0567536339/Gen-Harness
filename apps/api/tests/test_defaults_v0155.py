@@ -26,7 +26,7 @@ from gh import crypto
 from gh.db import sessionmaker
 from gh.defaults import profiles, registry
 from gh.defaults.routes import router as defaults_router
-from gh.providers import catalog
+from gh.providers import agy_policy, catalog
 from gh.providers.clients import AuthFailed, Completion, Message, ModelRejected
 from gh.providers.router import KEY_AAD, ModelRouter, ModelUnavailable
 from gh.setup.routes import DEFAULT_BACKUP
@@ -478,7 +478,9 @@ def rows_of(*names: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
 def picks(names: tuple[str, ...], role: str, *, background: bool = False, bg_cli: set[str] | None = None,
           tier: str | None = None) -> list[tuple[str, str, str | None]]:
     p, m = rows_of(*names)
-    got = profiles.resolve(p, m, role, background=background, bg_cli_allowed=bg_cli or set(), tier_override=tier)
+    # Ma trận hồ sơ chạy với hộp riêng ĐANG CHẠY (vai qua hộp vẫn dùng được agy); hộp tắt: test_agy_placement_v0163.
+    got = profiles.resolve(p, m, role, background=background, bg_cli_allowed=bg_cli or set(), tier_override=tier,
+                           agy=agy_policy.decide(role, box="ok"))
     return [(c["provider_kind"], c["model_name"], c["effort"]) for c in got]
 
 
@@ -523,11 +525,17 @@ def test_gen_picks_the_right_tier_and_effort_per_source() -> None:
         (AGY, "gemini-3.8-flash", "medium"), (API, "g/flash", None)]
 
 
-def test_reply_skips_agy_because_it_is_the_diplomatic_layer() -> None:
-    """Gói G: core.reply nói chuyện với người ngoài => CHƯA dùng agy (hộp riêng ở bản sau); Claude CLI và API vẫn."""
+def test_reply_uses_agy_only_through_the_box() -> None:
+    """H2: core.reply nói chuyện với người ngoài ⇒ agy chạy QUA HỘP: hộp tắt thì chỉ còn Claude CLI và API."""
     assert picks(("claude", "agy", "api"), "core.reply") == [
-        (CLAUDE, "sonnet", "low"), (API, "g/flash", None)]
-    assert picks(("agy",), "core.reply") == []
+        (CLAUDE, "sonnet", "low"), (AGY, "gemini-3.8-flash", "low"), (API, "g/flash", None)]
+    assert picks(("agy",), "core.reply") == [(AGY, "gemini-3.8-flash", "low")]
+    p, m = rows_of("claude", "agy", "api")
+    down = profiles.resolve(p, m, "core.reply", background=False, bg_cli_allowed=set(),
+                            agy=agy_policy.decide("core.reply", box="down"))
+    assert [c["provider_kind"] for c in down] == [CLAUDE, API]
+    assert profiles.resolve(*rows_of("agy"), "core.reply", background=False, bg_cli_allowed=set(),
+                            agy=agy_policy.decide("core.reply", box="not_installed")) == []
 
 
 def test_tier_override_forces_the_tier_but_keeps_the_rules() -> None:
@@ -586,7 +594,7 @@ def reason_of(names: tuple[str, ...], role: str, *, with_models: bool = True, bg
         m = []
     if no_key:
         p = [{**x, "has_key": False} if x["kind"] == API else x for x in p]
-    return profiles.missing_reason(p, m, role, bg_cli or set())
+    return profiles.missing_reason(p, m, role, bg_cli or set(), agy_policy.decide(role, box="ok"))
 
 
 def test_only_agy_with_model_gives_every_core_role_a_candidate() -> None:
@@ -598,11 +606,14 @@ def test_only_agy_with_model_gives_every_core_role_a_candidate() -> None:
 
 def test_missing_reason_agy_without_model_points_at_the_test_button() -> None:
     # Các vai core (kể cả vai nền): agy được dùng nhưng 0 model ⇒ bảo bấm Kiểm tra kết nối ở nguồn đó (đường tự sửa của
-    # Sếp). Gói G: core.reply không dùng agy ⇒ nói đúng lý do ngoại giao, KHÔNG bảo bấm Kiểm tra kết nối ở Agy.
-    for role in ("core.gen", "core.refinery", "core.briefing", "agent:7"):
+    # Sếp) — kể cả vai qua hộp khi hộp chạy. Hộp tắt (H2): vai qua hộp (core.reply, core.refinery) nói đúng lý do hộp,
+    # KHÔNG bảo bấm Kiểm tra kết nối ở Agy.
+    for role in ("core.gen", "core.refinery", "core.briefing", "agent:7", "core.reply"):
         assert reason_of(("agy",), role, with_models=False) == "chưa có model — bấm Kiểm tra kết nối ở Agy", role
-    assert reason_of(("agy",), "core.reply", with_models=False) == (
-        "Antigravity chưa dùng cho việc trả lời người ngoài — chờ hộp riêng (bản sau)")
+    p, m = rows_of("agy")
+    for role in ("core.reply", "core.refinery"):
+        assert profiles.missing_reason(p, [], role, set(), agy_policy.decide(role, box="down")) \
+            == agy_policy.REASON_BOX_DOWN
 
 
 def test_missing_reason_source_allowed_but_empty_and_fallback() -> None:
@@ -681,9 +692,11 @@ async def test_choice_options_contract(dapi: Api, db: Any) -> None:
 # (f) _chain: dòng gán thắng hồ sơ, hồ sơ thắng hạng; mức suy nghĩ
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-def router_for(redis: Any, *, claude: Any = None, agy: Any = None, handler: Any = None) -> ModelRouter:
+def router_for(redis: Any, *, claude: Any = None, agy: Any = None, handler: Any = None, box: Any = None) -> ModelRouter:
+    """`agy` = agy trong tiến trình (core.gen của Owner, Bản tin, agent nội bộ); `box` = hộp riêng (core.refinery…)."""
     return ModelRouter(sessionmaker(), redis, transport=transport(handler or (lambda host, key: (200, OK))),
-                       claude_factory=claude or (lambda: None), cli_factory=agy or (lambda: None))
+                       claude_factory=claude or (lambda: None), cli_factory=agy or (lambda: None),
+                       box_factory=box or (lambda: None))
 
 
 async def chain_of(r: ModelRouter, org: uuid.UUID, key: str, **kw: Any) -> list[tuple[str, str, str]]:
@@ -888,18 +901,21 @@ async def test_background_without_api_or_agy_source_keeps_old_behaviour(app: Any
     assert cli.calls == []
 
 
-async def test_background_with_agy_runs_on_agy_with_profile_effort(app: Any, db: Any, redis: Any) -> None:
-    """v0.1.62: có Antigravity CLI ⇒ việc nền chạy bằng agy (hồ sơ: tầng gần "nhanh" nhất = flash, mức "low");
-    Claude CLI chưa được cho phép nên không bị gọi."""
+async def test_background_with_agy_runs_on_agy_with_profile_effort(app: Any, db: Any, redis: Any,
+                                                                   boxctl: Any) -> None:  # noqa: F811
+    """Có Antigravity CLI ⇒ việc nền chạy bằng agy (hồ sơ: tầng gần "nhanh" nhất = flash, mức "low"): sàng lọc tin
+    (người lạ), Bản tin (review v0.1.63 P2-3) và trực việc của agent (P3: `duty_decide` đọc tin khách) đều qua hộp
+    riêng; Claude CLI chưa được phép nên không bị gọi."""
     org = await org_id(db)
     await add_source(db, org, CLAUDE, "Claude CLI", 1, ["sonnet", "haiku"])
     await add_source(db, org, AGY, "Agy", 2, ["gemini-3.8-flash", "gemini-3.1-pro"])
-    cli, agy = EffortCli(), EffortCli()
-    r = router_for(redis, claude=cli, agy=agy)
+    cli, agy, boxed = EffortCli(), EffortCli(), EffortCli()
+    r = router_for(redis, claude=cli, agy=agy, box=boxed)
     for key, purpose in (("core.briefing", "gen.briefing"), ("core.refinery", "refinery"), ("agent:1", "duty_decide")):
         out = await r.generate(org, agent_key=key, purpose=purpose, messages=MSGS, tier="fast")
         assert out.text == "cli-ok", key
-    assert cli.calls == [] and agy.calls == [("gemini-3.8-flash", "low")] * 3
+    assert cli.calls == [] and agy.calls == []
+    assert boxed.calls == [("gemini-3.8-flash", "low")] * 3
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════════════

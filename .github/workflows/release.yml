@@ -470,6 +470,12 @@ jobs:
           PY
           cmp deploy/browser/chromium-seccomp.json apps/genh/internal/compose/embedded_chromium-seccomp.json
 
+      # v0.1.63: hộp riêng Antigravity (agy-box) chỉ an toàn khi bản phát hành mang đúng cấu hình cô lập: chỉ secret
+      # gh_agy_key, không mạng default, không biến DB/Redis/khoá, cap_drop ALL, no-new-privileges, read_only, chỉ volume
+      # agy_state, và chạy đúng ảnh api đã ghim digest. Lệch ⇒ bản phát hành dừng tại đây, không có gì được publish.
+      - name: Bản phát hành mang agy-box đúng cấu hình cô lập (v0.1.63)
+        run: python3 .github/scripts/check_agy_box_isolation.py deploy/compose.release.yaml --release
+
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: compose-release
