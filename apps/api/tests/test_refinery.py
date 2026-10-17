@@ -170,6 +170,10 @@ async def test_fast_path_and_manual_queue(app, db, redis) -> None:  # type: igno
     sm = sessionmaker()
     await schedule(db, org, 3600, 1000)
     sch = await _scheduler(sm, redis, by_text())
+    # QD 17/10: nhóm «Lắng nghe im lặng» không bao giờ trả lời nên tin tag ở đó không đi đường nhanh — dùng nhóm
+    # «Nghe hết, chỉ trả lời khi được tag» (g1 đổi sang tagged_only) cho tin tag agent.
+    await db.execute(text("UPDATE core.groups SET listen_mode = 'tagged_only' WHERE external_id = 'g1'"))
+    await db.commit()
     await put(sm, org, msg("@bot cần 4 container, báo giá", mentions=True), msg(BUY))
     [fast] = await sch.tick(wait=True)
     assert fast.trigger == "fast" and fast.total == 1        # chỉ tin tag agent đi đường nhanh

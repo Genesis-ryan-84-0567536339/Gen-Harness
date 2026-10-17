@@ -1,5 +1,5 @@
 // v0.1.65 (F1a) — danh bạ: thu thành viên MỌI nhóm (kể cả "Không nghe"), vai trò admin, cờ "danh sách đủ", giãn cách,
-// nhóm mới báo `group.discovered` (không lưu tin), quét lại có giới hạn tần suất, lệnh directory.sync dùng chung một lượt.
+// nhóm mới báo `group.discovered` (kèm tin đầu tiên để lõi lưu nếu nhóm vào «Lắng nghe im lặng»), quét lại có giới hạn tần suất, lệnh directory.sync dùng chung một lượt.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { STREAMS } from '../src/envelope.js';
@@ -84,7 +84,7 @@ test('WhatsApp: role admin/member + cờ danh sách đủ', async () => {
   assert.equal(a.lastSyncComplete, true);
 });
 
-test('tin từ nhóm LẠ: không lưu, phát group.discovered đúng một lần (không kèm nội dung), rồi quét lại danh bạ', async () => {
+test('tin từ nhóm LẠ: không đi luồng inbound, phát group.discovered đúng một lần kèm TIN ĐẦU (first_message), rồi quét lại danh bạ', async () => {
   const lines = [];
   const api = makeZaloApi({ groups: GROUPS });
   const { bus, mgr } = await loginZalo(api, { logger: createLogger((l) => lines.push(l)), discoverDelayMs: 10, discoverMinGapMs: 0 });
@@ -93,11 +93,16 @@ test('tin từ nhóm LẠ: không lưu, phát group.discovered đúng một lầ
   api.listener.emit('message', zaloMessage({ threadId: 'G9', content: 'bí mật khách lạ', msgId: '91' }));
   api.listener.emit('message', zaloMessage({ threadId: 'G9', content: 'tin thứ hai', msgId: '92' }));
   const found = await waitFor(() => bus.of(STREAMS.directory, 'group.discovered')[0]);
-  assert.deepEqual(found.payload, { channel: 'zalo', session_id: 's1', group_id: 'G9', name: '', member_count: null });
+  const { first_message: first, ...rest } = found.payload;
+  assert.deepEqual(rest, { channel: 'zalo', session_id: 's1', group_id: 'G9', name: '', member_count: null });
+  // tin ĐẦU (không phải tin thứ hai) đi kèm nguyên văn để lõi lưu khi nhóm mới vào «Lắng nghe im lặng»
+  assert.equal(first.external_msg_id, '91');
+  assert.equal(first.external_group_id, 'G9');
+  assert.equal(first.body_text, 'bí mật khách lạ');
   await waitFor(() => bus.of(STREAMS.directory, 'groups').length === 2); // quét lại sau khi phát hiện
   await tick(20);
   assert.equal(bus.of(STREAMS.directory, 'group.discovered').length, 1);
-  assert.equal(bus.of(STREAMS.inbound).length, 0); // tin KHÔNG vào Kho
+  assert.equal(bus.of(STREAMS.inbound).length, 0); // không đi luồng inbound: lõi quyết định lưu hay không theo chế độ nhóm
   assert.ok(!lines.some((l) => l.includes('bí mật') || l.includes('thứ hai')));
   // nhóm đã có trong danh bạ (G1, "Không nghe") bị bỏ tin nhưng KHÔNG báo lại là nhóm mới
   api.listener.emit('message', zaloMessage({ threadId: 'G1', msgId: '93' }));
@@ -146,6 +151,8 @@ test('WhatsApp: tin từ nhóm lạ cũng báo group.discovered (kèm tên nếu
   sock.ev.emit('messages.upsert', { type: 'notify', messages: [waMessage({ remoteJid: '999@g.us', id: 'Z1' })] });
   const found = await waitFor(() => bus.of(STREAMS.directory, 'group.discovered')[0]);
   assert.equal(found.payload.group_id, '999@g.us');
+  assert.equal(found.payload.first_message.external_msg_id, 'Z1');
+  assert.equal(found.payload.first_message.external_group_id, '999@g.us');
   assert.equal(bus.of(STREAMS.inbound).length, 0);
   mgr.shutdown();
 });

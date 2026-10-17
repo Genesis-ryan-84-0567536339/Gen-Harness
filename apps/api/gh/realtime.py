@@ -38,7 +38,7 @@ EVENT_PERMISSION: dict[str, str | None] = {
     "refinery.run": "data.read",
     "channel.qr": "system.read",
     "channel.status": "system.read",
-    "group.discovered": "system.read",   # v0.1.65: nhóm mới phát hiện ⇒ Console hỏi Sếp Im lặng/Không nghe
+    "group.discovered": "system.read",   # v0.1.65: nhóm mới phát hiện ⇒ thẻ kênh cập nhật (hỏi Sếp chỉ khi Hỏi Sếp)
     "listen.event": "data.read",         # v0.1.71: sự kiện kênh cho Nhật ký lắng nghe (chỉ tín hiệu, không câu chữ)
     "cli.login": "system.manage",
     "header": None,

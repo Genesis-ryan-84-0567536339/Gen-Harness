@@ -271,12 +271,14 @@ export function channelErrorText(code: string, name: string, type?: Channel['typ
 }
 
 // ── groups ────────────────────────────────────────────────────────────────
+/** QD 17/10: nhóm vào đây là mặc định khi được add — lưu hết tin, KHÔNG BAO GIỜ trả lời (kể cả khi được tag). */
+export const SILENT_LISTEN_LABEL = 'Lắng nghe im lặng — lưu hết, không bao giờ trả lời (kể cả khi được tag)';
 /** Chế độ Sếp được CHỌN cho một nhóm (khớp `SETTABLE_LISTEN_MODES` ở api/gh/data/common.py). */
 export const LISTEN_MODES: Array<{ value: SettableListenMode; label: string }> = [
   { value: 'off', label: 'Không nghe' },
   // v0.1.65 (Q6=1, F065): chế độ này VẪN lưu mọi tin của nhóm — chỉ việc TRẢ LỜI mới cần được tag.
   { value: 'tagged_only', label: 'Nghe hết, chỉ trả lời khi được tag' },
-  { value: 'silent', label: 'Lắng nghe im lặng' },
+  { value: 'silent', label: SILENT_LISTEN_LABEL },
   { value: 'proactive', label: 'Chủ động bắt tín hiệu' },
   { value: 'paused', label: 'Tạm dừng' },
 ];
@@ -299,15 +301,19 @@ export const DIRECT_MODES: Array<{ value: DirectMode; label: string; hint: strin
 export const directModeOf = (c: Pick<Channel, 'direct_mode' | 'listen_direct'>): DirectMode =>
   c.direct_mode ?? (c.listen_direct === false ? 'off' : 'silent');
 
-/** Nhóm MỚI phát hiện sau này (v0.1.65, F1d; Sếp chốt 17/10): hỏi từng lần (mặc định) · vào Im lặng ngay · vào Không nghe ngay. */
+/** Nhóm MỚI phát hiện sau này (v0.1.65, F1d; Sếp chốt 17/10 thay «hỏi khi kết nối»): vào Lắng nghe im lặng ngay (mặc định) · hỏi từng lần · vào Không nghe. */
 export const NEW_GROUP_MODES: Array<{ value: NewGroupMode; label: string; hint: string }> = [
-  { value: 'ask', label: 'Hỏi Sếp', hint: 'Nhóm mới chờ Sếp chọn Im lặng hay Không nghe — chưa lưu tin nào cho tới khi Sếp chọn. Mặc định.' },
-  { value: 'silent', label: 'Im lặng', hint: 'Nhóm mới tự vào Im lặng: lưu tin ngay, không tự trả lời.' },
+  {
+    value: 'silent',
+    label: SILENT_LISTEN_LABEL,
+    hint: 'Nhóm mới tự vào Lắng nghe im lặng: lưu hết tin, không bao giờ trả lời, kể cả khi được tag. Mặc định.',
+  },
+  { value: 'ask', label: 'Hỏi Sếp', hint: 'Nhóm mới chờ Sếp chọn Lắng nghe im lặng hay Không nghe — chưa lưu tin nào cho tới khi Sếp chọn.' },
   { value: 'off', label: 'Không nghe', hint: 'Nhóm mới tự vào Không nghe: không lưu tin. Danh sách thành viên vẫn được ghi nhận.' },
 ];
-/** Máy chủ cũ không gửi `new_group_mode` ⇒ `undefined` (không hiện ô chỉnh); có gửi thì giá trị lạ coi như `ask`. */
+/** Máy chủ cũ không gửi `new_group_mode` ⇒ `undefined` (không hiện ô chỉnh); có gửi thì giá trị lạ coi như `silent` (mặc định). */
 export const newGroupModeOf = (c: Pick<Channel, 'new_group_mode'>): NewGroupMode | undefined =>
-  c.new_group_mode === undefined ? undefined : NEW_GROUP_MODES.some((m) => m.value === c.new_group_mode) ? c.new_group_mode : 'ask';
+  c.new_group_mode === undefined ? undefined : NEW_GROUP_MODES.some((m) => m.value === c.new_group_mode) ? c.new_group_mode : 'silent';
 
 export const VIEW_SCOPES: Array<{ value: ViewScope; label: string }> = [
   { value: 'owner', label: 'Chỉ Sếp' },

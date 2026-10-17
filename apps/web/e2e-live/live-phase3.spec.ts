@@ -6,7 +6,8 @@ import { createHash } from 'node:crypto';
  * Giai đoạn 5.3 — luồng 4–8 của docs/handoff/07-acceptance.md, TIẾP NỐI live-phase2.spec.ts trên CÙNG một
  * phiên api/worker/CSDL thật (`run.sh` chạy `live-phase2 live-phase3` trong một lệnh `playwright test`,
  * `workers: 1` nên hai tệp chạy tuần tự — không dựng lại thiết lập từ đầu). Owner/PIN, tổ chức, kênh Zalo,
- * nhóm "Chợ thép sỉ miền Nam" (g-si, nghe "silent") và các tin nhắn ở live-phase2 đã có sẵn khi test này chạy.
+ * nhóm "Chợ thép sỉ miền Nam" (g-si, nghe "tagged_only" — nhóm "silent" không bao giờ trả lời) và các tin nhắn ở
+ * live-phase2 đã có sẵn khi test này chạy.
  */
 const OUT = process.env.LIVE_OUT ?? '../test-results/live-shots';
 const PIN = '246810';

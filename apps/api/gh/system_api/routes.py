@@ -30,6 +30,7 @@ from gh.data.common import (
     DIRECT_MODES,
     LISTENING_MODES,
     NEW_GROUP_MODES,
+    NEW_SILENT_KEY,
     direct_mode,
     iso,
     new_group_mode,
@@ -134,12 +135,21 @@ async def channel_card(db: AsyncSession, redis: Any, org_id: uuid.UUID, type_: s
             "bridge_online": bool(await redis.get("gh:bridge:heartbeat")) if type_ in QR_CHANNELS else None,
             # v0.1.65: tin 1-1 ba mức (off | silent | reply), mặc định silent; `listen_direct` cho web cũ (khác off).
             "direct_mode": dmode, "listen_direct": dmode != "off",
-            # F1d: nhóm MỚI sau này (ask | silent | off, mặc định ask); `new_group_asked` = Sếp đã chọn ở hộp hỏi
-            # hoặc thẻ kênh kể từ lần nối kênh gần nhất (false ⇒ hộp hỏi bật sẵn ô «Áp dụng cho các nhóm mới sau này»).
+            # F1d: nhóm MỚI sau này (ask | silent | off, MẶC ĐỊNH silent theo QD 17/10); `new_group_asked` = Sếp đã
+            # chọn ở hộp hỏi hoặc thẻ kênh kể từ lần nối kênh gần nhất (chỉ còn để tương thích — ô «Áp dụng cho các
+            # nhóm mới sau này» không còn bật sẵn). `new_groups_silent` = số nhóm mới tự vào Lắng nghe im lặng mà Sếp
+            # chưa bấm «Đã biết».
             "new_group_mode": new_group_mode(settings, type_),
             "new_group_asked": _asked(settings, type_),
+            "new_groups_silent": _count(settings, NEW_SILENT_KEY, type_),
             "stats": {"msgs_24h": counts.msgs, "tagged_24h": counts.tagged, "latency_ms": meta.get("latency_ms"),
                       "uptime_pct": await uptime_pct(redis, type_, first_up) if first_up is not None else None}}
+
+
+def _count(settings: dict[str, Any], key: str, type_: str) -> int:
+    block = settings.get(key)
+    v = block.get(type_) if isinstance(block, dict) else None
+    return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else 0
 
 
 def _asked(settings: dict[str, Any], type_: str) -> bool:
@@ -271,8 +281,9 @@ async def channel_logout(type_: str, request: Request, user: service.CurrentUser
 
 class ChannelPatch(BaseModel):
     """Tin riêng 1-1 của kênh: `direct_mode` (off | silent | reply). `listen_direct` là khoá cũ của web ≤ 0.1.64:
-    true ⇒ reply (như trước: agent trực được trả lời), false ⇒ off. F1d: `new_group_mode` (ask | silent | off) = chế độ
-    cho nhóm MỚI phát hiện sau này (không đổi nhóm đã có). Đổi gì cũng cần mã PIN (`policy.change`)."""
+    true ⇒ reply (như trước: agent trực được trả lời), false ⇒ off. F1d: `new_group_mode` (ask | silent | off; mặc định
+    silent — QD 17/10) = chế độ cho nhóm MỚI phát hiện sau này (không đổi nhóm đã có). Đổi gì cũng cần mã PIN
+    (`policy.change`)."""
 
     listen_direct: bool | None = None
     direct_mode: Literal["off", "silent", "reply"] | None = None
@@ -364,6 +375,16 @@ async def channel_groups_refresh(type_: str, request: Request, user: service.Cur
     return {"session_id": str(sid), "requested": True}
 
 
+@router.post("/channels/{type_}/groups/seen")
+async def channel_groups_seen(type_: str, request: Request, user: service.CurrentUser = Depends(MANAGE),
+                              db: AsyncSession = DB) -> dict[str, Any]:
+    """QD 17/10: Sếp bấm «Đã biết» ở khối «N nhóm mới đã vào Lắng nghe im lặng» ⇒ đặt lại bộ đếm của kênh về 0.
+    Không đổi chế độ nhóm nào, không đổi quyền truy cập nên không đòi PIN. Trả thẻ kênh."""
+    await _qr_channel(db, user.org_id, type_)
+    await set_channel_setting(db, user.org_id, NEW_SILENT_KEY, type_, 0)
+    return await channel_card(db, request.app.state.redis, user.org_id, type_)
+
+
 class GroupModeIn(BaseModel):
     mode: Literal["off", "tagged_only", "silent", "proactive", "paused"]
     # F1d — ô «Áp dụng cho các nhóm mới sau này» của hộp hỏi: chỉ với Im lặng / Không nghe, lưu `new_group_mode`
@@ -409,8 +430,8 @@ async def update_group(db: AsyncSession, redis: Any, user: service.CurrentUser, 
         raise not_found("Nhóm")
     changes = {k: v for k, v in body.model_dump().items() if v is not None and getattr(cur, k) != v}
     if changes.get("listen_mode") == "pending":
-        raise field_errors({"listen_mode": "Không đặt lại nhóm về «Chờ Sếp chọn» — hãy chọn Im lặng, Không nghe "
-                                           "hoặc chế độ khác"})
+        raise field_errors({"listen_mode": "Không đặt lại nhóm về «Chờ Sếp chọn» — hãy chọn Lắng nghe im lặng, "
+                                           "Không nghe hoặc chế độ khác"})
     if changes:
         sets = ", ".join(f"{k} = :{k}" for k in changes)
         await db.execute(text(f"UPDATE core.groups SET {sets} WHERE id = :i"), {**changes, "i": gid})  # noqa: S608

@@ -111,10 +111,6 @@
       "apps/web/src/screens/system/JevCard.tsx": 3,
       "packages/contracts/src/genTargets.ts": 2
     },
-    "nghe-im-lang": {
-      "apps/api/gh/biz/duty/engine.py": 2,
-      "apps/web/src/setup/steps.ts": 1
-    },
     "nhap-pin": {
       "apps/api/gh/auth/account.py": 1,
       "apps/api/gh/gen/registry.json": 2,
