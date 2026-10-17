@@ -44,6 +44,7 @@ PURPOSE = "gen.telegram"
 CONSOLE_BUTTON = "Mở Console để Xác nhận"
 MAX_PROPOSALS = 2
 MAX_LIST = 8
+CONTEXT_MAX = 6000  # tổng độ dài (đã bọc) của dữ liệu đọc đưa vào model cho câu hỏi tự do
 
 Button = tuple[str, str]  # (chữ nút, URL) — chỉ nút link
 Reply = tuple[str, list[Button]]
@@ -231,7 +232,9 @@ async def _read_context(ctx: Context) -> str:
         data["su_co"] = [str(i.get("title")) for i in (await _issues(ctx))[:MAX_LIST]]
     except Exception:  # noqa: BLE001
         log.warning("Telegram: không đọc được việc/sự cố cho câu hỏi tự do", exc_info=True)
-    return wrap_untrusted("telegram.context", str(mask_for_model(data)))[:6000]
+    # Cắt THÂN trước rồi mới bọc — cắt cả chuỗi đã bọc sẽ mất dấu đóng, dữ liệu tràn ra ngoài khung "không tin cậy".
+    room = CONTEXT_MAX - len(wrap_untrusted("telegram.context", ""))
+    return wrap_untrusted("telegram.context", str(mask_for_model(data))[:room])
 
 
 def _ask_prompt(addr: str, context: str, now_text: str) -> str:

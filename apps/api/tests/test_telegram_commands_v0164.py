@@ -19,7 +19,7 @@ from sqlalchemy import text
 from gh import health
 from gh.db import admin_sessionmaker, sessionmaker
 from gh.gen import briefing, proposals
-from gh.gen.engine import UNTRUSTED_OPEN
+from gh.gen.engine import UNTRUSTED_CLOSE, UNTRUSTED_OPEN
 from gh.providers.clients import Message
 from gh.providers.router import ModelUnavailable, Routed
 from gh.telegram import commands, inbound, poller
@@ -190,6 +190,24 @@ async def test_free_question_read_only_masked_and_wrapped(
     assert PHONE not in system and "lan@khach.vn" not in system  # ĐÃ CHE trước khi vào model
     assert "không có công cụ" in system and "KHÔNG bao giờ xin mã PIN" in system
     assert call["messages"][1].content == "hôm nay có khách nào nóng không?"
+
+
+async def test_read_context_keeps_untrusted_closing_marker_when_data_is_long(
+    owner_api: Api, bot: FakeBot, redis: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P3 review v0.1.64: cắt cả chuỗi đã bọc làm mất dấu đóng ⇒ dữ liệu tràn ra ngoài khung "không tin cậy"."""
+
+    async def fake_collect(db: Any, org: Any, slot: Any, now: Any) -> list[dict[str, Any]]:
+        return [
+            {"key": f"k{i}", "title": f"Mục {i}", "count": 1, "lines": ["khách hỏi giá " * 60] * 5} for i in range(10)
+        ]
+
+    monkeypatch.setattr(briefing, "collect", fake_collect)
+    ctx = await ctx_for(owner_api, bot, redis)
+    out = await commands._read_context(ctx)
+    assert len(out) <= 6000
+    assert out.startswith("[kết quả telegram.context]") and UNTRUSTED_OPEN in out
+    assert out.endswith(UNTRUSTED_CLOSE)  # dấu đóng còn nguyên dù thân bị cắt
 
 
 async def test_free_question_model_unavailable_is_friendly(owner_api: Api, bot: FakeBot, redis: Any) -> None:
