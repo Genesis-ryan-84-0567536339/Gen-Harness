@@ -28,20 +28,20 @@ Antigravity bị hộp riêng chặn vì hộp chưa chạy).
 Khi nhiều nguồn cùng hỏng, báo lý do GẦN dùng được nhất (ít việc phải làm nhất): box_down < no_model < error <
 cli_expired < no_key < disabled < no_source — để Sếp thấy bước sửa ngắn nhất.
 
-─── hộp riêng Antigravity (`box_down`) — điểm nối cho gói H2 ───────────────────────────────────────────────────────
-H2 (placement) đặt luật "vai ngoại giao chỉ chạy agy trong hộp riêng; hộp tắt thì KHÔNG rơi về agy trong tiến trình". B2
-chỉ cần biết hai điều qua `BoxGate`:
-    required(role, agent_key) -> bool        vai này có BẮT BUỘC chạy agy qua hộp không (H2: `placement.box_required`)
-    await state() -> str                      "ok" | "down" | "not_installed"  (H1:
-    `agybox.client.box_status()["state"]`)
-Mặc định `SoftBoxGate` import MỀM `gh.providers.placement.box_required` và `gh.agybox.client.box_status`: chưa có
-`placement` (H2 chưa gộp) ⇒ không vai nào bắt buộc hộp ⇒ không bao giờ `box_down`. Có `placement` mà thiếu `agybox` thì
-coi hộp "not_installed" (đóng an toàn, đúng ý H2). Test / H2 muốn tiêm riêng: truyền `box=` (kwarg) vào ba
-hàm trên, hoặc
-`set_box_gate(gate)` cho cả tiến trình. Chỉ nguồn Antigravity CLI bị hộp chặn; nguồn khác không bao giờ.
+─── hộp riêng Antigravity (`box_down`) — nối với chính sách CUỐI của H2 ───────────────────────────────────────────
+Chỗ chạy agy theo vai nằm ở `gh.providers.placement` (luật thuần), quyết định cuối ở `agy_policy.decide` — cùng điểm
+mà bộ định tuyến dùng. Readiness hỏi `BoxGate`:
+    required(role, agent_key, *, owner=True, purpose=None) -> bool
+        vai này có BẮT BUỘC chạy agy qua hộp không (đúng chữ ký `placement.box_required`)
+    await state() -> str      "ok" | "down" | "not_installed"   (`agybox.client.box_status()["state"]`)
+Mặc định `SoftBoxGate` gọi thẳng hai hàm đó. Vai bắt buộc hộp mà hộp không `ok` ⇒ nguồn Antigravity bị chặn bằng
+`agy_policy.decide(..., box=state)` (lý do tiếng Việt của `decide`, mã `box_down`; "chưa cài" cũng là `box_down` nhưng
+câu nói đúng là chưa cài); vai không cần hộp ⇒ không bao giờ bị hộp chặn — nên kết luận ở đây LUÔN khớp với việc bộ
+định tuyến sẽ làm. `agent:<id>` ngoại giao được tra từ DB (`agy_policy.diplomatic_agent_ids`) rồi truyền cho cổng bằng
+`placement.AgentRef`. Test muốn tiêm riêng: truyền `box=` (kwarg) vào ba hàm trên, hoặc `set_box_gate(gate)` cho cả
+tiến trình. Chỉ nguồn Antigravity CLI bị hộp chặn; nguồn khác không bao giờ.
 """
 
-import importlib
 import logging
 import uuid
 from collections.abc import Callable
@@ -51,7 +51,7 @@ from typing import Any, Protocol
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gh.providers import agy_policy
+from gh.providers import agy_policy, placement
 
 log = logging.getLogger("gh.providers.readiness")
 
@@ -86,40 +86,27 @@ REASON_BOX_DOWN = ("Hộp riêng Antigravity chưa chạy — nguồn Google (An
 
 
 class BoxGate(Protocol):
-    """Giao diện hộp riêng Antigravity cho H2 / test (xem docstring module)."""
+    """Giao diện hộp riêng Antigravity cho readiness / test (xem docstring module)."""
 
-    def required(self, role: str | None, agent_key: str | None) -> bool: ...
+    def required(self, role: str | None, agent_key: Any, *, owner: bool = True, purpose: str | None = None) -> bool: ...
 
     async def state(self) -> str: ...
 
 
 class SoftBoxGate:
-    """Mặc định: import MỀM `placement` (H2) và `agybox.client` (H1) — thiếu thì coi như không bắt buộc hộp."""
+    """Mặc định: luật thật — `placement.box_required` và `agybox.client.box_status` (lỗi ⇒ đóng an toàn)."""
 
-    def required(self, role: str | None, agent_key: str | None) -> bool:
-        try:
-            placement = importlib.import_module("gh.providers.placement")
-        except ImportError:
-            return False
-        fn = getattr(placement, "box_required", None)
-        if fn is None:
+    def required(self, role: str | None, agent_key: Any, *, owner: bool = True, purpose: str | None = None) -> bool:
+        if role is None:                                 # khoá lạ không có hồ sơ: không có lý do để bắt buộc hộp
             return False
         try:
-            return bool(fn(role, agent_key))
+            return placement.box_required(role, agent_key, owner=owner, purpose=purpose)
         except Exception:  # noqa: BLE001 — hỏi hộp là phần thêm; lỗi không được làm sập câu trả lời "dùng được không"
             log.warning("placement.box_required lỗi (%s) — coi như không bắt buộc hộp", role, exc_info=True)
             return False
 
     async def state(self) -> str:
-        try:
-            agybox = importlib.import_module("gh.agybox.client")
-        except ImportError:
-            return "not_installed"
-        try:
-            return str((await agybox.box_status()).get("state") or "down")
-        except Exception:  # noqa: BLE001
-            log.warning("agybox.box_status lỗi — coi như hộp không chạy", exc_info=True)
-            return "down"
+        return await agy_policy.current_box_state()
 
 
 _box_gate: BoxGate = SoftBoxGate()
@@ -181,12 +168,16 @@ async def source_states(db: AsyncSession, org_id: uuid.UUID, role: str | None = 
         models.setdefault(m.provider_id, []).append(m)
 
     gate = box or _box_gate
-    verdict = await agy_policy.verdict_for(db, org_id, role, owner=owner) if role else agy_policy.ALLOWED
+    verdict = agy_policy.ALLOWED                 # chính sách CUỐI cho nguồn Antigravity (agy_policy.decide)
+    if role:
+        aid = agy_policy.agent_id_of(role)
+        dip = aid is not None and aid in await agy_policy.diplomatic_agent_ids(db, org_id, only=aid)
+        ref: Any = placement.AgentRef(diplomatic=dip) if aid is not None else role
+        if any(p.kind == KIND_AGY for p in provs) and gate.required(profiles.role_of(role), ref, owner=owner):
+            verdict = agy_policy.decide(role, owner=owner, diplomatic=dip, box=await gate.state())
     bg = bool(role) and profiles.role_background(role or "")
     bg_cli = await router.background_cli_allowed(db, org_id) if bg else set()
-    box_down = False
-    if role and any(p.kind == KIND_AGY for p in provs) and gate.required(profiles.role_of(role), role):
-        box_down = (await gate.state()) != "ok"
+    box_blocked = not verdict.allowed and verdict.code in (agy_policy.CODE_BOX_DOWN, agy_policy.CODE_BOX_NOT_INSTALLED)
 
     out: list[dict[str, Any]] = []
     for p in provs:
@@ -196,7 +187,7 @@ async def source_states(db: AsyncSession, org_id: uuid.UUID, role: str | None = 
         policy_reason: str | None = None
         if not p.is_enabled:
             blocker = DISABLED
-        elif p.kind == KIND_AGY and not verdict.allowed:
+        elif p.kind == KIND_AGY and not verdict.allowed and not box_blocked:
             blocker, policy_reason = POLICY, verdict.reason
         elif p.kind == KIND_CLAUDE and bg and p.kind not in bg_cli:
             blocker, policy_reason = POLICY, router.BACKGROUND_CLI_REASON
@@ -208,8 +199,8 @@ async def source_states(db: AsyncSession, org_id: uuid.UUID, role: str | None = 
             blocker = ERROR      # nguồn CLI: lượt gọi thật tự đưa `auth_state` về 'ok' nên 'error' là sự thật hiện tại
         elif not ms:
             blocker = NO_MODEL
-        elif p.kind == KIND_AGY and box_down:
-            blocker = BOX_DOWN
+        elif p.kind == KIND_AGY and box_blocked:
+            blocker, policy_reason = BOX_DOWN, verdict.reason
         # NO_MODEL chỉ chữa được bằng gọi thử khi là nguồn CLI (tự lưu model chạy được); nguồn khoá API thiếu model thì
         # phải chọn model, gọi thử không sửa gì.
         probe_ok = blocker in (None, ERROR) or (blocker == NO_MODEL and cli)
@@ -234,7 +225,7 @@ def _reason_vi(code: str, s: dict[str, Any] | None) -> str:
     if code == DISABLED:
         return REASON_DISABLED
     if code == BOX_DOWN:
-        return REASON_BOX_DOWN
+        return (s or {}).get("policy_reason") or REASON_BOX_DOWN
     assert s is not None
     label = CLI_LABEL.get(s["kind"], "")
     name = s["name"]
@@ -289,10 +280,10 @@ async def ai_ready(db: AsyncSession, org_id: uuid.UUID, role: str = READY_ROLE, 
 class FakeBox:
     """Cổng hộp giả cho test / dev: `FakeBox(required=True, state="down")`."""
 
-    def __init__(self, required: bool | Callable[[str | None, str | None], bool] = True, state: str = "ok") -> None:
+    def __init__(self, required: bool | Callable[[str | None, Any], bool] = True, state: str = "ok") -> None:
         self._required, self._state = required, state
 
-    def required(self, role: str | None, agent_key: str | None) -> bool:
+    def required(self, role: str | None, agent_key: Any, *, owner: bool = True, purpose: str | None = None) -> bool:
         return self._required(role, agent_key) if callable(self._required) else bool(self._required)
 
     async def state(self) -> str:

@@ -13,8 +13,6 @@ AI" xanh khi nguồn
 - F035: nút Kiểm tra không chỉ thử nguồn sẵn sàng ĐẦU TIÊN: nguồn đầu hỏng mà nguồn sau chạy được thì vẫn Đạt.
 """
 
-import sys
-import types
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -30,7 +28,9 @@ from gh.providers.readiness import FakeBox
 from gh.providers.router import KEY_AAD
 from tests.conftest import Api
 from tests.phase2 import org_id
+from tests.test_agy_phan_lop import _channel
 from tests.test_cli_models_v0131 import _login, _provider, clis  # noqa: F401 — fixture dùng chung
+from tests.test_p4_agents import _seed_agent
 
 AGY = "antigravity_cli"
 CLAUDE = "claude_code_cli"
@@ -224,24 +224,33 @@ async def test_ai_ready_never_raises(db: Any, monkeypatch: pytest.MonkeyPatch) -
 
 # ─── L1: vai (agy_policy + việc nền) ────────────────────────────────────────────────────────────────────────────
 
-async def test_core_reply_never_uses_agy(db: Any) -> None:
+async def test_core_reply_uses_agy_only_through_the_box(db: Any) -> None:
+    """H2: `core.reply` (soạn lại / dịch nháp tin khách) chạy agy QUA HỘP; hộp chưa cài / tắt ⇒ không có agy (không rơi
+    về trong tiến trình), hộp chạy ⇒ có."""
     org = await org_id(db)
     await _src(db, AGY, key=False, rank=1, models=("gemini-3.8-flash",))
     assert (await readiness.ai_ready(db, org, "core.gen"))["ok"] is True
-    assert await readiness.usable_sources(db, org, "core.reply") == []
-    r = await readiness.ai_ready(db, org, "core.reply")
-    _shape(r)
-    assert r["ok"] is False and r["reason_code"] == "no_source" and "Antigravity" in r["reason_vi"]
+    for state in ("not_installed", "down"):
+        gate = FakeBox(required=True, state=state)
+        assert await readiness.usable_sources(db, org, "core.reply", box=gate) == []
+        r = await readiness.ai_ready(db, org, "core.reply", box=gate)
+        _shape(r)
+        assert r["ok"] is False and r["reason_code"] == "box_down" and "Antigravity" in r["reason_vi"]
+    assert len(await readiness.usable_sources(db, org, "core.reply", box=FakeBox(required=True, state="ok"))) == 1
     api = await _src(db, "gemini", rank=2)
-    assert [s["provider_id"] for s in await readiness.usable_sources(db, org, "core.reply")] == [str(api)]
+    assert [s["provider_id"] for s in await readiness.usable_sources(
+        db, org, "core.reply", box=FakeBox(required=True, state="down"))] == [str(api)]
     assert len(await readiness.usable_sources(db, org)) == 2          # role=None: không lọc theo vai
 
 
-async def test_staff_gen_does_not_use_agy(db: Any) -> None:
+async def test_staff_gen_uses_agy_only_through_the_box(db: Any) -> None:
     org = await org_id(db)
     await _src(db, AGY, key=False, models=("gemini-3.8-flash",))
-    assert await readiness.usable_sources(db, org, "core.gen", owner=False) == []
+    down = FakeBox(required=True, state="down")
+    assert await readiness.usable_sources(db, org, "core.gen", owner=False, box=down) == []
     assert len(await readiness.usable_sources(db, org, "core.gen", owner=True)) == 1
+    assert len(await readiness.usable_sources(db, org, "core.gen", owner=False,
+                                              box=FakeBox(required=True, state="ok"))) == 1
 
 
 async def test_background_roles_skip_claude_cli_until_owner_allows(db: Any) -> None:
@@ -292,33 +301,59 @@ async def test_box_gate_receives_role_and_agent_key(db: Any) -> None:
     assert seen == [("core.refinery", "core.refinery")]
 
 
-async def test_default_gate_is_soft_import_of_placement_and_agybox(db: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Không tiêm gì: chưa có `gh.providers.placement` (H2) ⇒ không bao giờ box_down; có thì theo `box_required` +
-    `agybox.client.box_status` (import mềm)."""
+async def test_default_gate_follows_final_policy_and_box_state(db: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Không tiêm gì: cổng mặc định = `placement.box_required` + `agybox.client.box_status` ⇒ kết luận của readiness
+    khớp chính sách cuối của H2 (`agy_policy`): vai ngoài (core.refinery / core.reply / Gen nhân viên) cần hộp `ok`,
+    vai core (Gen của Sếp) không bao giờ bị hộp chặn."""
+    from gh.agybox import client as box_client
+    from gh.providers import agy_policy
+
     org = await org_id(db)
     await _src(db, AGY, key=False, models=("gemini-3.8-flash",))
-    monkeypatch.setitem(sys.modules, "gh.providers.placement", None)       # None ⇒ import lỗi như chưa có module
-    assert (await readiness.ai_ready(db, org, "core.refinery"))["ok"] is True
-
-    placement = types.ModuleType("gh.providers.placement")
-    placement.box_required = lambda role, agent=None: role == "core.refinery"  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "gh.providers.placement", placement)
-    pkg = types.ModuleType("gh.agybox")
-    pkg.__path__ = []  # type: ignore[attr-defined]
-    client = types.ModuleType("gh.agybox.client")
-    state = {"v": "down"}
+    state = {"v": "not_installed"}
 
     async def box_status(*_a: Any, **_k: Any) -> dict[str, Any]:
         return {"state": state["v"]}
 
-    client.box_status = box_status  # type: ignore[attr-defined]
-    pkg.client = client  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "gh.agybox", pkg)
-    monkeypatch.setitem(sys.modules, "gh.agybox.client", client)
-    assert (await readiness.ai_ready(db, org, "core.refinery"))["reason_code"] == "box_down"
-    assert (await readiness.ai_ready(db, org, "core.gen"))["ok"] is True       # core.gen không cần hộp
+    monkeypatch.setattr(box_client, "box_status", box_status)
+    r = await readiness.ai_ready(db, org, "core.refinery")
+    assert (r["ok"], r["reason_code"]) == (False, "box_down")
+    assert r["reason_vi"] == agy_policy.REASON_BOX_NOT_INSTALLED               # nói đúng "chưa cài"
+    state["v"] = "down"
+    r = await readiness.ai_ready(db, org, "core.refinery")
+    assert (r["ok"], r["reason_code"], r["reason_vi"]) == (False, "box_down", agy_policy.REASON_BOX_DOWN)
+    assert (await readiness.ai_ready(db, org, "core.reply"))["reason_code"] == "box_down"
+    assert (await readiness.ai_ready(db, org, "core.gen", owner=False))["reason_code"] == "box_down"   # Gen nhân viên
+    assert (await readiness.ai_ready(db, org, "core.gen"))["ok"] is True       # Gen của Sếp: trong tiến trình
+    assert (await readiness.ai_ready(db, org, "core.briefing"))["ok"] is True
     state["v"] = "ok"
-    assert (await readiness.ai_ready(db, org, "core.refinery"))["ok"] is True
+    for role, owner in (("core.refinery", True), ("core.reply", True), ("core.gen", False), ("core.gen", True)):
+        assert (await readiness.ai_ready(db, org, role, owner=owner))["ok"] is True, (role, owner)
+
+
+async def test_readiness_agrees_with_router_for_diplomatic_agent(db: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Agent ngoại giao (gắn kênh) cần hộp, agent nội bộ thì không — readiness tra DB như `agy_policy.verdict_for`."""
+    from gh.agybox import client as box_client
+    from gh.providers import agy_policy
+
+    org = await org_id(db)
+    await _src(db, AGY, key=False, models=("gemini-3.8-flash",))
+
+    async def down(*_a: Any, **_k: Any) -> dict[str, Any]:
+        return {"state": "down"}
+
+    monkeypatch.setattr(box_client, "box_status", down)
+    inner = await _seed_agent(db, org)
+    dip = await _seed_agent(db, org)
+    ch = await _channel(db, org)
+    await db.execute(text("INSERT INTO agent.channel_scopes (agent_id, channel_id, group_id) VALUES (:a, :c, NULL)"),
+                     {"a": dip, "c": ch})
+    await db.commit()
+    for aid, want in ((inner, True), (dip, False)):      # hộp tắt: nội bộ vẫn dùng agy, ngoại giao thì không
+        v = await agy_policy.verdict_for(db, org, f"agent:{aid}")
+        r = await readiness.ai_ready(db, org, f"agent:{aid}")
+        assert r["ok"] is v.allowed is want, (aid, r, v)
+        assert want or r["reason_code"] == "box_down"
 
 
 # ─── F002: Kiểm tra nguồn AI ở Việc Sếp cần làm lưu model cho nguồn CLI gọi thử xanh ────────────────────────────────

@@ -83,7 +83,6 @@ class AgyVerdict:
     where: str = INPROC
 
 
-DENIED_UNTRUSTED_TEXT = AgyVerdict(False, CODE_UNTRUSTED_TEXT, REASON_UNTRUSTED_TEXT)
 ALLOWED = AgyVerdict()                                  # agy trong tiến trình
 ALLOWED_BOX = AgyVerdict(where=BOX)                     # agy qua hộp, hộp đang chạy
 DENIED_BOX_DOWN = AgyVerdict(False, CODE_BOX_DOWN, REASON_BOX_DOWN, BOX)
@@ -103,9 +102,10 @@ def decide(agent_key: str, *, owner: bool = True, diplomatic: bool = False, box:
     Vai trong tiến trình luôn `allowed`. Vai qua hộp: `allowed` đúng khi hộp `ok`; không thì lý do trung thực và KHÔNG
     bao giờ chuyển về chạy trong tiến trình. Khoá lạ (core.embedding…) tính là vai qua hộp (đóng an toàn) — chúng không
     dùng agy nên không ai thấy lý do này."""
-    if purpose in UNTRUSTED_TEXT_PURPOSES:
-        return DENIED_UNTRUSTED_TEXT
-    if placement.placement(agent_key, diplomatic, owner=owner, purpose=purpose) == INPROC:
+    where = placement.placement(agent_key, diplomatic, owner=owner, purpose=purpose)
+    if purpose in UNTRUSTED_TEXT_PURPOSES:               # không dùng agy ở đâu cả; `where` giữ theo luật vai
+        return AgyVerdict(False, CODE_UNTRUSTED_TEXT, REASON_UNTRUSTED_TEXT, where)
+    if where == INPROC:
         return ALLOWED
     if box == BOX_OK:
         return ALLOWED_BOX
@@ -156,7 +156,7 @@ async def verdict_for(db: AsyncSession, org_id: uuid.UUID, agent_key: str, *, ow
     """`decide` cho MỘT khoá, tự tra DB khi là `agent:<id>` và đọc trạng thái hộp khi vai chạy qua hộp (vai trong tiến
     trình không tốn truy vấn hay lượt kiểm hộp)."""
     if purpose in UNTRUSTED_TEXT_PURPOSES:
-        return DENIED_UNTRUSTED_TEXT
+        return decide(agent_key, owner=owner, purpose=purpose)
     aid = agent_id_of(agent_key)
     diplomatic = (aid is not None and purpose not in placement.BOX_PURPOSES
                   and aid in await diplomatic_agent_ids(db, org_id, only=aid))

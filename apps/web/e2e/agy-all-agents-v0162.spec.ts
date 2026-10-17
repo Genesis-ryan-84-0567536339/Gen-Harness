@@ -29,7 +29,7 @@ test.describe('v0.1.62 · Antigravity CLI dùng được cho mọi vai', () => {
 
     // Thẻ Antigravity CLI nói đúng phạm vi mới (cùng một câu với API) — v0.1.42 (F-61): thẻ chỉ ở Kết nối.
     await page.goto('/connections');
-    await expect(page.getByTestId('cli-card-antigravity_cli')).toContainText('Dùng được cho: Gen của Sếp, sàng lọc tin, Bản tin và agent nội bộ');
+    await expect(page.getByTestId('cli-card-antigravity_cli')).toContainText('Dùng được cho: Gen của Sếp, Bản tin và agent nội bộ (chạy trong hệ thống)');
     await expect(page.getByTestId('cli-card-antigravity_cli')).not.toContainText('Chỉ dùng cho Gen');
 
     await page.goto('/api');

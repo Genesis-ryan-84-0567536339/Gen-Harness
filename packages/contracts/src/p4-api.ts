@@ -86,7 +86,7 @@ export interface FailoverRule {
  * v0.1.41 (F-86, QD-12): `GET/PUT /providers/background` — "Nguồn AI cho việc nền" (sàng lọc tin, trực việc, Bản tin Gen;
  * purpose ∈ refinery/duty_decide/gen.briefing). Mặc định chỉ khoá API; Owner có thể cho Claude Code CLI chạy việc nền
  * (cảnh báo + xác nhận + PIN `ai.background_cli`). Antigravity CLI chạy được sàng lọc tin và Bản tin không cần cho phép
- * (v0.1.62); agent trực kênh (ngoại giao) chưa dùng agy (gói G).
+ * (v0.1.62); agent trực kênh (ngoại giao) và sàng lọc chạy agy QUA HỘP RIÊNG (v0.1.63, H2) — hộp chưa chạy thì dùng nguồn khác.
  */
 export interface BackgroundSource {
   provider_id: string;

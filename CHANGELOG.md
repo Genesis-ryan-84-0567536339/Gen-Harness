@@ -7,6 +7,13 @@ Ngày = ngày Release trên GitHub theo giờ Việt Nam; tiêu đề trong `doc
 (v0.1.32–v0.1.34, v0.1.40, v0.1.46) hoặc vài ngày (v0.1.47, v0.1.48: làm 03/10, phát hành 09/10).
 Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) ghi ở [ROADMAP › Bản phản ứng](docs/ROADMAP.md).
 
+## v0.1.63 — Hộp riêng Antigravity: mỗi vai một chỗ chạy, "nguồn AI dùng được" một hàm duy nhất (17/10/2026)
+- **Hộp riêng `agy-box`**: container chạy Antigravity không có khoá master, DB hay Redis (chỉ khoá ký `gh_agy_key` + volume token agy; không mạng `default`); `genh update` tự sinh khoá và dựng hộp, `genh doctor` + thẻ Sức khoẻ có dòng "Hộp riêng Antigravity".
+- **Mỗi vai một chỗ chạy**: Gen của Sếp, Bản tin, agent nội bộ chạy agy trong tiến trình; sàng lọc tin người lạ, Soạn lại / Dịch nháp, agent trực kênh (ngoại giao), Gen của nhân viên, lượt thử agent chạy qua hộp. Hộp tắt ⇒ dùng nguồn AI kế, không bao giờ rơi về agy trong tiến trình; "Thử quy tắc" vẫn không dùng agy.
+- **Một hàm "nguồn AI dùng được"** (`providers.readiness`): bước 4 thiết lập, dòng "nguồn AI" ở Việc Sếp cần làm và nút Kiểm tra cùng hỏi nó (đóng F002/F010/F014/F035), có lý do `box_down`.
+- **Cổng phát hành**: `check_agy_box_isolation.py` + E2E `e2e_agy_box.sh` (cài mới và nâng cấp) trước khi ra bản chính thức.
+- Chi tiết: [docs/releases/v0.1.63.md](docs/releases/v0.1.63.md)
+
 ## v0.1.62 — Đợt A phần 2, Antigravity phân lớp theo kiến trúc, kênh bền, sức khoẻ, dev cục bộ (17/10/2026)
 - **Xem hết & tìm ở máy chủ**: Hộp thư, Việc, Nhật ký (câu tiếng Việt, ẩn `http.*`), Khách & Nhóm (con trỏ `(created_at, id)`, gán BOT hàng loạt theo bộ lọc, xuất/ẩn danh hoá một người); lỗi sao lưu và 403 nói tiếng người; Cung–Cầu không ghép bừa; che OTP/mật khẩu (kể cả mẫu Việt Nam) trước khi gửi model.
 - **Antigravity phân lớp**: agy dùng cho lớp core/nội bộ (Gen của Sếp, Bản tin, sàng lọc, agent không gắn kênh); chưa dùng cho ngoại giao (`core.reply`, agent giao tiếp người ngoài) và Gen nhân viên — chờ hộp riêng v0.1.63; thêm `prctl` che môi trường của chính api/worker (chưa phải cô lập thật — `/run/secrets` và tiến trình con còn đọc được, hộp riêng ở v0.1.63), `pg_dump`/`pg_restore` chỉ nhận môi trường tối thiểu, timeout việc nền + khoá tệp token, ca canary đọc `/proc/1/environ` (dự kiến báo hở, không chặn phát hành).

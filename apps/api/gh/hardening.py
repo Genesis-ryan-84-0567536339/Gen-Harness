@@ -7,7 +7,9 @@ Antigravity CLI (`agy`) chạy cùng uid `gh` với api/worker (xem `gh.provider
 CAP_SYS_PTRACE. Cờ được con cháu `fork` thừa hưởng nhưng `execve` (vd chạy `agy`) đặt lại — agy vẫn chạy bình
 thường, chỉ tiến trình api/worker là không bị đọc.
 
-KHÔNG thay cho việc tách agy ra container riêng (hộp riêng, v0.1.63), chỉ thu hẹp mặt phơi bày. Phần CÒN HỞ (nói thật):
+KHÔNG thay cho cô lập thật: từ v0.1.63 việc có người ngoài chạy agy trong hộp riêng (`agy-box`), nhưng vai core
+(Gen của Sếp, Bản tin, agent nội bộ) vẫn chạy agy trong tiến trình api/worker (Nợ #45) nên phần dưới vẫn còn với các
+vai đó; đây chỉ thu hẹp mặt phơi bày. Phần CÒN HỞ (nói thật):
 - `/run/secrets/gh_*` đọc được bằng uid `gh` (quyền tệp theo uid) — agy cùng uid đọc được;
 - tiến trình con do api/worker sinh KHÔNG thừa hưởng cờ: `execve` đặt lại dumpable, nên HEALTHCHECK của api (15 giây)
   và của worker (`arq --check`, 30 giây) chạy bằng uid `gh` mang đủ biến môi trường (vd GH_ADMIN_DATABASE_URL) và

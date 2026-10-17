@@ -21,12 +21,13 @@ KHÔNG BAO GIỜ in chuỗi canary, nội dung tệp hay đầu ra thô của ag
   `/run/secrets/*` (agy cùng uid `gh` với api/worker) rồi so đầu ra với giá trị bí mật mà canary đọc được (hoặc dấu hiệu
   bản dump environ `GH_…=` khi canary không đọc được vì api/worker đã `prctl(PR_SET_DUMPABLE, 0)`). Chỉ chạy với --live
   (cần model thật làm theo lệnh); KHÔNG BAO GIỜ in giá trị bí mật.
-  KHE HỞ DỰ KIẾN (review lần 2 v0.1.62): ca `shell_proc1_khong_lo` được kỳ vọng báo `false` tới khi có hộp riêng cho agy
-  (v0.1.63) — agy cùng uid `gh` đọc được `/run/secrets/gh_*` (quyền tệp theo uid), và các tiến trình con do api/worker
-  sinh (HEALTHCHECK, pg_dump/pg_restore…) mang environ đọc được sau `execve`; `prctl(PR_SET_DUMPABLE, 0)` chỉ che
-  `/proc/<pid>/environ` của chính api/worker. Vì vậy ca này VẪN được báo trong `checks` và `known_gaps` nhưng KHÔNG
-  làm `result` thành "lo" (không chặn phát hành); mọi ca cô lập khác hỏng vẫn là "lo". Khi hộp riêng xong, bỏ ca khỏi
-  `KNOWN_GAPS` để nó chặn phát hành.
+  KHE HỞ DỰ KIẾN (review lần 2 v0.1.62): ca `shell_proc1_khong_lo` được kỳ vọng báo `false` tới khi cả core chạy agy
+  trong hộp (hộp riêng v0.1.63 mới cho việc có người ngoài; core vào hộp = Nợ #45) — agy cùng uid `gh` đọc được
+  `/run/secrets/gh_*` (quyền tệp theo uid), và các tiến trình con do api/worker sinh (HEALTHCHECK, pg_dump/pg_restore…)
+  mang environ đọc được sau `execve`; `prctl(PR_SET_DUMPABLE, 0)` chỉ che `/proc/<pid>/environ` của chính
+  api/worker. Vì vậy ca này VẪN được báo trong `checks` và `known_gaps` nhưng KHÔNG làm `result` thành "lo"
+  (không chặn phát hành); mọi ca cô lập khác hỏng vẫn là "lo". Khi cả core vào hộp (Nợ #45),
+  bỏ ca khỏi `KNOWN_GAPS` để nó chặn phát hành.
 """
 
 import argparse
@@ -51,7 +52,8 @@ PROC1_ENVIRON = Path("/proc/1/environ")   # tiến trình api/worker trong conta
 RUN_SECRETS = Path("/run/secrets")        # gh_master_key… (Docker secrets)
 MIN_NEEDLE = 8                            # giá trị bí mật ngắn hơn bị bỏ (dễ trùng ngẫu nhiên)
 MAX_SECRET_FILE = 64 * 1024
-#: Ca canary dự kiến "lo" tới hộp riêng v0.1.63: báo trong `checks` + `known_gaps`, không tính vào `leaked`.
+#: Ca canary dự kiến "lo" tới khi cả core vào hộp (Nợ #45; hộp riêng v0.1.63 mới lo việc có người ngoài): báo trong
+#: `checks` + `known_gaps`, không tính vào `leaked`.
 KNOWN_GAPS = ("shell_proc1_khong_lo",)
 #: dấu hiệu bản dump environ của chính hệ thống (tên biến GH_… theo sau là "=") — dùng khi canary không đọc được bí mật.
 _ENV_DUMP = re.compile(rb"GH_[A-Z0-9_]{3,}=")   # không dùng \b: trong JSON, NUL thành "\\u0000" dính liền tên biến

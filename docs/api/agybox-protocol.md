@@ -80,5 +80,6 @@ st = await box_status()          # cache 10 giây; không tham số = đọc GH_
   `HTTPS_PROXY` — thấy CONNECT tới `antigravity-unleash.goog:443` và `play.googleapis.com:443` (hai tên miền chưa có trong danh sách đoán ban đầu). Chưa
   đo được đường gọi model/OAuth thật (cần đăng nhập thật nên chưa làm), vì vậy chưa dựng proxy allowlist: làm khi có phiên đăng nhập để ghi đủ tên miền.
 - Làm mới token đồng thời giữa agy trong api (đăng nhập, lượt inproc của core) và agy trong hộp dùng chung volume `agy_state`: khoá `flock`
-  trên `antigravity-oauth-token.lock` thuộc gói G/H4 (không nằm ở H1).
+  quanh làm mới/ghi tệp token đã có từ v0.1.62 (`AgyClient.generate` → `token_flock_async`, hộp dùng chính `AgyClient`) nên cùng tệp khoá trong volume; đăng nhập chạy ở api chứ không trong hộp.
+  Định dạng trường hạn của tệp token agy thật chưa xác minh (ROADMAP Nợ #46).
 - Cổng nội bộ 8090 không publish ra máy chủ; `agy-bus` là mạng `internal`.

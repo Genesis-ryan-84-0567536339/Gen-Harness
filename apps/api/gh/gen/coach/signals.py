@@ -408,7 +408,7 @@ async def _src_followup(db: AsyncSession, redis: Any, org: uuid.UUID) -> dict[st
     state: dict[str, bool] = {}
     for it in await follow_up_status(db, row):
         n = it.get("n")
-        if n == 4:    # bước 4 "Bộ não AI": cùng điều kiện với NoModelBanner (FOLLOW_UP_SQL[4])
+        if n == 4:    # bước 4 "Bộ não AI": `follow_up_status` lấy `readiness.ai_ready` (nguồn AI dùng được)
             state["model.bound"] = bool(it.get("done"))
         elif n in FOLLOWUP_NS:
             state[f"followup.{n}.done"] = bool(it.get("done"))

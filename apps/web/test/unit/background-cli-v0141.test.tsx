@@ -153,7 +153,7 @@ describe('<BackgroundSourcesCard> Nguồn AI cho việc nền', () => {
     expect(within(panel).getByTestId('bg-src-p-agy')).toHaveTextContent('Dùng cho việc nền');
     expect(within(panel).getByTestId('bg-src-p-agy')).not.toHaveTextContent('chỉ dùng khi Sếp hỏi Gen');
     expect(within(panel).getByTestId('bg-src-p-cc')).toHaveTextContent('Không dùng');
-    expect(within(panel).getByTestId('bg-src-agy-note')).toHaveTextContent('Antigravity CLI chạy được sàng lọc tin và Bản tin, không cần Sếp cho phép');
+    expect(within(panel).getByTestId('bg-src-agy-note')).toHaveTextContent('Antigravity CLI chạy được Bản tin (trong hệ thống) và sàng lọc tin người lạ (qua hộp riêng), không cần Sếp cho phép');
     const switches = within(panel).getAllByRole('switch');
     expect(switches).toHaveLength(1);
     expect(switches[0]).toHaveAccessibleName('Cho Claude Code CLI chạy việc nền');
