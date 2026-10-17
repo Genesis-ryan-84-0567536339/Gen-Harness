@@ -198,9 +198,11 @@ function NotificationPanel({ onClose }: { onClose: (refocus: boolean) => void })
   };
 
   const unread = q.data?.unread ?? 0;
-  const shown = (expanded ? all.data?.items : undefined) ?? q.data?.items ?? [];
+  // Đã mở "Xem thêm": gộp các trang đã tải (offset có thể lệch khi có thông báo mới ⇒ bỏ trùng theo id).
+  const loaded = expanded && all.data ? [...new Map(all.data.pages.flatMap((p) => p.items).map((n) => [n.id, n])).values()] : null;
+  const shown = loaded ?? q.data?.items ?? [];
   const total = q.data?.total ?? shown.length;
-  const hasMore = !expanded && total > shown.length;
+  const hasMore = expanded ? all.hasNextPage && !all.isFetchingNextPage : total > shown.length;
   return (
     <div className="nt-panel" role="dialog" aria-label="Thông báo" tabIndex={-1} ref={panel} onKeyDown={onKeyDown}>
       <div className="nt-head">
@@ -267,11 +269,11 @@ function NotificationPanel({ onClose }: { onClose: (refocus: boolean) => void })
           </ul>
         )}
         {hasMore ? (
-          <button type="button" className="nt-more" onClick={() => setExpanded(true)}>
-            Xem thêm ({total - shown.length})
+          <button type="button" className="nt-more" onClick={() => (expanded ? void all.fetchNextPage() : setExpanded(true))}>
+            Xem thêm ({Math.max(0, total - shown.length)})
           </button>
         ) : null}
-        {expanded && all.isPending ? (
+        {expanded && (all.isPending || all.isFetchingNextPage) ? (
           <div className="nt-state" aria-busy="true" aria-label="Đang tải thêm thông báo">
             <Skeleton width="80%" height={9} />
           </div>
@@ -279,7 +281,7 @@ function NotificationPanel({ onClose }: { onClose: (refocus: boolean) => void })
         {expanded && all.isError ? (
           <div className="nt-state">
             Không tải được thêm thông báo.{' '}
-            <button type="button" className="nt-link" onClick={() => void all.refetch()}>
+            <button type="button" className="nt-link" onClick={() => void (all.data ? all.fetchNextPage() : all.refetch())}>
               Thử lại
             </button>
           </div>

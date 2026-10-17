@@ -35,7 +35,9 @@ export interface NotificationsPage {
 export function notificationsEndpoints(r: ApiClient['request']) {
   return {
     notifications: {
-      list: (limit = 20, signal?: AbortSignal) => r<NotificationsPage>('/notifications', { query: { limit }, signal }),
+      /** `offset` (v0.1.69): lật trang khi có quá 100 thông báo (`limit` tối đa 100). */
+      list: (limit = 20, signal?: AbortSignal, offset = 0) =>
+        r<NotificationsPage>('/notifications', { query: offset > 0 ? { limit, offset } : { limit }, signal }),
       /** `ids` bỏ trống = đánh dấu TẤT CẢ đã đọc. */
       markRead: (ids?: string[]) =>
         r<{ unread: number }>('/notifications/read', { method: 'POST', body: ids?.length ? { ids } : {} }),

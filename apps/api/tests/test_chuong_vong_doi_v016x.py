@@ -234,6 +234,22 @@ async def test_list_reports_total_beyond_limit(owner_api: Api, db) -> None:  # t
     assert len(full["items"]) == 25 and full["total"] == 25
 
 
+async def test_list_offset_pages_past_the_100_limit(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    """Review P3: `limit` tối đa 100 ⇒ chuông có quá 100 thông báo không xem hết được; `offset` để lật trang."""
+    org = await org_id(db)
+    uid = (await notifications.owner_ids(db, org))[0]
+    for i in range(105):
+        await notifications.notify(db, org, [uid], kind="backup.done", title=f"Sao lưu xong {i}")
+    await db.commit()
+    p1 = (await owner_api.get("/notifications", params={"limit": 100})).json()
+    p2 = (await owner_api.get("/notifications", params={"limit": 100, "offset": 100})).json()
+    assert len(p1["items"]) == 100 and len(p2["items"]) == 5 and p2["total"] == 105
+    ids = [i["id"] for i in p1["items"] + p2["items"]]
+    assert len(set(ids)) == 105  # không trùng, không sót
+    assert p2["items"][-1]["title"] == "Sao lưu xong 0"  # mới nhất trước, cũ nhất ở cuối trang cuối
+    assert (await owner_api.get("/notifications", params={"offset": -1})).status_code == 422
+
+
 # ─── F104: không trùng lặp ────────────────────────────────────────────────────────────────────────────────────
 
 def _offsite_status(d: Path, **kw: Any) -> None:

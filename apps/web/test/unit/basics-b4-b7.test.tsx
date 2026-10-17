@@ -208,6 +208,27 @@ describe('B6 — chuông thông báo', () => {
     expect(within(dlg).queryByRole('button', { name: /Xem thêm/ })).toBeNull();
   });
 
+  it('"Xem thêm" lật tiếp trang kế khi có quá 100 thông báo (offset), không sót không trùng', async () => {
+    const mk = (from: number, to: number) => Array.from({ length: to - from }, (_, i) => N({ id: `n${from + i}`, title: `Việc ${from + i}`, read: true }));
+    const body = (items: ReturnType<typeof mk>) => ({ items, unread: 1, total: 130 });
+    stubApi((m, url) => {
+      if (m !== 'GET' || !url.includes('/notifications')) return undefined;
+      if (url.includes('offset=100')) return { status: 200, body: body(mk(100, 130)) };
+      if (url.includes('limit=100')) return { status: 200, body: body(mk(0, 100)) };
+      return { status: 200, body: body(mk(0, 20)) };
+    });
+    wrap(<NotificationBell />);
+    await userEvent.click(await screen.findByRole('button', { name: /Thông báo — 1 chưa đọc/ }));
+    const dlg = screen.getByRole('dialog', { name: 'Thông báo' });
+    await userEvent.click(await within(dlg).findByRole('button', { name: /Xem thêm \(110\)/ }));
+    expect(await within(dlg).findByText('Việc 99')).toBeInTheDocument();
+    expect(within(dlg).queryByText('Việc 100')).toBeNull();
+    await userEvent.click(await within(dlg).findByRole('button', { name: /Xem thêm \(30\)/ }));
+    expect(await within(dlg).findByText('Việc 129')).toBeInTheDocument();
+    expect(within(dlg).getAllByRole('listitem')).toHaveLength(130);
+    expect(within(dlg).queryByRole('button', { name: /Xem thêm/ })).toBeNull();
+  });
+
   it('WS notification.new chèn đầu danh sách, tăng số chưa đọc, không trùng', () => {
     const qc = new QueryClient();
     qc.setQueryData<NotificationsPage>(qk.notifications, page);

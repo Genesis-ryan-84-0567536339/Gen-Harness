@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { api } from './api';
 
 export const qk = {
@@ -22,12 +22,20 @@ export const useHeaderStatus = () =>
     refetchInterval: 60_000,
   });
 
-/** v0.1.69 (F098): chuông "Xem thêm" — tải tối đa 100 thông báo (giới hạn của API); chỉ chạy khi `enabled`. */
-export const NOTIFICATIONS_ALL_LIMIT = 100;
+/**
+ * v0.1.69 (F098): chuông "Xem thêm" — tải từng trang 100 thông báo (giới hạn của API) bằng `offset`, bấm "Xem thêm" tiếp thì
+ * lấy trang kế cho tới hết `total`; chỉ chạy khi `enabled`.
+ */
+export const NOTIFICATIONS_PAGE_SIZE = 100;
 export const useAllNotifications = (enabled: boolean) =>
-  useQuery({
+  useInfiniteQuery({
     queryKey: [...qk.notifications, 'all'] as const,
-    queryFn: ({ signal }) => api.notifications.list(NOTIFICATIONS_ALL_LIMIT, signal),
+    initialPageParam: 0,
+    queryFn: ({ pageParam, signal }) => api.notifications.list(NOTIFICATIONS_PAGE_SIZE, signal, pageParam),
+    getNextPageParam: (last, pages) => {
+      const loaded = pages.reduce((n, p) => n + p.items.length, 0);
+      return last.items.length > 0 && loaded < (last.total ?? loaded) ? loaded : undefined;
+    },
     enabled,
   });
 

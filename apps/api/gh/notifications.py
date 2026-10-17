@@ -207,15 +207,15 @@ async def _total(db: AsyncSession, user: service.CurrentUser) -> int:
 
 
 @router.get("")
-async def list_notifications(limit: int = Query(20, ge=1, le=100),
+async def list_notifications(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0),
                              user: service.CurrentUser = Depends(current_user),
                              db: AsyncSession = DB) -> dict[str, Any]:
     """`unread` đếm TOÀN BỘ chưa đọc, `items` chỉ `limit` mục mới nhất — `total` cho chuông biết còn bao nhiêu để hiện
-    "Xem thêm" (F098: từng ghi 35 chưa đọc mà chỉ thấy 20)."""
+    "Xem thêm" (F098: từng ghi 35 chưa đọc mà chỉ thấy 20). `offset` lật trang khi có quá 100 thông báo."""
     rows = (await db.execute(text("""
         SELECT id, kind, title, body, link, created_at, read_at, resolved_at FROM core.notifications
-        WHERE org_id = :o AND user_id = :u ORDER BY created_at DESC, id DESC LIMIT :l"""),
-        {"o": user.org_id, "u": user.id, "l": limit})).all()
+        WHERE org_id = :o AND user_id = :u ORDER BY created_at DESC, id DESC LIMIT :l OFFSET :f"""),
+        {"o": user.org_id, "u": user.id, "l": limit, "f": offset})).all()
     return {"items": [_out(r) for r in rows], "unread": await _unread(db, user), "total": await _total(db, user)}
 
 
