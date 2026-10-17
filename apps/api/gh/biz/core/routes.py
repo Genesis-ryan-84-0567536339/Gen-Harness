@@ -16,7 +16,7 @@ from gh.biz.core import drafts, explain
 from gh.biz.core.scope import Scope, ensure_group, ensure_person, not_found, scope_for
 from gh.biz.queue import service as qsvc
 from gh.chassis import actionlog
-from gh.data.common import iso, mask_text, parse_cursor
+from gh.data.common import has_masked_number, iso, mask_text, parse_cursor
 from gh.db import DB
 from gh.errors import ApiError, forbidden, model_unavailable
 from gh.providers.clients import Message
@@ -312,6 +312,11 @@ async def _decide(request: Request, draft_id: uuid.UUID, user: service.CurrentUs
                            {"i": draft_id, "o": user.org_id, **params})).first()
     if ok is None:
         raise not_found("Bản nháp")
+    if verdict == "edit" and user.role_code != rbac.OWNER and has_masked_number(body.text):
+        # Review v0.1.67 P3: vai dưới Owner chỉ thấy số đã che (•••••678); "Khôi phục bản trước" / "Sửa rồi gửi" /
+        # dùng bản dịch đưa chuỗi che đó vào ô sửa — gửi đi là gửi khách số sai và ghi đè mất số thật trong nháp.
+        raise ApiError(422, "MASKED_TEXT", "Nội dung có số đã che nên chưa gửi được",
+                       "Chỗ số bị che (•••) chỉ Sếp thấy đủ. Hãy xoá hoặc viết lại phần đó, hoặc nhờ Sếp duyệt.")
     try:
         await drafts.decide(db, draft_id=draft_id, org_id=user.org_id, user_id=user.id, verdict=verdict,
                             text_override=body.text, reason=body.reason, side_actions=body.side_actions,
@@ -375,7 +380,8 @@ async def translate(draft_id: uuid.UUID, body: TranslateIn, request: Request,
                                         "định dạng đoạn. Chỉ trả bản dịch, không thêm lời."),
                       Message("user", src)])
     except ModelUnavailable as e:
-        raise model_unavailable("Chưa có model nào chạy được để dịch", _owner_reasons(user, e.reasons)) from e
+        raise model_unavailable("Chưa có model nào chạy được để dịch", _owner_reasons(user, e.reasons),
+                                no_chain=e.no_chain) from e
     owner = user.role_code == rbac.OWNER
     return {"lang": body.lang, "text": mask_text(routed.text.strip(), owner)}
 
@@ -394,19 +400,42 @@ async def regenerate(draft_id: uuid.UUID, request: Request, body: RegenerateIn |
     cur = r.body or {}
     ask = (body.instruction if body else None) or "Viết lại gọn hơn, giữ nguyên mọi số liệu và cam kết."
     ctx = "\n".join(f"- {s.get('label')}" for s in (r.sources or []))
+    system = ("Bạn soạn lại bản nháp tin nhắn công việc. Chỉ dùng dữ kiện có trong bản "
+              "nháp và danh sách nguồn; không bịa số liệu. Chỉ trả nội dung mới.")
+    if r.agent_id:
+        # v0.1.67 (F081): nháp của agent phải soạn lại ĐÚNG xưng hô, giọng và điều cấm của agent đó (cùng khối như lúc
+        # agent soạn — `engine.identity_block`), không chỉ chọn model theo agent.
+        from gh.biz.duty import engine
+
+        agent = (await db.execute(text("""SELECT name, role_desc, addressing, voice, speak_when, forbidden
+                                          FROM agent.identities WHERE id = :a AND org_id = :o"""),
+                                  {"a": r.agent_id, "o": user.org_id})).one_or_none()
+        if agent is not None:
+            system += ("\n\nBản nháp này do agent sau soạn. Giữ đúng xưng hô, giọng điệu; TUYỆT ĐỐI không vi phạm "
+                       f"điều cấm:\n{engine.identity_block(agent)}")
+    prompt = (f"Bản nháp:\n{cur.get('text', '')}\n\nNguồn đã dùng:\n{ctx}\n\nYêu cầu: {ask}")
     try:
         routed = await request.app.state.model_router.generate(
             user.org_id, agent_key=_agent_key(r), purpose="draft_regenerate", json_mode=False, temperature=0.3,
-            messages=[Message("system", "Bạn soạn lại bản nháp tin nhắn công việc. Chỉ dùng dữ kiện có trong bản "
-                                        "nháp và danh sách nguồn; không bịa số liệu. Chỉ trả nội dung mới."),
-                      Message("user", f"Bản nháp:\n{cur.get('text', '')}\n\nNguồn đã dùng:\n{ctx}\n\n"
-                                      f"Yêu cầu: {ask}")])
+            messages=[Message("system", system), Message("user", prompt)])
     except ModelUnavailable as e:
-        raise model_unavailable("Chưa có model nào chạy được để soạn lại", _owner_reasons(user, e.reasons)) from e
+        raise model_unavailable("Chưa có model nào chạy được để soạn lại", _owner_reasons(user, e.reasons),
+                                no_chain=e.no_chain) from e
+    new_text = routed.text.strip()
+    if not new_text:
+        raise ApiError(502, "MODEL_BAD_OUTPUT", "Model trả về bản trống — bản nháp giữ nguyên, thử lại hoặc sửa tay",
+                       "Phản hồi của model rỗng.")
+    from gh.biz.duty.context import mentioned_ids
+
+    invented = sorted(mentioned_ids(new_text) - mentioned_ids(prompt))
+    if invented:
+        raise ApiError(502, "MODEL_BAD_OUTPUT",
+                       "Bản soạn lại nhắc tới mã không có trong nguồn — đã bỏ, bản nháp giữ nguyên",
+                       f"Mã không có trong bản nháp/nguồn: {', '.join(invented[:5])}. Thử lại hoặc sửa tay.")
     versions = [*list(cur.get("versions") or []),
                 {"at": iso(datetime.now(UTC)),
                  "by": "agent" if r.agent_id else "user", "text": cur.get("text", "")}]
-    new_body = {**cur, "text": routed.text.strip(), "versions": versions}
+    new_body = {**cur, "text": new_text, "versions": versions}
     await db.execute(text("UPDATE biz.action_drafts SET body = CAST(:b AS jsonb), updated_at = now() WHERE id = :i"),
                      {"b": orjson.dumps(new_body).decode(), "i": draft_id})
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
@@ -416,6 +445,28 @@ async def regenerate(draft_id: uuid.UUID, request: Request, body: RegenerateIn |
 
 
 # ─── quyết định của agent ─────────────────────────────────────────────────────
+
+def _proposal_text(proposal: Any, owner: bool) -> str | None:
+    t = proposal.get("text") if isinstance(proposal, dict) else None
+    return mask_text(t.strip()[:2000], owner) if isinstance(t, str) and t.strip() else None
+
+
+async def _readable_draft_ids(db: AsyncSession, user: service.CurrentUser, ids: list[uuid.UUID]) -> set[uuid.UUID]:
+    """Trong `ids`, những bản nháp người xem được đọc: `system.read` mức ALL (Owner, Auditor) đọc hết; còn lại theo
+    phạm vi soạn/duyệt (`_drafts_scope`); không có quyền nháp nào ⇒ không đọc được bản nào."""
+    if not ids:
+        return set()
+    if user.permissions.get("system.read", rbac.NONE) == rbac.ALL:
+        return set(ids)
+    try:
+        sc = await _drafts_scope(db, user)
+    except ApiError:
+        return set()
+    where, params = _scope_where(sc)
+    rows = (await db.execute(text(f"SELECT d.id FROM biz.action_drafts d WHERE d.org_id = :o AND d.id = ANY(:ids) "  # noqa: S608
+                                  f"AND {where}"), {"o": user.org_id, "ids": ids, **params})).all()
+    return {r.id for r in rows}
+
 
 @router.get("/agents/decisions")
 async def agent_decisions(agent_id: uuid.UUID | None = None, decision: str | None = None, cursor: str | None = None,
@@ -435,14 +486,24 @@ async def agent_decisions(agent_id: uuid.UUID | None = None, decision: str | Non
     params = {"o": user.org_id, "a": agent_id, "k": decision, "c": parse_cursor(cursor)}
     total = (await db.execute(text(f"SELECT count(*) FROM agent.decisions d WHERE {where}"), params)).scalar_one()  # noqa: S608
     rows = (await db.execute(text(f"""
-        SELECT d.*, a.name AS agent_name, ad.code AS draft_code FROM agent.decisions d
+        SELECT d.*, a.name AS agent_name, ad.code AS draft_code, ad.status AS draft_status FROM agent.decisions d
         JOIN agent.identities a ON a.id = d.agent_id LEFT JOIN biz.action_drafts ad ON ad.id = d.draft_id
         WHERE {where} ORDER BY d.at DESC LIMIT :n"""), {**params, "n": limit + 1})).all()  # noqa: S608
     owner = user.role_code == rbac.OWNER
+    readable = await _readable_draft_ids(db, user, [r.draft_id for r in rows[:limit] if r.draft_id])
     items = [{"id": str(r.id), "at": iso(r.at), "agent": {"id": str(r.agent_id), "name": r.agent_name},
               "decision": r.decision, "rationale": mask_text(r.rationale, owner), "trigger": r.trigger_ref,
               "context_refs": r.context_refs or [],
-              "draft": {"id": str(r.draft_id), "code": r.draft_code} if r.draft_id else None}
+              # v0.1.67 (F076): `outcome` (held = nháp chờ duyệt, suggested, noted, blocked, rejected, none) + trạng
+              # thái nháp thật — web chỉ ghi "Đã gửi" khi nháp `sent`. (F075): nội dung gợi ý/nháp agent đã soạn
+              # (che số nhạy cảm).
+              "outcome": r.outcome,
+              # Review v0.1.67 P2-1: toàn văn nháp gắn với một bản nháp chỉ hiện khi bản nháp đó nằm trong phạm vi
+              # của người xem (cùng `_scope_where` như /drafts) — Quản lý (TEAM) không đọc nháp cả tổ chức.
+              "proposal_text": (_proposal_text(r.proposal, owner)
+                                if r.draft_id is None or r.draft_id in readable else None),
+              "draft": {"id": str(r.draft_id), "code": r.draft_code, "status": r.draft_status}
+              if r.draft_id else None}
              for r in rows[:limit]]
     return {"items": items, "next_cursor": iso(rows[limit - 1].at) if len(rows) > limit else None, "total": total}
 

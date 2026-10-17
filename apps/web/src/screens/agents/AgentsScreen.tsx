@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import type { AgentDecision, AgentIdentity, AgentTemplate } from '@gen-harness/contracts';
-import { SCREEN_BY_KEY, autonomyChoice } from '@gen-harness/contracts';
+import type { AgentIdentity, AgentTemplate } from '@gen-harness/contracts';
+import { AUTONOMY_DEFAULT_LEVEL, SCREEN_BY_KEY, autonomyChoice } from '@gen-harness/contracts';
 import { Button, Dialog, EmptyState, Icon, SelectField, Switch, TextField } from '@gen-harness/ui';
 import { useChannels } from '../../lib/dataQueries';
 import { fmtDMClock } from '../../lib/format';
@@ -10,22 +10,34 @@ import { AutonomySelect } from '../AutonomySelect';
 import { CardError, InlineError, Panel, PinHint, ScreenHead, SkeletonLines, StateChip } from '../common';
 import {
   AUTONOMY_LEVELS,
+  WARN,
+  agentCreateBody,
   agentIcon,
   agentPatchBody,
   decisionTone,
   decisionWhat,
   lastSpoke,
+  modelLine,
   scopeSummary,
 } from './agentsModel';
-import { useAgentDecisions, useAgentTemplates, useAgents, useCloneAgent, useCreateAgent, useSetAgentEnabled, useUpdateAgent } from './queries';
+import {
+  useAgentDecisions,
+  useAgentTemplates,
+  useAgents,
+  useArchiveAgent,
+  useCloneAgent,
+  useCreateAgent,
+  useSetAgentEnabled,
+  useUpdateAgent,
+} from './queries';
 
 export function AgentsScreen() {
   const meta = SCREEN_BY_KEY.agents;
   const canManage = useCan('system.manage');
   const agents = useAgents();
-  const decisions = useAgentDecisions(undefined, undefined, 8);
   const [editing, setEditing] = useState<{ agent: AgentIdentity | null; template: AgentTemplate | null } | null>(null);
   const [cloning, setCloning] = useState(false);
+  const [archiving, setArchiving] = useState<AgentIdentity | null>(null);
 
   const actions = canManage ? (
     <>
@@ -63,8 +75,8 @@ export function AgentsScreen() {
               key={a.id}
               agent={a}
               canManage={canManage}
-              decisions={decisions.data?.items ?? []}
               onEdit={() => setEditing({ agent: a, template: null })}
+              onArchive={() => setArchiving(a)}
             />
           ))
         )}
@@ -77,6 +89,7 @@ export function AgentsScreen() {
 
       {editing ? <AgentFormDialog agent={editing.agent} template={editing.template} onClose={() => setEditing(null)} /> : null}
       {cloning ? <CloneAgentDialog agents={agents.data ?? []} onClose={() => setCloning(false)} /> : null}
+      {archiving ? <ArchiveAgentDialog agent={archiving} onClose={() => setArchiving(null)} /> : null}
     </div>
   );
 }
@@ -84,22 +97,25 @@ export function AgentsScreen() {
 function AgentCard({
   agent,
   canManage,
-  decisions,
   onEdit,
+  onArchive,
 }: {
   agent: AgentIdentity;
   canManage: boolean;
-  decisions: AgentDecision[];
   onEdit: () => void;
+  onArchive: () => void;
 }) {
   const { icon, tone } = agentIcon(agent);
   const setEnabled = useSetAgentEnabled();
+  const model = modelLine(agent);
+  const spoke = lastSpoke(agent);
   const fields: Array<[string, string]> = [
     ['VAI TRÒ', agent.role_desc],
     ['GIỌNG', agent.voice],
     ['NÓI KHI', agent.speak_when],
     ['CẤM', agent.forbidden.length ? agent.forbidden.join(' · ') : 'Không khai báo'],
     ['KÊNH', scopeSummary(agent.channel_scopes)],
+    ['MODEL', model.text],
   ];
   return (
     <article className="ag-card" role="listitem" data-off={agent.is_enabled ? undefined : ''} aria-label={agent.name}>
@@ -126,16 +142,29 @@ function AgentCard({
         {fields.map(([k, v]) => (
           <div className="ag-field-row" key={k}>
             <span className="ag-field-row__key">{k}</span>
-            <span className="ag-field-row__val">{v}</span>
+            <span
+              className="ag-field-row__val"
+              style={k === 'MODEL' && !model.ok ? { color: WARN } : undefined}
+              data-warn={k === 'MODEL' && !model.ok ? '' : undefined}
+            >
+              {v}
+            </span>
           </div>
         ))}
       </div>
+      {/* F089: công tắc lỗi (PIN khoá, mạng) phải nói được vì sao không đổi — không để công tắc lặng lẽ nhảy về cũ. */}
+      {setEnabled.isError ? <InlineError>{errorText(setEnabled.error)}</InlineError> : null}
       <div className="ag-card__rule" aria-hidden />
       <div className="ag-card__foot">
         <span className="ag-autonomy" title={`Mức ${agent.autonomy_level} — ${AUTONOMY_LEVELS[agent.autonomy_level] ?? ''}`}>
           {autonomyChoice(agent.autonomy_level)?.label ?? `mức ${agent.autonomy_level}`}
         </span>
-        <span className="ag-card__spoke" title={lastSpoke(agent.id, decisions)}>{lastSpoke(agent.id, decisions)}</span>
+        <span className="ag-card__spoke" title={spoke}>{spoke}</span>
+        {canManage ? (
+          <Button variant="ghost" className="btn-22" onClick={onArchive} aria-label={`Lưu trữ agent ${agent.name}`}>
+            Lưu trữ
+          </Button>
+        ) : null}
         <Button variant="ghost" className="btn-22" onClick={onEdit} aria-label={`${canManage ? 'Sửa' : 'Xem'} agent ${agent.name}`}>
           {canManage ? 'Sửa' : 'Xem'}
         </Button>
@@ -179,9 +208,16 @@ function DecisionsPanel() {
           <div className="ag-log-row" key={d.id}>
             <span className="ag-log-row__time">{fmtDMClock(d.at)}</span>
             <span className="ag-log-row__agent">{d.agent.name}</span>
-            <span className="ag-log-row__what" style={{ color: decisionTone(d.decision) }} title={decisionWhat(d)}>
+            <span className="ag-log-row__what" style={{ color: decisionTone(d) }} title={decisionWhat(d)}>
               {decisionWhat(d)}
             </span>
+            {/* F075: câu agent đã gợi ý / soạn — trước đây lưu nhưng không màn nào đọc được. */}
+            {d.proposal_text ? (
+              <span className="ag-log-row__proposal" data-testid="agent-proposal">
+                {d.decision === 'suggest' ? 'Gợi ý: ' : d.decision === 'note' ? 'Ghi chú: ' : 'Nội dung soạn: '}
+                {d.proposal_text}
+              </span>
+            ) : null}
           </div>
         ))
       )}
@@ -219,17 +255,12 @@ function TemplatesPanel({ canManage, onUseTemplate }: { canManage: boolean; onUs
   );
 }
 
-/**
- * Mức tự trị mặc định khi tạo agent mới mà Sếp chưa chọn: giữ mức 2 của form cũ (trước v0.1.43). KHÁC `DEFAULT_AUTONOMY`
- * phía API (= 4, mặc định của AgentIn khi body không có `autonomy_level`) — form luôn gửi giá trị này nên API không áp mặc định.
- */
-const DEFAULT_NEW_AGENT_AUTONOMY = 2;
-
 /** v0.1.45 (F-20): máy chủ đòi phiên PIN `policy.change` khi rào chắn của agent đổi — hộp PIN tự mở khi gặp 423.
  *  Giới hạn (limits) không sửa ở form này nên không nhắc. Tạo / nhân bản agent luôn cần PIN `agent.manage`. */
 const AGENT_PIN_TEXT = 'Đổi mức tự trị, điều cấm hay phạm vi kênh cần mã PIN';
 const AGENT_CREATE_PIN_TEXT = 'Tạo agent cần mã PIN';
 const AGENT_CLONE_PIN_TEXT = 'Nhân bản agent cần mã PIN';
+const AGENT_ARCHIVE_PIN_TEXT = 'Lưu trữ agent cần mã PIN';
 
 function AgentFormDialog({ agent, template, onClose }: { agent: AgentIdentity | null; template: AgentTemplate | null; onClose: () => void }) {
   const create = useCreateAgent();
@@ -257,21 +288,8 @@ function AgentFormDialog({ agent, template, onClose }: { agent: AgentIdentity | 
       update.mutate({ id: agent.id, body: patch }, { onSuccess: onClose });
       return;
     }
-    const body = {
-      name: name.trim(),
-      role_desc: roleDesc.trim(),
-      voice: voice.trim(),
-      speak_when: speakWhen.trim(),
-      // Tạo mới: chưa chọn thì giữ mức mặc định cũ (2) như trước (sửa agent: xem agentPatchBody ở trên).
-      autonomy_level: picked ?? DEFAULT_NEW_AGENT_AUTONOMY,
-      forbidden: forbidden
-        .split('\n')
-        .map((s) => s.trim())
-        .filter(Boolean),
-      template: template?.code ?? null,
-      channel_scopes: [...scopeIds].map((channel_id) => ({ channel_id })),
-    };
-    create.mutate(body, { onSuccess: onClose });
+    // v0.1.67: chưa chọn mức ⇒ mức mặc định chung (4) đang hiện sáng ở ô chọn (F078); mẫu tắt sẵn ⇒ agent tắt (F082).
+    create.mutate(agentCreateBody({ name, roleDesc, voice, speakWhen, forbidden, picked, scopeIds }, template), { onSuccess: onClose });
   };
 
   return (
@@ -284,7 +302,7 @@ function AgentFormDialog({ agent, template, onClose }: { agent: AgentIdentity | 
         readOnly
           ? 'Chỉ xem — chỉ Owner sửa được danh tính agent'
           : template && !agent
-            ? `Điền sẵn từ mẫu ${template.name} — không bắt buộc, chỉnh tự do`
+            ? `Điền sẵn từ mẫu ${template.name} — không bắt buộc, chỉnh tự do${template.default_enabled ? '' : '. Mẫu này tạo ra agent đang TẮT — bật ở thẻ khi sẵn sàng'}`
             : 'Danh tính do Sếp tự định nghĩa'
       }
       actions={
@@ -322,11 +340,11 @@ function AgentFormDialog({ agent, template, onClose }: { agent: AgentIdentity | 
           <textarea id="ag-forbidden" className="gh-input" rows={2} value={forbidden} onChange={(e) => setForbidden(e.target.value)} disabled={readOnly} />
         </div>
         {readOnly ? null : agent ? <PinHint text={AGENT_PIN_TEXT} title={AGENT_PIN_TEXT} /> : <PinHint text={AGENT_CREATE_PIN_TEXT} title={AGENT_CREATE_PIN_TEXT} />}
-        {/* Tạo mới: current=null để bấm "Chỉ ghi nhận" ghi đúng mức 0 (không bị coi là "giữ" mức mặc định 2). */}
+        {/* Tạo mới: current = mức mặc định thật (4) để ô chọn sáng đúng mức sẽ áp dụng; bấm "Chỉ ghi nhận" ghi mức 0. */}
         {readOnly ? (
           <p className="muted-note">Mức tự trị: {autonomyChoice(agent.autonomy_level)?.label ?? `mức ${agent.autonomy_level}`}</p>
         ) : (
-          <AutonomySelect current={agent ? agent.autonomy_level : null} value={picked} onChange={setPicked} />
+          <AutonomySelect current={agent ? agent.autonomy_level : AUTONOMY_DEFAULT_LEVEL} value={picked} onChange={setPicked} />
         )}
         <fieldset className="ag-scope-fields">
           <legend className="gh-field__label">Phạm vi kênh được xuất hiện</legend>
@@ -406,6 +424,37 @@ function CloneAgentDialog({ agents, onClose }: { agents: AgentIdentity[]; onClos
         <PinHint text={AGENT_CLONE_PIN_TEXT} title={AGENT_CLONE_PIN_TEXT} />
         {clone.isError ? <InlineError>{errorText(clone.error)}</InlineError> : null}
       </form>
+    </Dialog>
+  );
+}
+
+function ArchiveAgentDialog({ agent, onClose }: { agent: AgentIdentity; onClose: () => void }) {
+  const archive = useArchiveAgent();
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      width={420}
+      title={`Lưu trữ ${agent.name}?`}
+      kicker="Agent biến khỏi danh sách và ngừng làm việc; lịch sử quyết định của agent vẫn còn"
+      actions={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Huỷ
+          </Button>
+          <Button variant="primary" loading={archive.isPending} onClick={() => archive.mutate(agent.id, { onSuccess: onClose })}>
+            Lưu trữ agent
+          </Button>
+        </>
+      }
+    >
+      <div className="dlg-fields">
+        <p className="muted-note">
+          Model riêng của agent (nếu có) được gỡ. Tên “{agent.name}” dùng lại được cho agent mới. Muốn chỉ dừng tạm thì tắt công tắc ở thẻ.
+        </p>
+        <PinHint text={AGENT_ARCHIVE_PIN_TEXT} title={AGENT_ARCHIVE_PIN_TEXT} />
+        {archive.isError ? <InlineError>{errorText(archive.error)}</InlineError> : null}
+      </div>
     </Dialog>
   );
 }

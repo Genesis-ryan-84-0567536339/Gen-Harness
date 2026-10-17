@@ -12,6 +12,13 @@ export const AUTONOMY_LEVELS = [
   'Tự làm việc đã whitelist',
 ] as const;
 
+/**
+ * Mức tự trị mặc định của agent MỚI (v0.1.67, F078) — khớp `gh.chassis.policy.DEFAULT_AUTONOMY` (= 4, "Soạn sẵn chờ
+ * duyệt") và mức bước 8 thiết lập tạo. Form "Tạo agent" dùng mức này khi Sếp không chọn (trước đây là mức 2: không
+ * bao giờ soạn nháp).
+ */
+export const AUTONOMY_DEFAULT_LEVEL = 4;
+
 /** Mức cao nhất của thang (0–6). */
 export const AUTONOMY_MAX = 6;
 

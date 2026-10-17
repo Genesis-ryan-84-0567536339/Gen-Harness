@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from gh import realtime
 from gh.chassis import actionlog
 from gh.chassis.bus import CLEAN_READY, EventBus
-from gh.data.common import iso, live_person, raw_code
+from gh.data.common import iso, live_person, outbound_to_sql, raw_code
 from gh.gen import decider as decmod
 from gh.memory import notebook
 from gh.providers.router import AGY_BACKGROUND_TIMEOUT_S, ModelRouter, ModelUnavailable, raise_alert
@@ -168,15 +168,24 @@ async def unanswered(db: AsyncSession, ev: Ev, sender_identity: uuid.UUID | None
     """Số tin liên tiếp của cùng người gửi (tính cả tin này) chưa có ai khác trả lời, trong 48 giờ."""
     if sender_identity is None:
         return 0
-    rows = (await db.execute(text("""
-        SELECT sender_identity_id FROM raw.events
-        WHERE org_id = (SELECT org_id FROM raw.events WHERE id = :e AND received_at = :r)
-          AND channel_id = (SELECT channel_id FROM raw.events WHERE id = :e AND received_at = :r)
-          AND group_id IS NOT DISTINCT FROM CAST(:g AS uuid)
-          AND occurred_at <= :t AND occurred_at > CAST(:t AS timestamptz) - interval '48 hours'
-          AND (CAST(:g AS uuid) IS NOT NULL OR sender_identity_id = :s OR direction = 'outbound')
-        ORDER BY occurred_at DESC LIMIT 12"""),
-        {"e": ev.event_id, "r": ev.received_at, "g": ev.group_id, "t": ev.occurred_at, "s": sender_identity})).all()
+    # v0.1.67 (F050): tin 1-1 — chỉ tin ĐI gửi cho ĐÚNG người này mới cắt chuỗi (trả lời khách khác không tính).
+    # Định danh của người đó trên kênh (kể cả hồ sơ gộp) lấy một lần; `outbound_to_sql` ghép tin đi theo người nhận.
+    keys = (await db.execute(text("""
+        SELECT array_agg(x.id) AS ids, array_agg(NULLIF(split_part(x.external_id, '@', 1), '')) AS ext
+        FROM core.person_identities me
+        JOIN core.person_identities x ON x.person_id = me.person_id AND x.channel_id = me.channel_id
+        WHERE me.id = :s"""), {"s": sender_identity})).one()
+    rows = (await db.execute(text(f"""
+        SELECT e.sender_identity_id FROM raw.events e
+        WHERE e.org_id = (SELECT org_id FROM raw.events WHERE id = :e AND received_at = :r)
+          AND e.channel_id = (SELECT channel_id FROM raw.events WHERE id = :e AND received_at = :r)
+          AND e.group_id IS NOT DISTINCT FROM CAST(:g AS uuid)
+          AND e.occurred_at <= :t AND e.occurred_at > CAST(:t AS timestamptz) - interval '48 hours'
+          AND (CAST(:g AS uuid) IS NOT NULL OR e.sender_identity_id = :s
+               OR {outbound_to_sql("e", "CAST(:ids AS uuid[])", "CAST(:ext AS text[])")})
+        ORDER BY e.occurred_at DESC LIMIT 12"""),  # noqa: S608 — outbound_to_sql là hằng nội bộ
+        {"e": ev.event_id, "r": ev.received_at, "g": ev.group_id, "t": ev.occurred_at, "s": sender_identity,
+         "ids": list(keys.ids or [sender_identity]), "ext": [x for x in (keys.ext or []) if x]})).all()
     n = 0
     for r in rows:
         if r.sender_identity_id != sender_identity:

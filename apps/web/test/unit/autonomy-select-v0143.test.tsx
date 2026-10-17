@@ -252,7 +252,7 @@ describe('Danh tính Agent — tạo mới', () => {
     return dlg;
   };
 
-  it('chọn "Chỉ ghi nhận" → autonomy_level 0 (không phải mặc định 2); không chọn → giữ mặc định 2', async () => {
+  it('chọn "Chỉ ghi nhận" → autonomy_level 0 (không phải mặc định); không chọn → mức mặc định chung 4 (v0.1.67, F078)', async () => {
     const calls = mockFetch(createHandler);
     const user = userEvent.setup();
     renderScreen(<AgentsScreen />);
@@ -268,7 +268,7 @@ describe('Danh tính Agent — tạo mới', () => {
     dlg = await openCreate(user);
     await user.click(within(dlg).getByRole('button', { name: 'Tạo agent' }));
     await waitFor(() => expect(posts()).toHaveLength(2));
-    expect(posts()[1].body).toMatchObject({ autonomy_level: 2 });
+    expect(posts()[1].body).toMatchObject({ autonomy_level: 4 });
   });
 });
 

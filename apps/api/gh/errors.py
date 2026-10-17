@@ -79,17 +79,27 @@ def pin_required() -> ApiError:
 
 
 MODEL_UNAVAILABLE_HINT = "Chưa có model AI nào hoạt động — vào Agent & Model (Hướng dẫn bước 4) để chọn hoặc sửa model."
+MODEL_DOWN_TITLE = "Nguồn AI đang lỗi hoặc hết hạn mức — thử lại sau ít phút"
+MODEL_DOWN_HINT = ("Model đã chọn vẫn còn, chỉ là lượt gọi vừa rồi bị lỗi (mạng hoặc hết hạn mức của khoá). "
+                   "Thử lại sau ít phút; xem tình trạng từng nguồn ở API & Model — không cần chọn lại model.")
 
 
-def model_unavailable(title: str, reasons: list[str]) -> ApiError:
+def model_unavailable(title: str, reasons: list[str], *, no_chain: bool | None = None) -> ApiError:
     """v0.1.30: 503 MODEL_UNAVAILABLE đúng khuôn lỗi chung — `detail` là CÂU CHỮ cho người đọc (web hiện thẳng),
     lý do kỹ thuật từng nhà cung cấp nằm ở `reasons` cấp ngoài cùng (chuỗi). Trước đây `detail={"reasons": …}` (đối
     tượng) → web vẽ thẳng làm React child → sập màn (React error #31).
 
     v0.1.62: bỏ nhánh riêng "chuỗi chỉ có Antigravity CLI" (luật owner-only F-22 đã gỡ) — chỉ còn câu chung.
+
+    v0.1.67 (F011): hai tình huống khác nhau (như Gen đã phân biệt — `gh.gen.engine` MODEL_DOWN / NO_MODEL):
+    `no_chain=False` = ĐÃ có model nhưng lượt gọi lỗi (hết hạn mức, mạng) ⇒ "Nguồn AI đang lỗi hoặc hết hạn mức —
+    thử lại sau", `model_down=true`, web KHÔNG đưa Sếp đi chọn lại model; `True`/`None` = chưa có model nào ⇒ câu cũ
+    `title` + `model_down=false`.
     """
     clean = [str(r) for r in reasons if str(r).strip()]
-    return ApiError(503, "MODEL_UNAVAILABLE", title, MODEL_UNAVAILABLE_HINT, reasons=clean)
+    if no_chain is False:
+        return ApiError(503, "MODEL_UNAVAILABLE", MODEL_DOWN_TITLE, MODEL_DOWN_HINT, reasons=clean, model_down=True)
+    return ApiError(503, "MODEL_UNAVAILABLE", title, MODEL_UNAVAILABLE_HINT, reasons=clean, model_down=False)
 
 
 def field_errors(errors: dict[str, str]) -> ApiError:

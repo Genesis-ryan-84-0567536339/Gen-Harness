@@ -326,6 +326,9 @@ async def test_early_warning_scan_generates_and_dedupes(world, db, redis) -> Non
     [raw_slow] = await put(sm, org, {**msg("Còn hàng không ạ, mình cần gấp", sender="u4", name="Chị Hoa"),
                                      "occurred_at": old_ts})
     p_slow = await _person_of(db, raw_slow)
+    # v0.1.67 (F050): chỉ tin có kết luận "đang chờ trả lời" mới sinh cảnh báo Chưa trả lời.
+    await _unit(db, org, group_id=world["group"], person_id=p_slow, event_type="AskedStatus",
+                conclusion="Hỏi còn hàng, cần gấp", raw_id=raw_slow)
     owner_id = (await db.execute(text("SELECT id FROM core.users WHERE email = 'owner@example.vn'"))).scalar_one()
     await db.execute(text("UPDATE core.persons SET owner_user_id = :u WHERE id = :p"),
                      {"u": owner_id, "p": p_slow})

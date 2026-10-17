@@ -59,7 +59,7 @@ TEMPLATES: dict[str, dict[str, Any]] = {
         "default_enabled": True,
     },
     "key_account": {
-        "name": "Key Account junior",
+        "name": "Chăm sóc khách lớn",
         "role_desc": "Hỗ trợ chăm sóc khách hàng lớn, theo dõi lời hứa và deal đang mở.",
         "voice": "Trang trọng, đúng hẹn, nhấn mạnh cam kết",
         "speak_when": "Khi khách VIP nhắn tin hoặc deal sắp tới hạn",
@@ -83,7 +83,7 @@ TEMPLATES: dict[str, dict[str, Any]] = {
         "default_enabled": True,
     },
     "recruiter": {
-        "name": "Recruiter",
+        "name": "Tuyển dụng",
         "role_desc": "Sàng lọc ứng viên, nhắc lịch phỏng vấn, tổng hợp hồ sơ.",
         "voice": "Chuyên nghiệp, tôn trọng ứng viên",
         "speak_when": "Khi có hồ sơ ứng viên mới hoặc lịch phỏng vấn sắp tới",
@@ -100,11 +100,11 @@ TEMPLATES: dict[str, dict[str, Any]] = {
     },
     "mascot": {
         "name": "Bé Heo",
-        "role_desc": "Mẫu hoài niệm từ heo-harness — trò chuyện phiếm, không đảm nhiệm việc kinh doanh.",
+        "role_desc": "Mẫu trò chuyện phiếm, vui vẻ — không đảm nhiệm việc kinh doanh. Tắt sẵn, Sếp tự bật khi cần.",
         "voice": "Dí dỏm, thân mật",
         "speak_when": "Chỉ khi được gọi trực tiếp",
         "forbidden": ["Tự ý tham gia nghiệp vụ kinh doanh", "Gửi tin ra ngoài khi chưa được bật"],
-        "default_enabled": False,   # spec E13: "chỉ là template hoài niệm, tắt mặc định"
+        "default_enabled": False,   # spec E13: mẫu phiếm, tắt mặc định (web gửi is_enabled theo cờ này — F082)
     },
 }
 
@@ -156,15 +156,33 @@ async def _agent_key_label(db: AsyncSession, org_id: uuid.UUID, agent_key: str) 
             aid = uuid.UUID(agent_key[len("agent:"):])
         except ValueError as e:
             raise not_found("Agent") from e
-        name = (await db.execute(text("SELECT name FROM agent.identities WHERE id = :i AND org_id = :o"),
-                                 {"i": aid, "o": org_id})).scalar_one_or_none()
+        name = (await db.execute(text("SELECT name FROM agent.identities WHERE id = :i AND org_id = :o "
+                                      "AND archived_at IS NULL"), {"i": aid, "o": org_id})).scalar_one_or_none()
         if name is None:
             raise not_found("Agent")
         return str(name)
     raise field_errors({"agent_key": "agent_key phải là mục dùng chung (core.*) hoặc agent:<id>"})
 
 
-def _binding_out(r: Any) -> dict[str, Any]:
+REASON_SOURCE_OFF = "Nguồn đã tắt — agent đang dùng Chuẩn"
+REASON_MODEL_OFF = "Model đã tắt — agent đang dùng Chuẩn"
+
+
+def _inactive_reason(r: Any, agy: agy_policy.AgyVerdict | None = None) -> str | None:
+    """v0.1.67 (F016): dòng gán còn đó nhưng nguồn / model của nó đã bị Sếp tắt ⇒ `ModelRouter._chain` bỏ dòng gán
+    âm thầm và agent chạy bằng hồ sơ Chuẩn — chuỗi này nói thẳng điều đó (null = dòng gán đang có hiệu lực)."""
+    if getattr(r, "provider_enabled", True) is False:
+        return REASON_SOURCE_OFF
+    if getattr(r, "model_enabled", True) is False:
+        return REASON_MODEL_OFF
+    # Review v0.1.67 P3: dòng gán Antigravity CLI của khoá bị `agy_policy` chặn (agent ngoại giao, core.reply…) —
+    # `ModelRouter._chain` gỡ dòng này, khoá chạy bằng Chuẩn; thẻ không được ghi "· Antigravity" như đang dùng thật.
+    if agy is not None and not agy.allowed and agy.reason and getattr(r, "provider_kind", None) == agy_policy.KIND_AGY:
+        return f"{agy.reason} — đang dùng Chuẩn"
+    return None
+
+
+def _binding_out(r: Any, agy: agy_policy.AgyVerdict | None = None) -> dict[str, Any]:
     # Antigravity CLI gán được cho mọi khoá (luật F-22 owner-only đã gỡ ở v0.1.62 ⇒ không còn `blocked_reason` hay 409
     # AGY_OWNER_GEN_ONLY). v0.1.63 (H2): khoá của lớp ngoại giao / người ngoài (core.reply, core.refinery, agent gắn
     # kênh / nhóm / người, Gen của nhân viên) chạy agy QUA HỘP RIÊNG — hộp chưa chạy / chưa cài thì xem
@@ -172,7 +190,8 @@ def _binding_out(r: Any) -> dict[str, Any]:
     # `gh.providers.agy_policy.decide`, luật chỗ chạy ở `gh.providers.placement`).
     return {"model_id": str(r.model_id), "model_name": r.model_name, "provider_name": r.provider_name,
             "temperature": float(r.temperature), "context_tokens": r.context_tokens,
-            "rule_codes": list(r.rule_codes or []), "effort": getattr(r, "effort", None)}
+            "rule_codes": list(r.rule_codes or []), "effort": getattr(r, "effort", None),
+            "inactive_reason": _inactive_reason(r, agy)}
 
 
 @router.get("/bindings")
@@ -181,11 +200,12 @@ async def list_bindings(user: service.CurrentUser = Depends(READ), db: AsyncSess
     | 'standard' (chưa có dòng — dùng hồ sơ tiêu chuẩn); `standard` = model hồ sơ đang phủ khi chưa có dòng (null nếu
     chưa có nguồn phù hợp); `standard_reason` (v0.1.58) = vì sao `standard` null ("cần khoá API…", "chưa có model —
     bấm Kiểm tra kết nối ở …"; chuỗi hoặc null)."""
-    agents = (await db.execute(text("SELECT id, name FROM agent.identities WHERE org_id = :o ORDER BY created_at"),
-                               {"o": user.org_id})).all()
+    agents = (await db.execute(text("SELECT id, name FROM agent.identities WHERE org_id = :o AND archived_at IS NULL "
+                                    "ORDER BY created_at"), {"o": user.org_id})).all()
     keys = [*CORE_AGENT_KEYS.items(), *((f"agent:{a.id}", a.name) for a in agents)]
     rows = (await db.execute(text("""
         SELECT b.agent_key, b.model_id, m.model_name, p.name AS provider_name, p.kind AS provider_kind,
+               p.is_enabled AS provider_enabled, m.is_enabled AS model_enabled,
                b.temperature, b.context_tokens, b.rule_codes, b.effort
         FROM agent.bindings b JOIN agent.models m ON m.id = b.model_id JOIN agent.providers p ON p.id = m.provider_id
         WHERE b.org_id = :o"""), {"o": user.org_id})).all()
@@ -193,7 +213,7 @@ async def list_bindings(user: service.CurrentUser = Depends(READ), db: AsyncSess
     unbound = [k for k, _ in keys if k not in by_key]
     verdicts = await agy_policy.verdicts_for(db, user.org_id, [k for k, _ in keys])
     standard, reasons = await profiles.standard_with_reasons(db, user.org_id, unbound) if unbound else ({}, {})
-    items = [{"agent_key": k, "label": label, "binding": _binding_out(by_key[k]) if k in by_key else None,
+    items = [{"agent_key": k, "label": label, "binding": _binding_out(by_key[k], verdicts[k]) if k in by_key else None,
               "source": "custom" if k in by_key else "standard",
               "standard": None if k in by_key else profiles.standard_public(standard.get(k)),
               "standard_reason": None if k in by_key else reasons.get(k),
@@ -261,7 +281,8 @@ async def set_binding(agent_key: str, body: BindingIn, request: Request,
                            target_type="binding", target_id=agent_key, target_label=label,
                            detail=body.model_dump(mode="json"), ip=user.ip)
     r = (await db.execute(text("""
-        SELECT b.model_id, m.model_name, p.name AS provider_name, p.kind AS provider_kind, b.temperature,
+        SELECT b.model_id, m.model_name, p.name AS provider_name, p.kind AS provider_kind,
+               p.is_enabled AS provider_enabled, m.is_enabled AS model_enabled, b.temperature,
                b.context_tokens, b.rule_codes, b.effort
         FROM agent.bindings b JOIN agent.models m ON m.id = b.model_id JOIN agent.providers p ON p.id = m.provider_id
         WHERE b.org_id = :o AND b.agent_key = :k"""), {"o": user.org_id, "k": agent_key})).one()
@@ -291,7 +312,7 @@ async def delete_binding(agent_key: str, request: Request, user: service.Current
 
 AGENT_SELECT = """
 SELECT id, org_id, name, role_desc, template, addressing, voice, speak_when, forbidden, autonomy_level,
-       is_enabled, limits, created_at, updated_at
+       is_enabled, limits, created_at, updated_at, archived_at
 FROM agent.identities
 """
 
@@ -387,11 +408,16 @@ async def _scopes_of(db: AsyncSession, agent_id: uuid.UUID) -> list[dict[str, An
 
 async def _binding_of(db: AsyncSession, org_id: uuid.UUID, agent_id: uuid.UUID) -> dict[str, Any] | None:
     r = (await db.execute(text("""
-        SELECT b.model_id, m.model_name, p.name AS provider_name, p.kind AS provider_kind, b.temperature,
+        SELECT b.model_id, m.model_name, p.name AS provider_name, p.kind AS provider_kind,
+               p.is_enabled AS provider_enabled, m.is_enabled AS model_enabled, b.temperature,
                b.context_tokens, b.rule_codes, b.effort
         FROM agent.bindings b JOIN agent.models m ON m.id = b.model_id JOIN agent.providers p ON p.id = m.provider_id
         WHERE b.org_id = :o AND b.agent_key = :k"""), {"o": org_id, "k": f"agent:{agent_id}"})).one_or_none()
-    return None if r is None else _binding_out(r)
+    if r is None:
+        return None
+    agy = (await agy_policy.verdict_for(db, org_id, f"agent:{agent_id}")
+           if r.provider_kind == agy_policy.KIND_AGY else None)
+    return _binding_out(r, agy)
 
 
 def _agent_out(r: Any) -> dict[str, Any]:
@@ -399,7 +425,42 @@ def _agent_out(r: Any) -> dict[str, Any]:
             "addressing": r.addressing or {}, "voice": r.voice, "speak_when": r.speak_when,
             "forbidden": list(r.forbidden or []), "autonomy_level": r.autonomy_level, "is_enabled": r.is_enabled,
             "limits": {**DEFAULT_LIMITS, **(r.limits or {})}, "created_at": iso(r.created_at),
-            "updated_at": iso(r.updated_at)}
+            "updated_at": iso(r.updated_at), "archived": r.archived_at is not None}
+
+
+#: Quyết định tính là "đã lên tiếng" (F083): im lặng và ghi chú vào sổ tay KHÔNG phải lên tiếng với con người.
+SPOKE_DECISIONS = ("suggest", "draft", "send")
+
+
+async def _attach_model_and_spoke(db: AsyncSession, org_id: uuid.UUID, items: list[dict[str, Any]]) -> None:
+    """Gắn vào từng agent: `model` (F022: dùng model nào, chạy được không — một dòng chữ, không object lồng) và
+    `last_spoke_at` / `last_spoke_decision` (F083: lần lên tiếng gần nhất THEO TỪNG AGENT, không phải trong 8 quyết
+    định chung)."""
+    if not items:
+        return
+    need_std = [f"agent:{i['id']}" for i in items if i["binding"] is None or i["binding"].get("inactive_reason")]
+    std, why = await profiles.standard_with_reasons(db, org_id, need_std) if need_std else ({}, {})
+    for i in items:
+        key, b = f"agent:{i['id']}", i["binding"]
+        if b is not None and not b.get("inactive_reason"):
+            i["model"] = {"custom": True, "ok": True, "label": f"{b['model_name']} · {b['provider_name']}"}
+        elif b is not None:
+            cand = std.get(key)
+            tail = f": {cand['model_name']}" if cand else " — chưa có model khác chạy được"
+            i["model"] = {"custom": True, "ok": cand is not None, "label": f"{b['inactive_reason']}{tail}"}
+        else:
+            i["model"] = {"custom": False, "ok": std.get(key) is not None,
+                          "label": profiles.standard_text(std.get(key), why.get(key))}
+    rows = (await db.execute(text("""
+        SELECT DISTINCT ON (agent_id) agent_id, decision, at FROM agent.decisions
+        WHERE org_id = :o AND decision = ANY(CAST(:d AS text[])) AND agent_id = ANY(CAST(:a AS uuid[]))
+        ORDER BY agent_id, at DESC"""),
+                             {"o": org_id, "d": list(SPOKE_DECISIONS), "a": [i["id"] for i in items]})).all()
+    spoke = {str(r.agent_id): r for r in rows}
+    for i in items:
+        r = spoke.get(i["id"])
+        i["last_spoke_at"] = iso(r.at) if r else None
+        i["last_spoke_decision"] = r.decision if r else None
 
 
 async def _full(db: AsyncSession, org_id: uuid.UUID, agent_id: uuid.UUID) -> dict[str, Any]:
@@ -410,12 +471,14 @@ async def _full(db: AsyncSession, org_id: uuid.UUID, agent_id: uuid.UUID) -> dic
     out = _agent_out(r)
     out["channel_scopes"] = await _scopes_of(db, agent_id)
     out["binding"] = await _binding_of(db, org_id, agent_id)
+    await _attach_model_and_spoke(db, org_id, [out])
     return out
 
 
 @router.get("")
 async def list_agents(user: service.CurrentUser = Depends(READ), db: AsyncSession = DB) -> list[dict[str, Any]]:
-    rows = (await db.execute(text(AGENT_SELECT + " WHERE org_id = :o ORDER BY created_at"),
+    """Agent đang dùng (không gồm agent đã Lưu trữ — F085)."""
+    rows = (await db.execute(text(AGENT_SELECT + " WHERE org_id = :o AND archived_at IS NULL ORDER BY created_at"),
                              {"o": user.org_id})).all()
     out = []
     for r in rows:
@@ -423,7 +486,18 @@ async def list_agents(user: service.CurrentUser = Depends(READ), db: AsyncSessio
         item["channel_scopes"] = await _scopes_of(db, r.id)
         item["binding"] = await _binding_of(db, user.org_id, r.id)
         out.append(item)
+    await _attach_model_and_spoke(db, user.org_id, out)
     return out
+
+
+async def _check_name_free(db: AsyncSession, org_id: uuid.UUID, name: str, except_id: uuid.UUID | None = None) -> None:
+    """F085: hai agent trùng tên (không phân biệt hoa thường / khoảng trắng hai đầu) làm Sếp không biết ai là ai ở
+    thẻ, bảng quyết định, Gán model — chặn khi tạo / sửa tên / nhân bản. Agent đã Lưu trữ không tính."""
+    want = name.strip().casefold()
+    rows = (await db.execute(text("SELECT id, name FROM agent.identities WHERE org_id = :o AND archived_at IS NULL"),
+                             {"o": org_id})).all()
+    if any(r.name.strip().casefold() == want and r.id != except_id for r in rows):
+        raise field_errors({"name": f"Đã có agent tên “{name.strip()}” — đặt tên khác để khỏi nhầm."})
 
 
 @router.post("", status_code=201)
@@ -432,6 +506,7 @@ async def create_agent(body: AgentIn, user: service.CurrentUser = Depends(MANAGE
     """Không có mặc định bắt buộc (spec E13) — Owner tự đặt mọi trường, mẫu chỉ là gợi ý prefill ở Console
     (`GET /agents/templates`), không tự áp khi thiếu. PIN vì đây là thao tác "tạo agent"."""
     await _validate_scopes(db, user.org_id, body.channel_scopes)
+    await _check_name_free(db, user.org_id, body.name)
     aid = (await db.execute(text("""
         INSERT INTO agent.identities (org_id, name, role_desc, template, addressing, voice, speak_when, forbidden,
                                       autonomy_level, is_enabled, limits)
@@ -490,12 +565,14 @@ async def patch_agent(agent_id: uuid.UUID, body: AgentPatch, user: service.Curre
     """Sửa agent. v0.1.45 (F-20): PIN policy.change chỉ khi đổi autonomy_level/forbidden/limits/channel_scopes
     (khác giá trị đang lưu) — đổi tên, mô tả, giọng, lúc lên tiếng, mẫu, xưng hô không bao giờ đòi PIN; gửi lại đúng
     giá trị cũ của trường rào chắn cũng không đòi PIN (không hạ rào). Thứ tự: 403 → 404 → 422 → 423."""
-    cur = (await db.execute(text(AGENT_SELECT + " WHERE id = :i AND org_id = :o"),
+    cur = (await db.execute(text(AGENT_SELECT + " WHERE id = :i AND org_id = :o AND archived_at IS NULL"),
                             {"i": agent_id, "o": user.org_id})).one_or_none()
     if cur is None:
         raise not_found("Agent")
     if body.channel_scopes is not None:
         await _validate_scopes(db, user.org_id, body.channel_scopes)
+    if body.name is not None and body.name.strip().casefold() != cur.name.strip().casefold():
+        await _check_name_free(db, user.org_id, body.name, except_id=agent_id)
     if not user.pin_active() and await _barrier_changed(db, cur, body):
         raise pin_required()
     fields = body.model_dump(exclude_unset=True, exclude={"channel_scopes"})
@@ -539,16 +616,36 @@ async def patch_agent(agent_id: uuid.UUID, body: AgentPatch, user: service.Curre
     return await _full(db, user.org_id, agent_id)
 
 
+async def _copy_binding(db: AsyncSession, org_id: uuid.UUID, src_id: uuid.UUID, new_id: uuid.UUID) -> bool:
+    """F091: bản sao chạy đúng model riêng của agent nguồn (không âm thầm rơi về Chuẩn). Antigravity CLI chỉ chép khi
+    luật agy (`agy_policy`) vẫn cho agent mới — phạm vi nghe đã chép xong trước khi gọi hàm này."""
+    b = (await db.execute(text("""
+        SELECT b.model_id, b.temperature, b.context_tokens, b.rule_codes, b.effort, p.kind
+        FROM agent.bindings b JOIN agent.models m ON m.id = b.model_id JOIN agent.providers p ON p.id = m.provider_id
+        WHERE b.org_id = :o AND b.agent_key = :k"""), {"o": org_id, "k": f"agent:{src_id}"})).one_or_none()
+    if b is None:
+        return False
+    if b.kind == agy_policy.KIND_AGY and not (await agy_policy.verdict_for(db, org_id, f"agent:{new_id}")).allowed:
+        return False
+    await db.execute(text("""
+        INSERT INTO agent.bindings (org_id, agent_key, model_id, temperature, context_tokens, rule_codes, effort)
+        VALUES (:o, :k, :m, :t, :ct, :rc, :e)"""),
+                     {"o": org_id, "k": f"agent:{new_id}", "m": b.model_id, "t": b.temperature,
+                      "ct": b.context_tokens, "rc": list(b.rule_codes or []), "e": b.effort})
+    return True
+
+
 @router.post("/{agent_id}/clone", status_code=201)
 async def clone_agent(agent_id: uuid.UUID, body: CloneIn, user: service.CurrentUser = Depends(MANAGE),
                       _pin: Any = Depends(require_pin("agent.manage")), db: AsyncSession = DB) -> dict[str, Any]:
-    """Nhân bản: sao mọi trường (kể cả phạm vi nghe nếu chọn) từ agent nguồn, NHƯNG tạo ở trạng thái tắt
-    (`is_enabled=false`) — tránh hai agent cùng nghe/trả lời trùng nhau trước khi Owner rà lại bản sao. Quyết
-    định tự đưa ra (PLAN không nói rõ trạng thái ban đầu của bản nhân bản)."""
-    src = (await db.execute(text(AGENT_SELECT + " WHERE id = :i AND org_id = :o"),
+    """Nhân bản: sao mọi trường (kể cả phạm vi nghe nếu chọn và model riêng — v0.1.67 F091) từ agent nguồn, NHƯNG
+    tạo ở trạng thái tắt (`is_enabled=false`) — tránh hai agent cùng nghe/trả lời trùng nhau trước khi Owner rà
+    lại bản sao. Quyết định tự đưa ra (PLAN không nói rõ trạng thái ban đầu của bản nhân bản)."""
+    src = (await db.execute(text(AGENT_SELECT + " WHERE id = :i AND org_id = :o AND archived_at IS NULL"),
                             {"i": agent_id, "o": user.org_id})).one_or_none()
     if src is None:
         raise not_found("Agent")
+    await _check_name_free(db, user.org_id, body.name)
     new_id = (await db.execute(text("""
         INSERT INTO agent.identities (org_id, name, role_desc, template, addressing, voice, speak_when, forbidden,
                                       autonomy_level, is_enabled, limits)
@@ -562,27 +659,54 @@ async def clone_agent(agent_id: uuid.UUID, body: CloneIn, user: service.CurrentU
         await db.execute(text("""INSERT INTO agent.channel_scopes (agent_id, channel_id, group_id)
                                  SELECT :n, channel_id, group_id FROM agent.channel_scopes WHERE agent_id = :s"""),
                          {"n": new_id, "s": agent_id})
+    binding_copied = await _copy_binding(db, user.org_id, agent_id, new_id)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id, action="agent.cloned",
                            target_type="agent", target_id=str(new_id), target_label=body.name,
                            detail={"source_id": str(agent_id), "source_name": src.name,
-                                   "copy_channel_scopes": body.copy_channel_scopes}, ip=user.ip)
+                                   "copy_channel_scopes": body.copy_channel_scopes,
+                                   "binding_copied": binding_copied}, ip=user.ip)
     return await _full(db, user.org_id, new_id)
 
 
 @router.patch("/{agent_id}/disable")
 async def disable_agent(agent_id: uuid.UUID, body: DisableIn, user: service.CurrentUser = Depends(MANAGE),
-                        _pin: Any = Depends(require_pin("agent.manage")), db: AsyncSession = DB) -> dict[str, Any]:
+                        db: AsyncSession = DB) -> dict[str, Any]:
     """Tắt/bật một danh tính agent (cùng dạng toggle với `gh.plugins_api.routes.toggle`). Tắt KHÔNG xoá cấu hình
     hay phạm vi nghe — chỉ dừng agent nhận đơn vị mới (`agent.identities a JOIN ... WHERE a.is_enabled` ở
-    `gh.biz.duty.context`)."""
+    `gh.biz.duty.context`). v0.1.67 (F089): TẮT không cần PIN (agent đang nói bậy mà PIN bị khoá thì Sếp vẫn dừng
+    được ngay, như nút dừng khẩn Facebook); BẬT lại cần PIN `agent.manage`."""
+    if body.enabled and not user.pin_active():
+        raise pin_required()
     row = (await db.execute(text("""UPDATE agent.identities SET is_enabled = :e, updated_at = now()
-                                    WHERE id = :i AND org_id = :o RETURNING name, is_enabled"""),
+                                    WHERE id = :i AND org_id = :o AND archived_at IS NULL
+                                    RETURNING name, is_enabled"""),
                             {"e": body.enabled, "i": agent_id, "o": user.org_id})).one_or_none()
     if row is None:
         raise not_found("Agent")
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="agent.enabled" if body.enabled else "agent.disabled", target_type="agent",
                            target_id=str(agent_id), target_label=row.name, ip=user.ip)
+    return await _full(db, user.org_id, agent_id)
+
+
+@router.post("/{agent_id}/archive")
+async def archive_agent(agent_id: uuid.UUID, request: Request, user: service.CurrentUser = Depends(MANAGE),
+                        _pin: Any = Depends(require_pin("agent.manage")), db: AsyncSession = DB) -> dict[str, Any]:
+    """F085 — Lưu trữ agent: tắt hẳn, ẩn khỏi danh sách / bảng Gán model / ô chọn, gỡ model riêng. KHÔNG xoá dòng:
+    lịch sử quyết định (`agent.decisions`) và nháp cũ vẫn đọc được tên agent. Tên đã lưu trữ đặt lại được."""
+    row = (await db.execute(text("""UPDATE agent.identities
+                                    SET is_enabled = false, archived_at = now(), updated_at = now()
+                                    WHERE id = :i AND org_id = :o AND archived_at IS NULL RETURNING name"""),
+                            {"i": agent_id, "o": user.org_id})).one_or_none()
+    if row is None:
+        raise not_found("Agent")
+    had_binding = (await db.execute(text("DELETE FROM agent.bindings WHERE org_id = :o AND agent_key = :k "
+                                         "RETURNING 1"), {"o": user.org_id, "k": f"agent:{agent_id}"})
+                   ).one_or_none() is not None
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id, action="agent.archived",
+                           target_type="agent", target_id=str(agent_id), target_label=row.name,
+                           detail={"binding_removed": had_binding}, ip=user.ip)
+    await coach_cache.commit_and_invalidate(db, request.app.state.redis, user.org_id)
     return await _full(db, user.org_id, agent_id)
 
 
