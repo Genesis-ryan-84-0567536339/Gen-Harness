@@ -193,10 +193,11 @@ def test_every_target_resolves_in_registry() -> None:
     assert "api.bindings" not in sg.ALL_TARGETS
     assert sg.ALL_TARGETS >= {"system.backup.schedule", "mcp.hub_link.token", "workbench.drafts",
                               "guide.item.do:5", "guide.item.do:10"}
-    # v0.1.55: chỉ Gen-hub (gợi ý) và Truy cập từ xa còn đích ở dòng "Việc Sếp cần làm"; boss.ai trỏ thẻ Bộ não AI.
+    # v0.1.55: chỉ Gen-hub (gợi ý) và Truy cập từ xa còn đích ở dòng "Việc Sếp cần làm"; boss.ai (v0.1.68) dẫn màn
+    # Thiết lập nguồn AI.
     assert {t for t in sg.ALL_TARGETS if t.startswith("boss_checks.row.")} == {
         "boss_checks.row.hub", "boss_checks.row.remote"}
-    assert sg.TODO_TARGETS["boss.ai"] == "connections.brain"
+    assert "boss.ai" not in sg.TODO_TARGETS and sg.TODO_LINKS["boss.ai"] == "/setup?buoc=nguon-ai"
     for target in sorted(sg.ALL_TARGETS):
         assert gen_registry.resolve_target(target) is not None, target
     # mỗi việc tĩnh có ĐÚNG một cách chỉ đường: đích làm sáng (TODO_TARGETS) hoặc liên kết trang (TODO_LINKS).
@@ -268,7 +269,8 @@ def test_rank_p0_p1_p2_p3_group_health_and_cut_three() -> None:
     rows = plan.payload["todos"]
     assert [r["can_dismiss"] for r in rows] == [False, True, True]
     assert "dismiss_warning" not in rows[0] and rows[1]["dismiss_warning"] == sg.DISMISS_WARNINGS["boss.ai"]
-    assert rows[1]["target"] == "connections.brain" and rows[0]["link"] == "/moi" and "target" not in rows[0]
+    assert rows[1]["link"] == "/setup?buoc=nguon-ai" and "target" not in rows[1]
+    assert rows[0]["link"] == "/moi" and "target" not in rows[0]
     assert plan.p01_keys == ["health.channel.down", "boss.ai", "health.offsite.stale"]
 
 
@@ -276,10 +278,10 @@ def test_boss_ai_is_deduped_with_model_missing_and_gen_hub_is_only_a_p3_hint() -
     # Chưa có model: chỉ model.missing (P0) — boss.ai không nhắc hai lần một chuyện.
     no_model = mk_sig(state={"model.bound": False, "boss.ai.done": False})
     assert [t.key for t in engine.candidate_todos(no_model)] == ["model.missing"]
-    # Có model mà nguồn AI chưa chạy thật/chưa Kiểm tra: boss.ai (P1, đích thẻ Bộ não AI).
+    # Có model mà nguồn AI chưa chạy thật/chưa Kiểm tra: boss.ai (P1, dẫn màn Thiết lập nguồn AI).
     has_model = mk_sig(state={"boss.ai.done": False})
     todo = engine.candidate_todos(has_model)[0]
-    assert (todo.key, todo.level, todo.target) == ("boss.ai", "P1", "connections.brain")
+    assert (todo.key, todo.level, todo.target, todo.link) == ("boss.ai", "P1", None, "/setup?buoc=nguon-ai")
     assert todo.title == "Kiểm tra nguồn AI chạy được"
     # Gen-hub / Facebook / Telegram / Google / Claude chưa nối: KHÔNG có P1; chỉ một gợi ý P3 (Gen-hub), không chuông.
     optional_off = mk_sig(state={f"boss.{k}.done": False for k in ("hub", "facebook", "agy", "claude", "telegram")})

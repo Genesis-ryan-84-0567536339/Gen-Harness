@@ -86,9 +86,9 @@ TOPIC: dict[str, str] = {
 BOSS_TARGET = "boss_checks.row.{key}"
 
 #: Khoá việc (không kể health.<kind>: đích của sự cố là liên kết `link` của chính sự cố) → đích làm sáng.
-#: v0.1.55: `boss.ai` trỏ thẻ "Bộ não AI" ở Kết nối — nơi Sếp thêm nguồn AI.
+#: v0.1.68 (F029): `boss.ai` KHÔNG còn trỏ thẻ "Bộ não AI" ở Kết nối (thẻ đó không có chỗ nhập khoá) — nó dẫn màn Thiết
+#: lập nguồn AI qua `TODO_LINKS`, cùng đích với `model.missing`.
 TODO_TARGETS: dict[str, str] = {
-    "boss.ai": "connections.brain",
     "boss.hub": BOSS_TARGET.format(key="hub"),
     "boss.remote": BOSS_TARGET.format(key="remote"),
     "backup.unset": "system.backup.schedule",
@@ -99,10 +99,13 @@ TODO_TARGETS: dict[str, str] = {
 ALL_TARGETS: frozenset[str] = frozenset(TODO_TARGETS.values())
 
 #: v0.1.59 (g5-thiet-lap): việc tĩnh mà đích là MỘT TRANG (không phải phần tử cần làm sáng) → `link`. Web ưu tiên
-#: `target` hơn `link` (coachModel.showMe) nên khoá ở đây KHÔNG được có trong `TODO_TARGETS`. `model.missing` dẫn
-#: thẳng tới màn "Thiết lập nguồn AI" (/setup?buoc=nguon-ai) — cùng đích với mọi nút "Chọn model" khác.
+#: `target` hơn `link` (coachModel.showMe) nên khoá ở đây KHÔNG được có trong `TODO_TARGETS`. `model.missing` và
+#: `boss.ai` dẫn thẳng tới màn "Thiết lập nguồn AI" (/setup?buoc=nguon-ai) — MỘT đích duy nhất cho việc thêm / kiểm
+#: nguồn AI (cùng `readiness.FIX_AI`, mọi nút "Chọn model" và câu lỗi AI_NO_SOURCE / AI_KEY_MISSING).
+AI_SOURCE_LINK = "/setup?buoc=nguon-ai"
 TODO_LINKS: dict[str, str] = {
-    "model.missing": "/setup?buoc=nguon-ai",
+    "model.missing": AI_SOURCE_LINK,
+    "boss.ai": AI_SOURCE_LINK,
 }
 
 # ─── quy tắc việc ─────────────────────────────────────────────────────────────────────────────────────────────

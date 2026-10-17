@@ -686,7 +686,7 @@ describe('hợp đồng gen.ts ↔ mock-gen-coach', () => {
       expect(x.can_dismiss).toBe(true);
       expect(typeof x.dismiss_warning).toBe('string');
     }
-    expect(t.todos[0]).toMatchObject({ title: 'Kiểm tra nguồn AI chạy được', target: 'connections.brain' });
+    expect(t.todos[0]).toMatchObject({ title: 'Kiểm tra nguồn AI chạy được', link: '/setup?buoc=nguon-ai' });
     expect(t.todos[1]).toMatchObject({ title: 'Nối Gen-hub nếu Sếp muốn', target: 'boss_checks.row.hub' });
     expect(t.tip?.key).toBe('telegram_briefing');
     expect(t.lesson).toMatchObject({ id: 'N01', k: 1, total: 19, status: 'new' });

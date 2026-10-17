@@ -66,7 +66,8 @@ const BOSS_DEFS: Record<string, Def> = {
     title: 'Kiểm tra nguồn AI chạy được',
     why: 'Em đã có nguồn AI nhưng chưa gọi thật được lần nào — Sếp bấm Kiểm tra để em chắc là trả lời và lọc tin được.',
     level: 'P1',
-    target: 'connections.brain',
+    // v0.1.68 (F029): như máy chủ (`TODO_LINKS`) — dẫn thẳng màn Thiết lập nguồn AI, không còn làm sáng thẻ Kết nối.
+    link: '/setup?buoc=nguon-ai',
     warning: 'Nếu tắt, Gen sẽ không nhắc kiểm tra nguồn AI nữa — tới lúc cần trả lời mới biết lỗi.',
   },
   hub: {

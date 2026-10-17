@@ -247,6 +247,40 @@ async def switch_passes(db: AsyncSession, org_id: uuid.UUID) -> int:
     return n
 
 
+#: Lỗi TẠM (bận / hạn mức) — KHÔNG ghi thành bản kiểm (thay kết quả đã lưu bằng một lỗi chỉ vì bấm quá nhanh là sai).
+TRANSIENT_CODES = frozenset({"SOCIAL_BUSY", "SOCIAL_RATE_LIMIT", "PROBE_RATE_LIMITED", "HUB_RATE_LIMITED",
+                             "CLI_LOGIN_IN_PROGRESS", "TELEGRAM_RATE_LIMITED"})
+
+
+async def record_hub_result(db: AsyncSession, org_id: uuid.UUID, r: dict[str, Any],
+                            user_id: uuid.UUID | None = None) -> dict[str, Any] | None:
+    """Ghi bản kiểm `hub` từ kết quả `hub_link.service.test_link` (v0.1.68, F028) — DÙNG CHUNG cho nút Kiểm tra ở
+    "Việc Sếp cần làm" (`/boss-checks/hub/run`) và nút "Lưu & kiểm tra" ở Kết nối › Gen-hub (`/hub/link/test`),
+    để hai nơi
+    không bao giờ lệch (Hướng dẫn "Đã xong" mà Việc Sếp cần làm "Chưa kiểm", Gen vẫn nhắc "Nối Gen-hub").
+    Lỗi TẠM → None (không ghi). Không commit."""
+    ok = bool(r.get("ok"))
+    if not ok and r.get("error_code") in TRANSIENT_CODES:
+        return None
+    detail: dict[str, Any] = {"latency_ms": r.get("latency_ms"), "exposed_tools": len(r.get("exposed_tools") or []),
+                              "missing_tools": list(r.get("missing_tools") or [])}
+    # v0.1.49 (QD-16): quyền ĐỌC thêm (lịch/mail/việc/Drive) chỉ để hiển thị — KHÔNG quyết định Đạt/Lỗi. Chỉ lưu khi
+    # Kiểm tra XANH: lượt đỏ (mạng, token bị từ chối…) trả quyền cũ trong CSDL (toàn False nếu chưa từng xanh) — hiện
+    # "Lịch ✗ … tick thêm quyền" cạnh "Lỗi …" là chỉ sai cách sửa.
+    scopes = r.get("read_scopes")
+    if ok and isinstance(scopes, dict):
+        detail["read_scopes"] = {str(k): bool(v) for k, v in scopes.items()}
+        detail["read_missing"] = [str(x) for x in (r.get("read_missing") or [])]
+    # v0.1.50 (F-81): quyền GHI Kho (kho_create, kho_update) — cũng chỉ để hiển thị, cùng quy tắc "chỉ khi kiểm xanh".
+    wscopes = r.get("write_scopes")
+    if ok and isinstance(wscopes, dict):
+        detail["write_scopes"] = {str(k): bool(v) for k, v in wscopes.items()}
+        detail["write_missing"] = [str(x) for x in (r.get("write_missing") or [])]
+    return await record(db, org_id, "hub", "pass" if ok else "fail",
+                        error_code=None if ok else (r.get("error_code") or "HUB_ERROR"),
+                        message=None if ok else r.get("error"), detail=detail, user_id=user_id)
+
+
 def _passed(results: dict[str, dict[str, Any] | None], key: str) -> bool:
     r = results.get(key)
     return r is not None and r["status"] == "pass"

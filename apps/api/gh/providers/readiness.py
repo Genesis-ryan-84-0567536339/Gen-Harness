@@ -68,21 +68,24 @@ POLICY = "policy"                                    # blocker nội bộ: vai n
 #: Vai mặc định của `ai_ready`: Gen của Sếp (Owner) — việc cốt lõi mà "có nguồn AI" phải bảo đảm.
 READY_ROLE = "core.gen"
 
-FIX_SETUP = "/setup?buoc=nguon-ai"                  # chưa có nguồn / chưa chọn model: màn Thiết lập nguồn AI
-FIX_BRAIN = "/connections#brain"                    # có nguồn nhưng cần khoá / đăng nhập: Kết nối › Bộ não AI
-FIX_TO = {NO_SOURCE: FIX_SETUP, DISABLED: FIX_BRAIN, NO_KEY: FIX_BRAIN, CLI_EXPIRED: FIX_BRAIN,
-          NO_MODEL: FIX_SETUP, ERROR: FIX_BRAIN, BOX_DOWN: FIX_BRAIN}
+#: v0.1.68 (F029): MỘT đích duy nhất để thêm / sửa nguồn AI — màn Thiết lập nguồn AI (dán khoá, đăng nhập Google /
+#: Claude Code, gọi thử, chọn model đều làm trọn ở đó). Trước đây có nơi dẫn "Kết nối › Bộ não AI" (không có chỗ nhập
+#: khoá) và nơi dẫn "Cài đặt › Bộ não AI" (chỉ đọc). Riêng nguồn đã TẮT thì bật lại ở API & Model (công tắc từng nguồn).
+FIX_AI = "/setup?buoc=nguon-ai"
+FIX_API = "/api"
+FIX_TO = {NO_SOURCE: FIX_AI, DISABLED: FIX_API, NO_KEY: FIX_AI, CLI_EXPIRED: FIX_AI,
+          NO_MODEL: FIX_AI, ERROR: FIX_AI, BOX_DOWN: FIX_AI}
 
 #: Càng nhỏ càng gần dùng được (xem docstring module).
 _CLOSENESS = {BOX_DOWN: 0, NO_MODEL: 1, ERROR: 2, CLI_EXPIRED: 3, NO_KEY: 4, DISABLED: 5}
 
 CLI_LABEL = {KIND_AGY: "Google (Antigravity CLI)", KIND_CLAUDE: "Claude Code"}
 
-REASON_NO_SOURCE = ("Chưa có nguồn AI nào — thêm khoá API hoặc đăng nhập Google / Claude Code ở Kết nối › Bộ não AI "
+REASON_NO_SOURCE = ("Chưa có nguồn AI nào — thêm khoá API hoặc đăng nhập Google / Claude Code ở màn Thiết lập nguồn AI "
                     "rồi bấm Kiểm tra")
-REASON_DISABLED = "Mọi nguồn AI đang tắt — bật lại một nguồn ở Kết nối › Bộ não AI rồi bấm Kiểm tra"
+REASON_DISABLED = "Mọi nguồn AI đang tắt — bật lại một nguồn ở API & Model rồi bấm Kiểm tra"
 REASON_BOX_DOWN = ("Hộp riêng Antigravity chưa chạy — nguồn Google (Antigravity) tạm không dùng được cho việc này; "
-                   "bật lại hộp hoặc thêm khoá API ở Kết nối › Bộ não AI")
+                   "bật lại hộp hoặc thêm khoá API ở màn Thiết lập nguồn AI")
 
 
 class BoxGate(Protocol):
@@ -240,10 +243,10 @@ def _reason_vi(code: str, s: dict[str, Any] | None) -> str:
     name = s["name"]
     if code == NO_KEY:
         if s["cli"]:
-            return f"Chưa đăng nhập {label} — bấm Đăng nhập trước ở Kết nối › Bộ não AI"
-        return f"Nguồn AI «{name}» chưa có khoá API đang bật — thêm khoá ở Kết nối › Bộ não AI rồi bấm Kiểm tra"
+            return f"Chưa đăng nhập {label} — bấm Đăng nhập trước ở màn Thiết lập nguồn AI"
+        return f"Nguồn AI «{name}» chưa có khoá API đang bật — thêm khoá ở màn Thiết lập nguồn AI rồi bấm Kiểm tra"
     if code == CLI_EXPIRED:
-        return f"Phiên đăng nhập {label} đã hết hạn — đăng nhập lại ở Kết nối › Bộ não AI"
+        return f"Phiên đăng nhập {label} đã hết hạn — đăng nhập lại ở màn Thiết lập nguồn AI"
     if code == NO_MODEL:
         return (f"Nguồn AI «{name}» chưa có model nào được bật — bấm Kiểm tra kết nối để Gen tự lấy model, "
                 "hoặc chọn model ở Thiết lập nguồn AI")
@@ -270,7 +273,8 @@ def explain(states: list[dict[str, Any]]) -> dict[str, Any]:
     # Chỉ còn nguồn bị luật vai chặn (vd agy với core.reply): nói đúng luật đó, không gợi ý đăng nhập lại.
     why = next((s["policy_reason"] for s in states if s["policy_reason"]), None)
     return {"ok": False, "reason_code": NO_SOURCE, "fix_to": FIX_TO[NO_SOURCE],
-            "reason_vi": f"{why}. Thêm nguồn khác ở Kết nối › Bộ não AI" if why else REASON_NO_SOURCE, "source": None}
+            "reason_vi": f"{why}. Thêm nguồn khác ở màn Thiết lập nguồn AI" if why else REASON_NO_SOURCE,
+            "source": None}
 
 
 async def ai_ready(db: AsyncSession, org_id: uuid.UUID, role: str = READY_ROLE, *, owner: bool = True,
@@ -281,7 +285,7 @@ async def ai_ready(db: AsyncSession, org_id: uuid.UUID, role: str = READY_ROLE, 
         verdict = explain(await source_states(db, org_id, role, owner=owner, box=box))
     except Exception:  # noqa: BLE001
         log.warning("Không đọc được trạng thái nguồn AI (%s)", org_id, exc_info=True)
-        return {"ok": False, "reason_code": ERROR, "fix_to": FIX_BRAIN,
+        return {"ok": False, "reason_code": ERROR, "fix_to": FIX_AI,
                 "reason_vi": "Chưa kiểm tra được nguồn AI lúc này — thử lại sau ít phút hoặc bấm Kiểm tra"}
     return {k: verdict[k] for k in ("ok", "reason_code", "reason_vi", "fix_to")}
 

@@ -35,7 +35,7 @@ from tests.test_cli_models_v0131 import _login, _provider, clis  # noqa: F401 �
 AGY = "antigravity_cli"
 CLAUDE = "claude_code_cli"
 SETUP = "/setup?buoc=nguon-ai"
-BRAIN = "/connections#brain"
+API = "/api"          # v0.1.68 (F029): nguồn đã tắt bật lại ở API & Model; mọi lỗi khác về một đích SETUP
 
 
 @pytest.fixture(autouse=True)
@@ -93,7 +93,7 @@ async def test_no_provider_is_no_source(db: Any) -> None:
     r = await _ready(db)
     _shape(r)
     assert (r["ok"], r["reason_code"], r["fix_to"]) == (False, "no_source", SETUP)
-    assert "khoá API" in r["reason_vi"] and "Bộ não AI" in r["reason_vi"]
+    assert "khoá API" in r["reason_vi"] and "Thiết lập nguồn AI" in r["reason_vi"]
     assert await readiness.usable_sources(db, await org_id(db)) == []
 
 
@@ -107,7 +107,7 @@ async def test_all_disabled_is_disabled(db: Any) -> None:
     await _src(db, "gemini", enabled=False)
     r = await _ready(db)
     _shape(r)
-    assert (r["reason_code"], r["fix_to"]) == ("disabled", BRAIN) and "tắt" in r["reason_vi"]
+    assert (r["reason_code"], r["fix_to"]) == ("disabled", API) and "tắt" in r["reason_vi"]
 
 
 @pytest.mark.parametrize("key", [False, "off"], ids=["khong-co-khoa", "khoa-da-tat"])
@@ -115,7 +115,7 @@ async def test_api_source_without_enabled_key_is_no_key(db: Any, key: Any) -> No
     await _src(db, "gemini", name="Gemini của Sếp", key=key)
     r = await _ready(db)
     _shape(r)
-    assert (r["reason_code"], r["fix_to"]) == ("no_key", BRAIN)
+    assert (r["reason_code"], r["fix_to"]) == ("no_key", SETUP)
     assert "khoá API" in r["reason_vi"] and "Gemini của Sếp" in r["reason_vi"]
 
 
@@ -172,7 +172,7 @@ async def test_cli_expired_by_auth_state(db: Any) -> None:
     await _src(db, AGY, key=False, auth_state="expired")
     r = await _ready(db)
     _shape(r)
-    assert (r["reason_code"], r["fix_to"]) == ("cli_expired", BRAIN) and "hết hạn" in r["reason_vi"]
+    assert (r["reason_code"], r["fix_to"]) == ("cli_expired", SETUP) and "hết hạn" in r["reason_vi"]
 
 
 async def test_cli_expired_by_past_token_that_cannot_refresh(db: Any) -> None:
@@ -263,7 +263,7 @@ async def test_box_down_blocks_only_agy_for_roles_that_require_the_box(db: Any) 
     down = FakeBox(required=True, state="down")
     r = await readiness.ai_ready(db, org, "core.refinery", box=down)
     _shape(r)
-    assert (r["ok"], r["reason_code"], r["fix_to"]) == (False, "box_down", BRAIN)
+    assert (r["ok"], r["reason_code"], r["fix_to"]) == (False, "box_down", SETUP)
     assert "Hộp riêng Antigravity" in r["reason_vi"]
     api = await _src(db, "gemini", rank=2)
     got = await readiness.usable_sources(db, org, "core.refinery", box=down)
@@ -433,7 +433,7 @@ async def test_f014_old_model_call_does_not_count_after_source_is_disabled(owner
     done, res, req = await _boss(owner_api)
     assert (done, req) == (False, 0)
     assert res["status"] == "fail" and res["error_code"] == "AI_DISABLED" and "tắt" in res["message"]
-    assert res["detail"].get("fix_to") == BRAIN
+    assert res["detail"].get("fix_to") == API
 
 
 async def test_f014_old_model_call_does_not_count_after_key_removed(owner_api: Api, db: Any) -> None:

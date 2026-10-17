@@ -57,8 +57,7 @@ NOT_READY = {
     "jev": ("JEV_NOT_CONFIGURED",
             "Chưa thêm Jev — mục này không bắt buộc; thêm khoá Jev ở Cài đặt › Bộ não AI nếu Sếp cần"),
 }
-TRANSIENT_CODES = frozenset({"SOCIAL_BUSY", "SOCIAL_RATE_LIMIT", "PROBE_RATE_LIMITED", "HUB_RATE_LIMITED",
-                             "CLI_LOGIN_IN_PROGRESS", "TELEGRAM_RATE_LIMITED"})
+TRANSIENT_CODES = boss.TRANSIENT_CODES
 SOCIAL_NO_ACCOUNT_MSG = "Chưa có tài khoản Facebook — mở trang Tài khoản mạng xã hội để thêm và đăng nhập"
 
 
@@ -135,26 +134,10 @@ def transient(key: str, code: str, message: str | None) -> dict[str, Any]:
 async def _run_hub(request: Request, db: AsyncSession, user: service.CurrentUser) -> dict[str, Any]:
     client = hub.client_for(getattr(request.app.state, "mcp_transport", None))
     r = await hub.test_link(db, request.app.state.redis, client, user=user)
-    ok = bool(r["ok"])
-    if not ok and r.get("error_code") in TRANSIENT_CODES:
+    out = await boss.record_hub_result(db, user.org_id, r, user.id)
+    if out is None:
         return transient("hub", str(r["error_code"]), r.get("error"))
-    detail: dict[str, Any] = {"latency_ms": r.get("latency_ms"), "exposed_tools": len(r.get("exposed_tools") or []),
-                              "missing_tools": list(r.get("missing_tools") or [])}
-    # v0.1.49 (QD-16): quyền ĐỌC thêm (lịch/mail/việc/Drive) chỉ để hiển thị — KHÔNG quyết định Đạt/Lỗi. Chỉ lưu khi
-    # Kiểm tra XANH: lượt đỏ (mạng, token bị từ chối…) trả quyền cũ trong CSDL (toàn False nếu chưa từng xanh) — hiện
-    # "Lịch ✗ … tick thêm quyền" cạnh "Lỗi …" là chỉ sai cách sửa.
-    scopes = r.get("read_scopes")
-    if ok and isinstance(scopes, dict):
-        detail["read_scopes"] = {str(k): bool(v) for k, v in scopes.items()}
-        detail["read_missing"] = [str(x) for x in (r.get("read_missing") or [])]
-    # v0.1.50 (F-81): quyền GHI Kho (kho_create, kho_update) — cũng chỉ để hiển thị, cùng quy tắc "chỉ khi kiểm xanh".
-    wscopes = r.get("write_scopes")
-    if ok and isinstance(wscopes, dict):
-        detail["write_scopes"] = {str(k): bool(v) for k, v in wscopes.items()}
-        detail["write_missing"] = [str(x) for x in (r.get("write_missing") or [])]
-    return await boss.record(db, user.org_id, "hub", "pass" if ok else "fail",
-                             error_code=None if ok else (r.get("error_code") or "HUB_ERROR"),
-                             message=None if ok else r.get("error"), detail=detail, user_id=user.id)
+    return out
 
 
 async def _run_facebook(request: Request, db: AsyncSession, user: service.CurrentUser,
