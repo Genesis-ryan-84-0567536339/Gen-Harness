@@ -37,6 +37,8 @@ export interface Pipeline {
   interval_seconds: number;
   count_threshold: number;
   clean_total: number;
+  /** v0.1.64 (F055): số tin ở trạng thái "Lỗi xử lý" (model trả sai định dạng đủ 3 lần). */
+  raw_error: number;
 }
 
 // ── raw lake ──────────────────────────────────────────────────────────────

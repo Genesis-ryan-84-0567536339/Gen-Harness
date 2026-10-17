@@ -103,11 +103,8 @@ export interface PipelineCard {
 
 export type DataScreen = 'raw' | 'rules' | 'clean';
 
-/** `raw_error` (v0.1.64, F055): số tin "Lỗi xử lý"; máy chủ cũ không trả ⇒ coi như 0. */
-export type PipelineView = Pipeline & { raw_error?: number };
-
-export function pipelineCards(p: PipelineView, screen: DataScreen): PipelineCard[] {
-  const rawError = p.raw_error ?? 0;
+export function pipelineCards(p: Pipeline, screen: DataScreen): PipelineCard[] {
+  const rawError = p.raw_error ?? 0; // máy chủ cũ chưa trả raw_error ⇒ coi như 0
   return [
     {
       step: 1,

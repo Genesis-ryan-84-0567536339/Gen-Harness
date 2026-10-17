@@ -719,6 +719,7 @@ export function createPhase2(opts: Phase2Options) {
     interval_seconds: schedule.interval_seconds,
     count_threshold: schedule.count_threshold,
     clean_total: cleanTotal,
+    raw_error: 0,
   });
   const scheduleView = () => {
     if (schedule.next_run_at < Date.now()) schedule.next_run_at = Date.now() + schedule.interval_seconds * 1000;

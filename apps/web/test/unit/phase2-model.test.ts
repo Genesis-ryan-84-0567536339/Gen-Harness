@@ -102,7 +102,7 @@ describe('data layer model', () => {
 
   it('pipeline strip formats raw numbers', () => {
     const cards = pipelineCards(
-      { channels_live: 4, groups_listening: 42, raw_total: 18412, raw_pending: 4204, interval_seconds: 900, count_threshold: 500, clean_total: 14208 },
+      { channels_live: 4, groups_listening: 42, raw_total: 18412, raw_pending: 4204, interval_seconds: 900, count_threshold: 500, clean_total: 14208, raw_error: 0 },
       'raw',
     );
     const text = JSON.stringify(cards);

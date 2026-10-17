@@ -8,7 +8,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
-import type { Profile } from '@gen-harness/contracts';
+import type { Pipeline, Profile } from '@gen-harness/contracts';
 import { queryClient } from '../../src/lib/queryClient';
 import { qk } from '../../src/lib/queries';
 import { useUrlStateStore } from '../../src/lib/uiStore';
@@ -85,7 +85,7 @@ describe('peopleModel — loại người', () => {
 });
 
 describe('Dải pipeline — tin Lỗi xử lý (F055)', () => {
-  const base = { channels_live: 1, groups_listening: 2, raw_total: 100, raw_pending: 3, interval_seconds: 900, count_threshold: 500, clean_total: 50 };
+  const base = { channels_live: 1, groups_listening: 2, raw_total: 100, raw_pending: 3, interval_seconds: 900, count_threshold: 500, clean_total: 50, raw_error: 0 };
   it('có tin lỗi → ghi rõ số tin và báo hệ thống tự thử lại, thẻ đổi sang màu báo lỗi', () => {
     const raw = pipelineCards({ ...base, raw_error: 4 }, 'raw')[1];
     expect(raw.note).toContain('4 bản ghi lỗi xử lý');
@@ -93,7 +93,9 @@ describe('Dải pipeline — tin Lỗi xử lý (F055)', () => {
     expect(raw.tone).toBe('var(--color-bad)');
   });
   it('không lỗi (hoặc máy chủ cũ không trả raw_error) → giữ câu cũ', () => {
-    expect(pipelineCards(base, 'raw')[1].note).not.toContain('lỗi xử lý');
+    const cu = { ...base } as Partial<Pipeline>;
+    delete cu.raw_error;
+    expect(pipelineCards(cu as Pipeline, 'raw')[1].note).not.toContain('lỗi xử lý');
     expect(pipelineCards({ ...base, raw_error: 0 }, 'raw')[1].note).not.toContain('lỗi xử lý');
   });
 });
