@@ -136,6 +136,21 @@ export function offeredGroups(t: ProviderTestResult | null | undefined): ModelGr
     : [];
 }
 
+/**
+ * v0.1.66 (F116, bài học BAI-10 "một nút kiểm tra không được làm mất đường thoát của người dùng"): nhóm model cho ô chọn
+ * LUÔN có — lần Kiểm tra xanh thì lấy danh sách thật của CLI / nhà cung cấp; đỏ hoặc chưa kiểm thì lấy danh mục dự
+ * phòng máy chủ gửi kèm (gắn "chưa xác minh"), nguồn khoá API không có thì chỉ còn model đã lưu (`ModelPicker` thêm).
+ */
+export function pickerGroups(t: ProviderTestResult | null | undefined): { groups: ModelGroup[]; live: boolean } {
+  const live = offeredGroups(t);
+  if (live.length) return { groups: live, live: true };
+  const notEmbed = (id: string) => !/embed/i.test(id);
+  const fallback = (t?.model_groups ?? [])
+    .map((g) => ({ ...g, models: g.models.filter((m) => notEmbed(m.id)).map((m) => ({ ...m, verified: false })) }))
+    .filter((g) => g.models.length > 0);
+  return { groups: fallback, live: false };
+}
+
 /** Model đang là mặc định của nguồn (đã "Dùng model này"), không có thì model đã lưu đầu tiên. */
 export function currentModelName(p: Pick<Provider, 'models'>): string | null {
   return p.models.find((m) => m.is_default)?.model_name ?? p.models[0]?.model_name ?? null;
@@ -195,13 +210,30 @@ export function bindingEffortText(slot: SlotView): string {
   return std ? `${EFFORT_LABEL[std] ?? std} (chuẩn)` : '—';
 }
 
-/** Dòng "Nâng cao" của một vai: nhiệt độ · ngữ cảnh · bộ quy tắc (một chuỗi — web không render object). */
-export function bindingParamsText(slot: SlotView & Pick<AgentBindingSlot, 'label'>): string {
+/**
+ * Dòng "Nâng cao" của một vai (một chuỗi — web không render object). v0.1.66 (F021): bốn vai lõi (Gen, Bản tin, Sàng
+ * lọc, Soạn lại) chạy theo hồ sơ chuẩn — nhiệt độ / ngữ cảnh cố định, không chỉnh được ở hộp gán model, và "bộ quy tắc"
+ * không có tác dụng với vai nào ⇒ chỉ agent trực việc (`agent:*`) mới có nhiệt độ + ngữ cảnh do Sếp đặt.
+ */
+export function bindingParamsText(slot: SlotView & Pick<AgentBindingSlot, 'label'> & Partial<Pick<AgentBindingSlot, 'agent_key'>>): string {
   const b = slot.binding;
-  const t = b ? b.temperature : slot.standard?.temperature;
-  const c = b ? b.context_tokens : slot.standard?.context_tokens;
-  const rules = b?.rule_codes?.length ? b.rule_codes.join(', ') : '—';
-  return `${slot.label} — nhiệt độ ${t == null ? '—' : fmtTemperature(t)} · ngữ cảnh ${c == null ? '—' : fmtContextTokens(c)} · bộ quy tắc ${rules}${b ? '' : ' (chuẩn)'}`;
+  const isAgent = (slot.agent_key ?? '').startsWith('agent:');
+  const t = isAgent && b ? b.temperature : slot.standard?.temperature;
+  const c = isAgent && b ? b.context_tokens : slot.standard?.context_tokens;
+  if (!isAgent && (t == null || c == null)) return `${slot.label} — nhiệt độ và ngữ cảnh theo hồ sơ chuẩn (cố định)`;
+  const tail = isAgent ? (b ? '' : ' (chuẩn)') : ' (theo hồ sơ chuẩn, cố định)';
+  return `${slot.label} — nhiệt độ ${t == null ? '—' : fmtTemperature(t)} · ngữ cảnh ${c == null ? '—' : fmtContextTokens(c)}${tail}`;
+}
+
+/** Ngữ cảnh mặc định của agent trực việc (`DEFAULT_CONTEXT_TOKENS` của máy chủ) — ô nhập lấy đúng số này. */
+export const DEFAULT_CONTEXT_TOKENS = 6000;
+
+/** Ô nhập hạn mức → số nguyên dương hoặc null (bỏ hạn mức); chữ không hợp lệ ⇒ undefined. */
+export function parseQuotaInput(v: string): number | null | undefined {
+  const t = v.trim();
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isInteger(n) && n >= 1 ? n : undefined;
 }
 
 /** Model + mức đang dùng của nguồn ("Dùng model này"), không có thì model đã lưu đầu tiên. */

@@ -466,6 +466,8 @@ export interface ProviderModel {
   id: string;
   model_name: string;
   daily_quota: number | null;
+  /** v0.1.66: giới hạn lượt/phút (null = không giới hạn) — đặt ở thẻ nhà cung cấp, "Quản lý khoá và model". */
+  rate_limit_per_min?: number | null;
   used_today: number;
   /** v0.1.31: model mặc định của nguồn ("Dùng model này"). */
   is_default?: boolean;

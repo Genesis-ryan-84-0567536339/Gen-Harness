@@ -48,10 +48,10 @@ export interface P4ApiOptions {
 
 /** ARCHITECTURE §11 — cố định, chỉ đọc. */
 const FAILOVER_RULES: FailoverRule[] = [
-  { key: 'hết hạn mức', value: 'chuyển xuống nhà cung cấp kế tiếp trong chuỗi' },
+  { key: 'hết hạn mức', value: 'chuyển xuống nhà cung cấp kế tiếp trong chuỗi (hạn mức Sếp đặt ở từng model)' },
   { key: 'ngắt mạch', value: 'giữ nguyên hội thoại, thử lại sau 60 giây' },
   { key: 'hết chuỗi', value: 'xếp hàng và báo Sếp qua hàng đợi cần xử lý' },
-  { key: 'ngưỡng cảnh báo', value: 'còn dưới 20% hạn mức trên bất kỳ model nào' },
+  { key: 'ngưỡng cảnh báo', value: 'còn dưới 20% hạn mức ngày trên model nào Sếp đã đặt hạn mức' },
 ];
 
 /** `gh.agents_api.routes.CORE_AGENT_KEYS`. */
