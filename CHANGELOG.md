@@ -7,6 +7,23 @@ Ngày = ngày Release trên GitHub theo giờ Việt Nam; tiêu đề trong `doc
 (v0.1.32–v0.1.34, v0.1.40, v0.1.46) hoặc vài ngày (v0.1.47, v0.1.48: làm 03/10, phát hành 09/10).
 Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) ghi ở [ROADMAP › Bản phản ứng](docs/ROADMAP.md).
 
+## v0.1.68 — Một danh sách việc, thiết lập nói thật, màn «Nhật ký lắng nghe»; bản gộp v0.1.66 + v0.1.67 + v0.1.68 (17/10/2026)
+- **Thiết lập và «Việc Sếp cần làm» nói thật** (D1, C1, C2): chỉ MỘT cách đếm việc và MỘT đường tới «Thêm nguồn AI» (`/setup?buoc=nguon-ai`); nguồn Sếp đã tắt không bị tự bật lại; «Mời người trong đội» chỉ xong khi có người khác Owner đang hoạt động; làm lại bước 8 không tạo agent trùng, agent bước 8 nghe sẵn mọi kênh đã nối; vai không phải Owner mở `/guide/n` thấy khung «Việc này do Owner làm» (hết 403 ở console); Kết nối › Gen-hub «Lưu & kiểm tra» tự ghi kết quả kiểm. Route-crawl duyệt thêm vai Operator và Auditor.
+- **Màn mới «Nhật ký lắng nghe»** (Nâng cao › Tầng dữ liệu, sau Kho dữ liệu thô): một dòng thời gian gộp tin và sự kiện kênh (nhóm mới/rời, thành viên vào-rời, kênh nối/ngắt), kèm chế độ nghe lúc tin vào kho, sàng lọc, quyết định của agent trực; tìm chữ, lọc, tự cập nhật. Migration 0040.
+- **THAY ĐỔI QUYỀN**: đổi hạng chuỗi nguồn AI sau khi Hoàn tất thiết lập, xoá nguồn AI và xoá khoá API cần mã PIN `ai.route_change`; xem thêm v0.1.66 và v0.1.67 ở dưới.
+- Gộp ba bản: v0.1.66 (model hiển thị = model chạy) và v0.1.67 (agent làm và nói thật) **phát hành chung trong v0.1.68** — Sếp chỉ cần một lần `genh update`; kèm bản gộp v0.1.65 (hộp riêng Antigravity, Telegram 2 chiều, chế độ nghe) nếu máy chưa lên. Chi tiết: [docs/releases/v0.1.68.md](docs/releases/v0.1.68.md)
+
+## v0.1.67 — Agent làm và nói thật: lỗi model đúng loại, Lưu trữ agent, «Chưa trả lời» đúng người (17/10/2026)
+- **Agent nói thật** (B7, C5): thẻ agent có dòng MODEL («Chuẩn: …» hoặc model riêng, cảnh báo khi nguồn đã tắt); lỗi 503 phân biệt «chưa có model» với «nguồn đang lỗi / hết hạn mức»; bảng «Agent đã nói gì» hiện câu agent gợi ý, «Đã gửi» chỉ khi nháp thật sự gửi; Soạn lại theo giọng, điều cấm, xưng hô của agent và từ chối đầu ra rỗng hoặc có mã bịa.
+- **Lưu trữ agent** (PIN `agent.manage`, giữ lịch sử quyết định), chặn trùng tên, tắt agent không cần PIN, bật cần PIN, nhân bản chép cả model riêng, mức tự trị mặc định 4, mẫu Việt hoá. Migration 0039. **THAY ĐỔI QUYỀN**: Quản lý chỉ thấy nháp trong phạm vi của mình; «Sửa rồi gửi» của vai dưới Owner chặn chuỗi số đã che (422).
+- **«Chưa trả lời» đúng người, đúng tin** (C6): tin 1-1 ghép theo người nhận, chỉ cảnh báo tin đang chờ trả lời, mỗi người một cảnh báo.
+- Phát hành chung trong v0.1.68 (không có bản v0.1.67 riêng). Chi tiết: [docs/releases/v0.1.67.md](docs/releases/v0.1.67.md)
+
+## v0.1.66 — Model hiển thị = model chạy: một bộ chọn model, một bảng tầng, xoá khoá, gỡ model, đặt hạn mức (17/10/2026)
+- **Một bộ chọn, một bảng tầng**: «Chuẩn: …», chuỗi chạy và bảng gán dùng chung một hàm; model Sếp đã chốt hiện đúng; Gen không ép tầng Nhanh khi Sếp đã ghim model; flash = Cân bằng, flash-lite = Nhanh; ô chọn model luôn hiện cả khi Kiểm tra đỏ (ghi «chưa xác minh»).
+- **Việc mới ở API & Model**: Xoá khoá, Gỡ model (chặn nếu còn lượt gọi trong 30 ngày, có «Tắt model»), ô Hạn mức/ngày và Lượt/phút; chip cảnh báo «đang dùng Chuẩn» khi nguồn của một agent đã tắt (F016). Bản cài cũ chỉ có 1 model Antigravity ⇒ tự thêm model ở ô chọn nếu cần tầng «Kỹ hơn».
+- Phát hành chung trong v0.1.68 (không có bản v0.1.66 riêng). Chi tiết: [docs/releases/v0.1.66.md](docs/releases/v0.1.66.md)
+
 ## v0.1.65 — Chế độ nghe & danh bạ: nhóm mới tự vào Lắng nghe im lặng, thu thành viên mọi nhóm, tin 1-1 lưu im lặng; quyền xem tin 1-1 chặt hơn (17/10/2026)
 - **Nhóm mới mặc định Lắng nghe im lặng** (Sếp chốt 17/10): lưu hết tin, KHÔNG BAO GIỜ trả lời kể cả khi được tag (`tagged_only` mới trả lời khi tag); tin ĐẦU TIÊN của nhóm lạ cũng được lưu; nhóm cũ đang Không nghe giữ nguyên; đổi mặc định ở thẻ kênh (cần mã PIN). **Danh bạ** quét 2 giờ/lượt, thu thành viên MỌI nhóm (kể cả Không nghe), đánh dấu người/nhóm đã rời; nút «Cập nhật danh sách nhóm».
 - **Tin 1-1 lưu im lặng** (bản cài cũ đang tắt ⇒ nay lưu im lặng, đang bật giữ trả lời): ba mức Lưu im lặng / Lưu và cho trợ lý trả lời / Không lưu; «Gán BOT» cho một người có tác dụng với tin 1-1 của người đó. **THAY ĐỔI QUYỀN**: tin 1-1 chỉ Owner (hoặc người phụ trách/được giao đúng người đó) xem nguyên văn; gán/bỏ BOT cho một người chỉ Owner + mã PIN; SĐT/JID che với vai dưới Owner. Migration 0038 (sau 0037).
