@@ -67,7 +67,8 @@ test.describe('UX v0.1.28', () => {
     // Tải lại: kết quả gọi thử + nút chọn model vẫn còn (lưu ở máy chủ).
     await page.reload();
     await expect(page.locator('.prov-row', { hasText: 'Gemini API' }).getByRole('button', { name: 'Dùng model này' })).toBeVisible();
-    await expect(page.getByText(/Chưa chọn thì hệ thống dùng gemini-2.5-flash/)).toBeVisible();
+    // v0.1.66 (model hiển thị = model chạy): nguồn mới thêm chưa lưu model nào ⇒ nói thẳng, không hứa "hệ thống dùng model X".
+    await expect(page.getByText(/Chưa lưu model nào — chọn rồi bấm "Dùng model này"/).first()).toBeVisible();
 
     // Xoá nguồn lỗi.
     page.once('dialog', (d) => void d.accept());
