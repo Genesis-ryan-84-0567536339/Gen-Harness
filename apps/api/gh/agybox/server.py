@@ -52,6 +52,9 @@ ENV_CLI_BINARY = "GH_CLI_BINARY"
 #: ảnh api — hộp không có kho phiên) bị bỏ qua và xoá.
 ALLOWED_ENV = frozenset({ENV_KEY_FILE, ENV_MAX_JOBS, ENV_HOST, ENV_PORT, ENV_CLI_BINARY})
 VERSION_TTL_S = 300.0
+#: Số chữ ký còn trong cửa sổ chống phát lại (2 × MAX_SKEW_S) tối đa được nhớ. Đầy ⇒ TỪ CHỐI yêu cầu mới (bận, thử lại)
+#: thay vì ngừng ghi — review v0.1.63 (P3): trước đây đầy thì chữ ký mới không được nhớ nên phát lại được.
+SEEN_MAX = 4096
 _VERSION_RE = re.compile(r"\d+\.\d+\.\d+\S*")
 
 
@@ -161,8 +164,10 @@ def create_app(cfg: Config, *, clock: Callable[[], float] = time.time) -> Starle
         if why is not None:
             log.warning("agy-box: từ chối %s %s (%s)", request.method, request.url.path, why)
             raise _Reject(P.E_UNAUTHORIZED, "Chữ ký không hợp lệ hoặc đã hết hạn")
-        if len(seen) < 4096:
-            seen[sig] = now
+        if len(seen) >= SEEN_MAX:
+            log.warning("agy-box: bộ nhớ chống phát lại đầy (%d) — từ chối yêu cầu mới", len(seen))
+            raise _Reject(P.E_BUSY, "Hộp đang bận", retry_after=P.BUSY_RETRY_AFTER_S)
+        seen[sig] = now
         return sig
 
     def parse(body: bytes) -> dict[str, Any]:
