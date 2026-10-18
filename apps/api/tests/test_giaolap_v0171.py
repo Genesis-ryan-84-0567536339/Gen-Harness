@@ -209,6 +209,34 @@ async def test_opportunity_count_is_the_same_in_inbox_and_owner_feed(app, db, ow
     assert inbox == feed_counts == 3, (inbox, feed_counts)
 
 
+# ─── P3-10 — vai dưới Owner không đọc được OTP / mật khẩu ở Kho thô, Nhật ký lắng nghe ───────────────────────────────
+
+OTP_TEXT = "Mã xác minh của bạn là 482913, mật khẩu wifi: abc12345xyz, gọi 0912 345 678"
+
+
+def test_mask_text_hides_otp_and_passwords_below_owner_only() -> None:
+    from gh.data.common import mask_text
+
+    low = mask_text(OTP_TEXT, False) or ""
+    assert "482913" not in low and "abc12345xyz" not in low and "0912 345 678" not in low
+    assert "Mã xác minh" in low and "gọi" in low                        # phần còn lại của câu giữ nguyên
+    assert mask_text(OTP_TEXT, True) == OTP_TEXT                         # Owner thấy nguyên văn
+    assert mask_text("Còn 25 tấn thép, giá 14.500 đồng", False) == "Còn 25 tấn thép, giá 14.500 đồng"
+
+
+async def test_raw_store_and_listen_log_hide_otp_from_auditor(app, db, redis, owner_api) -> None:  # type: ignore[no-untyped-def]
+    from tests.test_rbac_api import login_as
+
+    org = await org_id(db)
+    await listen(db, org, "g1")
+    [raw] = await put(sessionmaker(), org, msg(OTP_TEXT, sender="u1", name="Chị Lan"))
+    aud = await login_as(owner_api.c, db, "auditor")
+    for url in (f"/raw/{raw}", "/raw?since=all", "/listen-log?since=all&kind=all"):
+        body = (await aud.get(url)).text
+        assert "482913" not in body and "abc12345xyz" not in body, url
+    assert "482913" in (await owner_api.get(f"/raw/{raw}")).text
+
+
 # ─── P3-4 — chưa có bộ ghi lời hứa: không nói «không có lời hứa bị vỡ» ────────────────
 
 def test_care_scenario_note_does_not_claim_no_broken_promises_while_untracked() -> None:

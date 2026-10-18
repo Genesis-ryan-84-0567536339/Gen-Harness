@@ -113,6 +113,11 @@ def _mask_context_secrets(s: str) -> str:
     return _RE_OTP_BEFORE_CODE.sub(lambda m: m.group(1) + MASK, s)
 
 
+def mask_context_secrets(s: str) -> str:
+    """Che mã OTP / mật khẩu / tham số bí mật trong URL cạnh từ khoá (không đụng tới số điện thoại hay email)."""
+    return _mask_context_secrets(unicodedata.normalize("NFKC", s))
+
+
 def _mask_str(s: str, extra: tuple[str, ...]) -> str:
     for secret in extra:
         if secret:

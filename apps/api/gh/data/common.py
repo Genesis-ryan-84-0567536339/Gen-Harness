@@ -203,6 +203,12 @@ def has_masked_number(text_: str | None) -> bool:
 def mask_text(text_: str | None, is_owner: bool) -> str | None:
     if text_ is None or is_owner:
         return text_
+    # v0.1.71 (P3-10): vai dưới Owner cũng không đọc được mã OTP / mật khẩu / token trong URL cạnh từ khoá (hình dạng
+    # chuỗi không lộ, chỉ ngữ cảnh mới lộ) — cùng bộ luật với chữ gửi cho model. Import muộn: `chassis.masking` nhập
+    # lại module này.
+    from gh.chassis.masking import mask_context_secrets
+
+    text_ = mask_context_secrets(text_)
 
     def sub(m: re.Match[str]) -> str:
         digits = re.sub(r"\D", "", m.group(1))
