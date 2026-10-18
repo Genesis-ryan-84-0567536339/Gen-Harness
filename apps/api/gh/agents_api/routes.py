@@ -145,6 +145,8 @@ CORE_AGENT_KEYS: dict[str, str] = {
     "core.reply": "Soạn lại / dịch nháp",
     "core.gen": "Gen — trợ lý quản trị",
     "core.briefing": "Bản tin Gen",
+    "core.owner_reply": "Sếp gọi bot ở nhóm",
+    "core.support": "Chế độ hỗ trợ nhóm",
 }
 
 

@@ -126,6 +126,9 @@ WHERE (
                  ELSE u.listen_mode = 'proactive' OR (u.listen_mode = 'tagged_only' AND u.tagged) END)
   )
   AND NOT EXISTS (SELECT 1 FROM agent.decisions d WHERE d.agent_id = a.id AND d.trigger_unit_id = u.id)
+  -- v0.1.72: tin của chính Sếp (tài khoản bot đã ghép, attrs.is_owner) là LỆNH GỌI bot —
+  -- gh.owner_channel.group_reply trả lời tại chỗ; agent trực không soạn thêm một nháp trùng.
+  AND COALESCE(pp.attrs->>'is_owner', '') <> 'true'
 ORDER BY u.tagged DESC, u.observed_at, a.id
 LIMIT :n
 """

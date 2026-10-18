@@ -49,7 +49,9 @@ CHOICE_EFFORTS = ("low", "medium", "high")   # chat chỉ cho chọn ba mức n�
 ROLE_GEN, ROLE_BRIEFING, ROLE_REFINERY, ROLE_REPLY, ROLE_AGENT = (
     "core.gen", "core.briefing", "core.refinery", "core.reply", "agent:*")
 #: Vai chạy nền (không có Sếp ngồi trước màn hình): luật F-86 (Claude Code CLI) áp bất kể `purpose` bên gọi truyền.
-BACKGROUND_ROLES = frozenset({ROLE_BRIEFING, ROLE_REFINERY, ROLE_AGENT})
+#: v0.1.72: Sếp tag bot trong nhóm và Chế độ hỗ trợ chạy khi không có Sếp ngồi trước màn hình ⇒ cũng là việc nền.
+ROLE_OWNER_REPLY, ROLE_SUPPORT = "core.owner_reply", "core.support"
+BACKGROUND_ROLES = frozenset({ROLE_BRIEFING, ROLE_REFINERY, ROLE_AGENT, ROLE_OWNER_REPLY, ROLE_SUPPORT})
 
 
 @dataclass(frozen=True)
@@ -85,6 +87,9 @@ PROFILES: dict[str, dict[str, Profile]] = {
                  KIND_CLAUDE: Profile("balanced", None, 0.3, 6000),
                  KIND_AGY: Profile("balanced", "low", 0.3, 6000)},
 }
+# v0.1.72: hai vai mới dùng hồ sơ của «Soạn lại / dịch nháp» (cân bằng) — cùng lớp «người ngoài», chạy qua hộp riêng.
+PROFILES[ROLE_OWNER_REPLY] = PROFILES[ROLE_REPLY]
+PROFILES[ROLE_SUPPORT] = PROFILES[ROLE_REPLY]
 
 
 def role_of(agent_key: str) -> str | None:

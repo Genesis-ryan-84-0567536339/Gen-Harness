@@ -93,10 +93,12 @@ def test_box_required_matches_the_b2_call_shape() -> None:
 
 def test_placement_table_is_the_single_source_and_read_only() -> None:
     assert dict(placement.AGY_PLACEMENT) == {GEN: "inproc", BRIEFING: "box", "agent:*": "inproc",
-                                            REPLY: "box", REFINERY: "box"}
+                                            REPLY: "box", REFINERY: "box",
+                                            "core.owner_reply": "box", "core.support": "box"}
     with pytest.raises(TypeError):
         placement.AGY_PLACEMENT["core.reply"] = "inproc"  # type: ignore[index]
-    assert placement.BOX_PURPOSES == {"setup_agent_try", "draft_translate", "draft_regenerate", "duty_decide"}
+    assert placement.BOX_PURPOSES == {"setup_agent_try", "draft_translate", "draft_regenerate", "duty_decide",
+                                      "owner_reply", "support_classify", "support_reply"}
     # Hai tên chỗ chạy là hằng của hợp đồng — B2 so khớp theo chuỗi.
     assert (placement.INPROC, placement.BOX) == ("inproc", "box")
 

@@ -15,6 +15,7 @@ Bảng (`AGY_PLACEMENT` + ba ngoại lệ bên dưới):
 | `agent:<id>` nội bộ (không gắn kênh / nhóm / người) | inproc |
 | `core.reply` (soạn lại / dịch nháp tin khách) | box |
 | `core.refinery` (sàng lọc tin người lạ) | box |
+| `core.owner_reply` (Sếp tag bot trong nhóm), `core.support` (Chế độ hỗ trợ) | box |
 | `agent:<id>` ngoại giao (`agy_policy.diplomatic_agent_ids`) | box |
 | `core.gen` của nhân viên (không phải Owner) | box |
 | lượt thử agent, Soạn lại / Dịch nháp tin khách, trực việc (`purpose` ∈ `BOX_PURPOSES`) | box |
@@ -53,6 +54,9 @@ AGY_PLACEMENT: Mapping[str, str] = MappingProxyType({
     ROLE_AGENT: INPROC,          # agent không gắn kênh / nhóm / người; ngoại giao ⇒ DIPLOMATIC_AGENT_PLACEMENT
     "core.reply": BOX,
     "core.refinery": BOX,
+    # v0.1.72: bot tài khoản riêng. Cả hai đọc chữ NGƯỜI NGOÀI trong nhóm và đầu ra cả nhóm đọc ⇒ luôn qua hộp.
+    "core.owner_reply": BOX,     # Sếp tag bot trong nhóm ⇒ trả lời tại chỗ
+    "core.support": BOX,         # Chế độ hỗ trợ: trả lời thành viên nhóm
 })
 #: Ngoại lệ: agent ngoại giao (có `channel_scopes` / gán BOT nhóm / gán BOT người) đọc nội dung người ngoài.
 DIPLOMATIC_AGENT_PLACEMENT = BOX
@@ -65,7 +69,11 @@ STAFF_GEN_PLACEMENT = BOX
 #:   theo tiêu chí DB) vẫn không được chạy agy trong tiến trình;
 #: - `duty_decide` (review v0.1.63, P3): agent trực việc quyết định trên tin khách (`gh/biz/duty/engine.py`) — luôn
 #:   qua hộp, kể cả khi agent không (còn) "ngoại giao" theo tiêu chí DB.
-BOX_PURPOSES = frozenset({"setup_agent_try", "draft_translate", "draft_regenerate", "duty_decide"})
+#: - `owner_reply` / `support_classify` / `support_reply` (v0.1.72): Sếp gọi bot trong nhóm và Chế độ hỗ trợ —
+# chữ của người
+#:   ngoài vào lời nhắc, đầu ra đăng vào nhóm ⇒ KHÔNG BAO GIỜ chạy agy trong tiến trình.
+BOX_PURPOSES = frozenset({"setup_agent_try", "draft_translate", "draft_regenerate", "duty_decide", "owner_reply",
+                          "support_classify", "support_reply"})
 #: Khoá lạ (không có trong bảng): đóng an toàn ⇒ hộp.
 UNKNOWN_PLACEMENT = BOX
 

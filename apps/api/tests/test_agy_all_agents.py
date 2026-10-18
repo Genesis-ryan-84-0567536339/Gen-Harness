@@ -270,7 +270,9 @@ async def test_bindings_have_no_api_key_reason_and_agy_assignable_to_every_key(o
     org, _pid, mid = await _agy_only(api)
     aid = await _seed_agent(db, org)
     items = {i["agent_key"]: i for i in (await api.get("/agents/bindings")).json()["items"]}
-    assert set(items) == {"core.gen", "core.refinery", "core.briefing", "core.reply", f"agent:{aid}"}
+    # v0.1.72: + core.owner_reply, core.support (Sếp gọi bot ở nhóm, Chế độ hỗ trợ).
+    assert set(items) == {"core.gen", "core.refinery", "core.briefing", "core.reply",
+                          "core.owner_reply", "core.support", f"agent:{aid}"}
     for k, it in items.items():                                              # (d)
         assert it["source"] == "standard" and it["standard_reason"] is None, k
         # v0.1.66 (F005): fixture đã chốt gemini-3.1-pro ("Dùng model này") ⇒ "Chuẩn" nói đúng model chạy thật.

@@ -22,7 +22,8 @@ from tests.phase2 import org_id
 from tests.test_p4_agents import _seed_agent, _seed_provider_model
 from tests.test_ux_v0128 import _provider
 
-CORE = {"core.refinery", "core.reply", "core.gen", "core.briefing"}  # v0.1.55 (G1): + Bản tin Gen
+CORE = {"core.refinery", "core.reply", "core.gen", "core.briefing",
+        "core.owner_reply", "core.support"}  # v0.1.55 (G1): + Bản tin Gen; v0.1.72: + Sếp gọi bot ở nhóm, Chế độ hỗ trợ
 DEAD = {"core.intent", "core.scoring", "core.indexing"}
 
 
