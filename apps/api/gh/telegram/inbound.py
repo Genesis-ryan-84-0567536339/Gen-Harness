@@ -308,7 +308,8 @@ async def record_reject(
 
 async def rate_ok(redis: Any, org_id: uuid.UUID, now: datetime | None = None) -> bool:
     """Tối đa `RATE_PER_MIN` lệnh trong BẤT KỲ 60 giây liền kề/tổ chức (cửa sổ trượt, v0.1.68). Cài đặt ở bộ đếm chung
-    `gh.owner_cmd.core.rate_ok` (zset + Lua, khoá Redis cũ `gh:tg:rate:<org>`) để kênh quản trị Zalo/WhatsApp dùng lại."""
+    `gh.owner_cmd.core.rate_ok` (zset + Lua, khoá Redis cũ `gh:tg:rate:<org>`) để kênh quản trị Zalo/WhatsApp
+    dùng lại."""
     return await owner_rate_ok(redis, org_id, "telegram", now, RATE_PER_MIN)
 
 

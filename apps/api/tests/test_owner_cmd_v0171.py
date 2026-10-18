@@ -140,18 +140,21 @@ async def test_rate_limit_is_per_minute_per_channel(redis: Any) -> None:
     org, t = uuid.uuid4(), datetime(2026, 10, 18, 9, 0, 10, tzinfo=UTC)
     assert [await core.rate_ok(redis, org, "zalo", t) for _ in range(21)] == [True] * 20 + [False]
     assert await core.rate_ok(redis, org, "whatsapp", t) is True  # kênh khác: bộ đếm riêng
-    assert await core.rate_ok(redis, org, "zalo", t + timedelta(minutes=1)) is True  # đúng 60 giây sau ⇒ đã ra khỏi cửa sổ trượt
+    # đúng 60 giây sau ⇒ đã ra khỏi cửa sổ trượt
+    assert await core.rate_ok(redis, org, "zalo", t + timedelta(minutes=1)) is True
     assert await core.rate_ok(redis, uuid.uuid4(), "zalo", t) is True  # tổ chức khác
     assert await core.rate_ok(None, org, "zalo", t) is True  # không Redis ⇒ cho qua
     org3 = uuid.uuid4()
-    assert [await core.rate_ok(redis, org3, "zalo", t, per_min=3) for _ in range(4)] == [True] * 3 + [False]  # trần tuỳ chỉnh
+    # trần tuỳ chỉnh
+    assert [await core.rate_ok(redis, org3, "zalo", t, per_min=3) for _ in range(4)] == [True] * 3 + [False]
 
 
 async def test_telegram_rate_limit_keeps_its_redis_key_and_limit(redis: Any) -> None:
     org, t = uuid.uuid4(), datetime(2026, 10, 18, 9, 0, 10, tzinfo=UTC)
     assert inbound.RATE_PER_MIN == core.RATE_PER_MIN == 20
     assert [await inbound.rate_ok(redis, org, t) for _ in range(21)] == [True] * 20 + [False]
-    assert await redis.zcard(f"gh:tg:rate:{org}") == 20  # khoá cũ của v0.1.68 (cửa sổ trượt: zset), lệnh bị chặn không được ghi
+    # khoá cũ của v0.1.68 (cửa sổ trượt: zset), lệnh bị chặn không được ghi
+    assert await redis.zcard(f"gh:tg:rate:{org}") == 20
     assert await redis.exists(f"gh:zalo:rate:{org}") == 0
 
 

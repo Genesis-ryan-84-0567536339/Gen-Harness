@@ -61,6 +61,8 @@ from gh.middleware import (
 )
 from gh.notifications import router as notifications_router
 from gh.owner.routes import router as owner_router
+from gh.owner_channel import jobs as owner_jobs
+from gh.owner_channel.routes import router as owner_channel_router
 from gh.plugins_api.routes import router as plugins_router
 from gh.providers import cli as climod
 from gh.providers import clients
@@ -207,6 +209,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     stop = asyncio.Event()
     consumers = start_ingest(app, stop)
     consumers.append(asyncio.create_task(_permit_sweep_loop(sm, app.state.redis, stop), name="permit-sweep"))
+    # v0.1.72: kênh quản trị Zalo/WhatsApp — tin 1-1 của Sếp, mã ghép (gh.owner.inbound).
+    consumers.extend(owner_jobs.start(app, stop, sm))
     # v0.1.29: kết quả đã ký từ browser-worker (gh:browser:results) → DB, phiên mã hoá, chuông Owner.
     consumers.append(asyncio.create_task(
         social_service.consume_results(sm, app.state.redis, stop, f"api-{socket.gethostname()}"),
@@ -258,7 +262,7 @@ def create_app(*, with_lifespan: bool = True, expose_docs: bool | None = None) -
              mcp_router, data_router, system_router, update_router, backups_router, offsite_router, org_router,
              gen_router, coach_router, notifications_router, triage_router, hub_router, social_router, health_router,
              boss_checks_router, telegram_router, diagnostics_router, client_errors_router, access_router,
-             defaults_router, jev_router, owner_router):
+             defaults_router, jev_router, owner_router, owner_channel_router):
         app.include_router(r, prefix="/api/v1")
     for r in biz.routers():
         app.include_router(r, prefix="/api/v1")

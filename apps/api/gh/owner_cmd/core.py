@@ -186,7 +186,8 @@ async def rate_ok(
     redis: Any, org_id: uuid.UUID, via: str = "telegram", now: datetime | None = None, per_min: int = RATE_PER_MIN
 ) -> bool:
     """Tối đa `per_min` lệnh trong BẤT KỲ 60 giây liền kề/tổ chức/kênh (cửa sổ trượt, không theo phút đồng hồ — cửa sổ
-    cố định cho lọt 2×giới hạn quanh ranh giới phút). Lệnh ở đúng mốc `now - 60s` đã ra khỏi cửa sổ. Không Redis ⇒ cho qua."""
+    cố định cho lọt 2×giới hạn quanh ranh giới phút). Lệnh ở đúng mốc `now - 60s` đã ra khỏi cửa sổ. Không
+    Redis ⇒ cho qua."""
     if redis is None:
         return True
     now_ms = int((now or datetime.now(UTC)).timestamp() * 1000)

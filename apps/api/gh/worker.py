@@ -59,6 +59,7 @@ from gh.hardening import set_not_dumpable
 from gh.hub_link import service as hub_link
 from gh.identity import service as identity
 from gh.memory import notebook
+from gh.owner_channel import reports as owner_reports
 from gh.providers import cli as climod
 from gh.providers import clients
 from gh.providers.router import ModelRouter
@@ -104,6 +105,7 @@ JOB_LABELS = {
     "scheduled_backup_scan": "Sao lưu theo lịch",
     "gen_briefing": "Bản tin Gen",
     "telegram_flush": "Gửi tin Telegram",
+    "owner_flush": "Báo cáo cho Sếp qua kênh quản trị",
     "telegram_inbound": "Nhận tin Telegram của Sếp",
     "hub_breaker_watch": "Theo dõi Gen-hub",
     "gen_kho_release": "Đề xuất ghi Phiên vào Kho",
@@ -419,6 +421,13 @@ async def telegram_flush(ctx: dict[str, Any]) -> dict[str, int]:
     return await telegram.flush_outbox(sessionmaker(), redis=ctx.get("redis_bus"))
 
 
+async def owner_flush(ctx: dict[str, Any]) -> dict[str, int]:
+    """v0.1.72: gửi hàng đợi báo cáo chủ động của kênh quản trị (chỉ sự kiện đặc biệt) qua cửa `send_auto(owner_dm)`,
+    mỗi phút."""
+    s = get_settings()
+    return await owner_reports.flush(sessionmaker(), EventBus(ctx["redis_bus"], s.stream_maxlen), ctx["redis_bus"])
+
+
 _BIZ_JOBS = [*biz.jobs(), *BACKUP_JOBS, *TELEGRAM_JOBS]  # PLAN §5.6 — cùng mẫu CronJob; v0.1.64: + telegram_inbound
 
 
@@ -432,7 +441,7 @@ class WorkerSettings:
     functions = [verify_action_log, partition_maintenance, detect_identities, compact_notebooks, expire_sessions,
                  purge_gen_conversations, purge_notifications, retention_sweep, hub_token_expiry_scan,
                  hub_breaker_watch, social_schedule, social_session_check, gen_briefing, gen_kho_release,
-                 gen_coach, telegram_flush, *(fn for fn, _ in _BIZ_JOBS), *BACKUP_FUNCTIONS]
+                 gen_coach, telegram_flush, owner_flush, *(fn for fn, _ in _BIZ_JOBS), *BACKUP_FUNCTIONS]
     health_check_interval = 30
     job_timeout = JOB_TIMEOUT  # v0.1.40 (F-16): tường minh — `_cron` dùng cùng giá trị để nhận ra lần quá giờ
     # v0.1.36 (F-45): mọi giờ dưới đây là GIỜ VN (Asia/Ho_Chi_Minh). Job nặng theo ngày tránh 08:00–18:00 và cửa
@@ -457,6 +466,7 @@ class WorkerSettings:
         _cron(gen_coach, hour={9, 11, 14}, minute={5}),
         # mỗi phút — gửi hộp thư đi Telegram (bản tin + nhắc việc của Owner, F-8c); lượt ngắn
         _cron(telegram_flush, minute=set(range(60)), timeout=TELEGRAM_FLUSH_TIMEOUT),
+        _cron(owner_flush, minute=set(range(60)), timeout=TELEGRAM_FLUSH_TIMEOUT),
         *(_cron(fn, **kw) for fn, kw in _BIZ_JOBS),              # biz + sao lưu: giữ NGUYÊN kw (kể cả timeout)
     ]
 
