@@ -45,6 +45,11 @@ ALERT_TYPE_LABELS = {
     # dòng cũ (≤ v0.1.58) vẫn hiện đúng tên.
     "model_chain_agy_only": "Chưa có nguồn AI phù hợp",
 }
+#: `biz.promises` (lời hứa trong hội thoại) CHƯA có bộ nào ghi vào — không việc nền nào trích lời hứa ra khỏi tin nhắn
+#: (v0.1.71, giả lập toàn luồng P3-4; Nợ #62). Chưa theo dõi thì các câu nhận xét của Chăm sóc khách không được
+#: nói «không có lời hứa bị vỡ» như thể đã theo dõi (cảnh báo `forgotten_deadline` tự trống: không có dòng nào để quét).
+#: Bật lại cùng cờ `PROMISES_TRACKED` của web (`apps/web/src/lib/features.ts`).
+PROMISES_TRACKED = False
 
 # Đơn vị ý nghĩa nào rơi vào tab nào của Hộp thư (mục "Chỗ tự quyết" trong docs/api/phase-3-queue.md).
 OPPORTUNITY_EVENTS = frozenset({"AskedPrice", "OfferedSupply", "RequestedPartnership"})

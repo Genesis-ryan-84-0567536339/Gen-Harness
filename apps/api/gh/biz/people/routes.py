@@ -30,6 +30,7 @@ from gh.auth.deps import current_user, require, require_pin
 from gh.biz.core import explain
 from gh.biz.core.scope import Scope, not_found, scope_for
 from gh.biz.people import service as psvc
+from gh.biz.queue import service as qsvc
 from gh.chassis import actionlog
 from gh.data.common import iso, mask_text, parse_cursor
 from gh.db import DB
@@ -586,8 +587,9 @@ def _scenario_note(status: str, stats: dict[str, Any] | None, broken: int) -> st
         return "Không có dữ liệu hội thoại để đối chiếu"
     fast_pct = stats.get("fast_pct")
     parts = [f"phản hồi nhanh {fast_pct:g}%" if fast_pct is not None and fast_pct >= 60 else
-             (f"phản hồi chậm ({fast_pct:g}% nhanh)" if fast_pct is not None else "không có lượt phản hồi nào"),
-             "không có lời hứa bị vỡ" if broken == 0 else f"{broken} lời hứa bị vỡ"]
+             (f"phản hồi chậm ({fast_pct:g}% nhanh)" if fast_pct is not None else "không có lượt phản hồi nào")]
+    if qsvc.PROMISES_TRACKED:     # chưa theo dõi lời hứa thì không nói «không có lời hứa bị vỡ» (v0.1.71)
+        parts.append("không có lời hứa bị vỡ" if broken == 0 else f"{broken} lời hứa bị vỡ")
     kind = "Kịch bản thắng" if status == "won" else "Kịch bản mất khách"
     return f"{kind}: {', '.join(parts)}."
 

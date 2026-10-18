@@ -58,6 +58,11 @@ import { WorkScreen } from '../../src/owner/work/WorkScreen';
 import { useOwnerBrief, useOwnerProposals, useOwnerRelations, useOwnerToday } from '../../src/owner/queries';
 import { useDrafts } from '../../src/screens/core/queries';
 
+// Các ca trong tệp này viết cho trạng thái ĐÃ theo dõi lời hứa (`PROMISES_TRACKED = true`); mặc định hiện tại là false
+// (v0.1.71, P3-4) — trạng thái ẩn được kiểm ở `promises-hidden-v0171.test.tsx`.
+vi.mock('../../src/lib/features', () => ({ PROMISES_TRACKED: true }));
+
+
 // ── dữ liệu mẫu (tên hư cấu, không có địa chỉ Gen-hub / Kho thật) ───────────────────────────────────────────────────────
 
 const MIN = 60_000;

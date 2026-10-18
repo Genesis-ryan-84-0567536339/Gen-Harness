@@ -131,3 +131,22 @@ async def test_gen_tool_results_to_model_are_masked_but_ids_survive(app, db, red
     _no_secret(res.text)
 
 
+# ─── P3-4 — chưa có bộ ghi lời hứa: không nói «không có lời hứa bị vỡ» ────────────────
+
+def test_care_scenario_note_does_not_claim_no_broken_promises_while_untracked() -> None:
+    from gh.biz.people.routes import _scenario_note
+
+    note = _scenario_note("won", {"fast_pct": 80.0}, 0)
+    assert "lời hứa" not in note and note.startswith("Kịch bản thắng")
+
+
+def test_nothing_writes_biz_promises() -> None:
+    """Điều kiện của cờ `PROMISES_TRACKED = False`: nếu sau này có mã ghi `biz.promises`, test này đỏ để nhớ bật lại
+    cờ (máy chủ `gh.biz.queue.service` + web `src/lib/features.ts`) và gỡ Nợ #62."""
+    import pathlib
+    import re
+
+    root = pathlib.Path(__file__).resolve().parents[1] / "gh"
+    writers = [str(p.relative_to(root)) for p in root.rglob("*.py")
+               if re.search(r"INSERT\s+INTO\s+biz\.promises", p.read_text(), re.I)]
+    assert writers == [], writers

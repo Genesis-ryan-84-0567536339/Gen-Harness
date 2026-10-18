@@ -104,18 +104,12 @@ test.describe('v0.1.59 · Việc', () => {
     expect(t.status).toBe('todo');
   });
 
-  test('lời hứa quá hạn nằm trong Việc hôm nay; tick Xong ghi "đã giữ lời"', async ({ page }) => {
+  test('chưa có bộ ghi lời hứa (v0.1.71): Việc hôm nay không có dòng lời hứa', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/owner/viec');
-    const title = 'Gọi lại xác nhận giá cho An Khang trong hôm nay';
-    const row = page.getByTestId('work-today').getByTestId('work-task-row').filter({ hasText: title });
-    await expect(row).toBeVisible();
-    await expect(row).toHaveAttribute('data-kind', 'promise');
-    await expect(row.getByRole('link', { name: 'Mở hồ sơ' })).toHaveAttribute('href', /\/owner\/quan-he\?nguoi=/);
-    await row.getByRole('checkbox', { name: `Xong: ${title}` }).check();
-    await expect(page.getByTestId('work-today').getByText(title)).toHaveCount(0);
-    const kept = (await apiCall(page, 'GET', '/tasks/promises?status=overdue')) as { items: Array<{ text: string }> };
-    expect(kept.items.some((p) => p.text === title)).toBe(false);
+    await expect(page.getByTestId('work-today')).toBeVisible();
+    await expect(page.getByTestId('work-today').locator('[data-kind="promise"]')).toHaveCount(0);
+    await expect(page.getByTestId('work-today').getByText('Gọi lại xác nhận giá cho An Khang trong hôm nay')).toHaveCount(0);
   });
 
   test('Gen đề xuất: "Tạo nhắc" chỉ tạo việc khi Sếp bấm', async ({ page }) => {

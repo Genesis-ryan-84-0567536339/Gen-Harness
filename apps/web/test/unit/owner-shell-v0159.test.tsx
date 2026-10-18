@@ -48,6 +48,11 @@ import { routes } from '../../src/router';
 import { createMock as createOwnerMock } from '../mock-owner';
 import type { P2Ctx } from '../mock-phase2';
 
+// Các ca trong tệp này viết cho trạng thái ĐÃ theo dõi lời hứa (`PROMISES_TRACKED = true`); mặc định hiện tại là false
+// (v0.1.71, P3-4) — trạng thái ẩn được kiểm ở `promises-hidden-v0171.test.tsx`.
+vi.mock('../../src/lib/features', () => ({ PROMISES_TRACKED: true }));
+
+
 // ── dữ liệu mẫu: lấy THẲNG từ mock-owner (nếu mock và hợp đồng lệch nhau thì test này đỏ) ─────────────────────────────
 
 const ME = (over: Record<string, unknown> = {}, role = 'owner') => ({

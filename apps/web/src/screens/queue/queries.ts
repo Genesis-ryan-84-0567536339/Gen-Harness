@@ -184,10 +184,11 @@ export const useUpdateTask = () => {
   });
 };
 
-export const usePromises = (status: 'upcoming' | 'overdue' | 'kept' | 'all') =>
+export const usePromises = (status: 'upcoming' | 'overdue' | 'kept' | 'all', enabled = true) =>
   useQuery({
     queryKey: qkQueue.promises(status),
     queryFn: ({ signal }) => api.queue.tasks.promises.list({ status }, signal),
+    enabled,
   });
 
 export const useKeepPromise = () => {
