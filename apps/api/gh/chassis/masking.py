@@ -131,6 +131,63 @@ def _mask_str(s: str, extra: tuple[str, ...]) -> str:
     return _RE_LONGNUM.sub(num, s)
 
 
+# ─── che nội dung NGƯỜI NGOÀI trước khi vào prompt model (v0.1.71, giả lập toàn luồng P2-3) ───────────────────────
+# `mask_for_model` che MỌI dãy ≥ 8 chữ số — kể cả giá tiền «25.000.000» mà sàng lọc / agent cần đọc để trích `value_vnd`
+# và báo giá. Bản này giữ nguyên số tiền (nhóm 3 chữ số cách nhau bởi . , hoặc dấu cách, không bắt đầu bằng 0), ngày,
+# giờ ISO, UUID và mã đối tượng (PER-…, OPP-…); che OTP / mật khẩu cạnh từ khoá, khoá/token, email, số điện thoại (giữ
+# 3 số cuối như `mask_text` để model vẫn hiểu đó là SĐT) và số tài khoản / thẻ / giấy tờ.
+_RE_PROMPT_KEEP = (
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"                  # UUID
+    r"|\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?"          # ngày giờ ISO
+    r"|\b(?:PER|GRP|OPP|TSK|ACT|ALR|RAW|SYS|DEAL|CASE|DOC|DRF)-(?:[A-Z]{2}-)?\d+\b")                 # mã đối tượng
+_RE_PHONE = (r"(?<![\w.+-])(?:\+84|0)(?:[ .-]?\d){8,10}(?!\d)"                                      # 0912 345 678, +84…
+             r"|(?<![\d.,+-])84[ .-]?[35789](?:[ .-]?\d){8}(?!\d)")                                    # 84 912 345 678
+_RE_PROMPT_NUMBER = re.compile(rf"(?P<keep>{_RE_PROMPT_KEEP})|(?P<phone>{_RE_PHONE})|(?P<num>{_RE_LONGNUM.pattern})")
+_RE_MONEY = re.compile(r"[1-9]\d{0,2}(?:[., ]\d{3})+")
+
+
+def _hide_digits(digits: str) -> str:
+    return "•" * (len(digits) - 3) + digits[-3:]
+
+
+def _prompt_number(m: re.Match[str]) -> str:
+    whole = m.group(0)
+    if m.group("keep") is not None:
+        return whole
+    if m.group("phone") is not None:
+        return _hide_digits(re.sub(r"\D", "", whole))
+    digits = re.sub(r"\D", "", whole)
+    if len(digits) < 8 or _RE_DATE.fullmatch(whole.strip()) or _RE_MONEY.fullmatch(whole):
+        return whole                                    # ngày tháng, số tiền có dấu phân cách nghìn
+    if whole.isdigit() and len(digits) < 10 and not whole.startswith("0"):
+        return whole                                    # 8–9 chữ số liền, không bắt đầu bằng 0: coi là số tiền
+    return _hide_digits(digits)
+
+
+def _prompt_str(s: str, extra: tuple[str, ...]) -> str:
+    for secret in extra:
+        if secret:
+            s = s.replace(secret, MASK)
+    s = _mask_context_secrets(unicodedata.normalize("NFKC", s))
+    s = _RE_SECRET.sub(MASK, s)
+    s = _RE_EMAIL.sub(lambda m: f"{m.group(1)}•••@{m.group(2)}", s)
+    return _RE_PROMPT_NUMBER.sub(_prompt_number, s)
+
+
+def mask_for_prompt(data: Any, *, secrets: tuple[str, ...] = ()) -> Any:
+    """Che nội dung người ngoài (tin nhắn, tên, kết luận trích từ tin) trước khi đưa vào prompt model. Chuỗi: xem khối
+    chú thích phía trên; dict/list: đệ quy, giá trị của khoá kiểu mật khẩu/token bị thay hẳn; số, bool, None giữ
+    nguyên."""
+    if isinstance(data, str):
+        return _prompt_str(data, secrets)
+    if isinstance(data, list):
+        return [mask_for_prompt(v, secrets=secrets) for v in data]
+    if isinstance(data, dict):
+        return {str(k): (MASK if is_secret_key(str(k)) and isinstance(v, str | int) and not isinstance(v, bool)
+                         and v != "" else mask_for_prompt(v, secrets=secrets)) for k, v in data.items()}
+    return data
+
+
 def _keep_id(value: str, secrets: tuple[str, ...]) -> bool:
     """Giá trị dưới khoá `keep_keys` có được giữ nguyên không (id Gmail/sự kiện/tệp có thể chứa ≥ 8 chữ số liền —
     regex số dài sẽ phá id)? Chỉ khi là id thuần, không '@', không chứa token của liên kết, không giống khoá/token."""
@@ -168,4 +225,4 @@ def mask_error(message: str, *, secrets: tuple[str, ...] = (), limit: int = 200)
     return _mask_str(message[:4000], secrets)[:limit]  # che TRƯỚC khi cắt — không để nửa token lọt qua regex
 
 
-__all__ = ["MASK", "mask_error", "mask_for_model"]
+__all__ = ["MASK", "mask_error", "mask_for_model", "mask_for_prompt"]
