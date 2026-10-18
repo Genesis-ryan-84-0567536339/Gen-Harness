@@ -1,23 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
-import { ApiError, SCREEN_BY_KEY, type ListenLogDecision, type ListenLogEvent, type ListenLogItem, type ListenLogMessage } from '@gen-harness/contracts';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ApiError, SCREEN_BY_KEY, type AutoSendItem, type ListenLogDecision, type ListenLogEvent, type ListenLogItem, type ListenLogMessage, type Since } from '@gen-harness/contracts';
 import { Button, EmptyState, ErrorState, FilterSelect, Icon, Segmented, Skeleton, Switch, TextField, type FilterOption } from '@gen-harness/ui';
-import { fmtHM, fmtInt } from '../../lib/format';
+import { api } from '../../lib/api';
+import { fmtDMClock, fmtHM, fmtInt } from '../../lib/format';
 import { errorDetail, errorText } from '../../lib/errorText';
 import { setListenLogLive, useListenLog, useListenLogStats } from '../../lib/listenLogQueries';
 import { useOrgTimezone } from '../../lib/permissions';
 import { useUrlPatch, useUrlState } from '../../lib/uiStore';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
-import { CardError, ScreenHead } from '../common';
+import { useIsOwnerRole } from '../../owner/queries';
+import { CardError, InlineError, ScreenHead } from '../common';
+import { autoSendsKey, autoStatusLabel, basisLabel, channelName } from '../connections/ownerChannelModel';
 import { channelIcon, channelTone } from './dataModel';
 import {
   KIND_OPTIONS,
   NOT_LISTENING_NOTE,
   SINCE_OPTIONS,
   activeFilterCount,
+  autoSendsForChannel,
   decisionTone,
   draftHref,
+  eventKindLabel,
   eventTone,
   eventsHiddenByFilters,
   groupByDay,
@@ -185,6 +190,8 @@ export function ListenLogScreen() {
                 Bộ lọc tag / agent đã xử lý chỉ áp cho tin nên các sự kiện của kênh được ẩn.
               </p>
             ) : null}
+
+            {kind !== 'event' ? <AutoSendsBlock since={since} channel={channel} tz={tz} /> : null}
 
             <section className="ll-card" aria-label="Dòng thời gian" aria-busy={list.isFetching || undefined}>
               {list.isPending ? (
@@ -398,10 +405,70 @@ function EventRow({ item, tz, fresh }: { item: ListenLogEvent; tz: string; fresh
           <time className="ll-time" dateTime={item.at}>
             {fmtHM(item.at, tz)}
           </time>
-          <span className="ll-event-kind">Sự kiện</span>
+          <span className="ll-event-kind">{eventKindLabel(String(item.event_type))}</span>
           {item.channel ? <span className="ll-who">{item.channel.name}</span> : null}
         </div>
         <p className="ll-event-text">{item.text}</p>
+      </div>
+    </li>
+  );
+}
+
+/**
+ * v0.1.72: «Bot đã tự trả lời» — sổ tin bot tự gửi (`GET /auto-sends`, CHỈ Owner; không có nội dung tin) kèm nhãn trường
+ * hợp: Kênh quản trị / Sếp gọi / Hỗ trợ. Ẩn khi không có dòng nào, khi máy chủ cũ chưa có API (404) hoặc không phải Owner.
+ */
+function AutoSendsBlock({ since, channel, tz }: { since: Since; channel: string; tz: string }) {
+  const isOwner = useIsOwnerRole();
+  const q = useQuery({
+    queryKey: autoSendsKey(since),
+    queryFn: ({ signal }) => api.ownerChannel.autoSends({ since, limit: 50 }, signal),
+    enabled: isOwner,
+  });
+  if (!isOwner || q.isPending) return null;
+  if (q.isError) {
+    if (q.error instanceof ApiError && (q.error.status === 404 || q.error.status === 403)) return null;
+    return <InlineError detail={errorDetail(q.error)}>{`Chưa tải được danh sách tin bot tự gửi. ${errorText(q.error)}`}</InlineError>;
+  }
+  const items = autoSendsForChannel(Array.isArray(q.data?.items) ? q.data.items : [], channel);
+  if (items.length === 0) return null;
+  return (
+    <section className="ll-card ll-auto" aria-label="Bot đã tự trả lời" data-testid="ll-autosends">
+      <h3 className="ll-day__title">
+        <Icon name="ph ph-robot" size={13} /> Bot đã tự trả lời · {fmtInt(items.length)} tin
+      </h3>
+      <p className="muted-note">Chỉ ghi lúc gửi, trường hợp và độ dài — không lưu nội dung tin ở đây. Bot chỉ tự gửi khi kênh chạy bằng tài khoản riêng của bot.</p>
+      <ol className="ll-items">
+        {items.map((a) => (
+          <AutoSendRow key={a.id} a={a} tz={tz} />
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function AutoSendRow({ a, tz }: { a: AutoSendItem; tz: string }) {
+  const bad = a.status === 'failed' || a.status === 'expired';
+  return (
+    <li className="ll-row ll-row--event" data-testid="ll-autosend" data-basis={a.basis}>
+      <span className="ll-rail ll-rail--event" style={{ ['--event-tone' as string]: bad ? 'var(--color-bad)' : 'var(--color-accent-300)' }}>
+        <Icon name="ph ph-robot" size={15} color={bad ? 'var(--color-bad)' : 'var(--color-accent-300)'} />
+      </span>
+      <div className="ll-main">
+        <div className="ll-head">
+          <time className="ll-time" dateTime={a.at} title={fmtDMClock(a.at, tz)}>
+            {fmtHM(a.at, tz)}
+          </time>
+          <span className="ll-event-kind" data-testid="ll-autosend-basis">
+            {basisLabel(String(a.basis), typeof a.basis_label === 'string' ? a.basis_label : null)}
+          </span>
+          <span className="ll-who">{channelName(String(a.channel))}</span>
+        </div>
+        <p className="ll-event-text">
+          {`Bot đã tự trả lời ${a.group?.name ? `trong nhóm ${a.group.name}` : 'Sếp (tin riêng)'} · ${autoStatusLabel(String(a.status))}${
+            typeof a.body_len === 'number' ? ` · ${fmtInt(a.body_len)} ký tự` : ''
+          }`}
+        </p>
       </div>
     </li>
   );

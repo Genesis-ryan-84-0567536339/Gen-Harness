@@ -462,6 +462,9 @@ async def expire_stale_permits(db: AsyncSession, redis: Redis | None = None) -> 
         await report_send_failure(db, redis, org_id=row.org_id, draft_id=row.id, code="PERMIT_EXPIRED",
                                   title=row.title, draft_code=row.code, decided_by=row.decided_by,
                                   created_by=row.created_by)
+    from gh.owner_channel import autosend  # v0.1.72: sổ tin tự gửi cũng có permit hết hạn
+
+    await autosend.expire_stale(db)
     return [row.id for row in rows]
 
 

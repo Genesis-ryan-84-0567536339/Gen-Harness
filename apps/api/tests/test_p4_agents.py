@@ -214,7 +214,8 @@ async def test_bindings_list_set_and_delete(owner_api, db) -> None:  # type: ign
     listing = (await api.get("/agents/bindings")).json()
     keys = {i["agent_key"] for i in listing["items"]}
     # v0.1.43 (F-25): chỉ còn các khoá lõi được ModelRouter dùng thật (v0.1.55: + core.briefing — Bản tin Gen).
-    assert keys == {"core.refinery", "core.reply", "core.gen", "core.briefing", f"agent:{aid}"}
+    assert keys == {"core.refinery", "core.reply", "core.gen", "core.briefing", "core.owner_reply", "core.support",
+                    f"agent:{aid}"}   # v0.1.72: + 2 khoá chạy trong hộp
     assert all(i["binding"] is None for i in listing["items"])
     assert any(m["id"] == mid for m in listing["models"])
 

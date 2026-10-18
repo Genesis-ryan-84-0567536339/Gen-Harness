@@ -33,6 +33,9 @@ BRIDGE_OUTBOUND = "gh.bridge.outbound"
 BRIDGE_CONTROL = "gh.bridge.control"
 BRIDGE_STATUS = "gh.bridge.status"
 BRIDGE_DIRECTORY = "gh.bridge.directory"
+#: v0.1.72: lõi → consumer của kênh quản trị (dm | pair | call | support_ask); mang chữ của Sếp/mã ghép nên có
+# khoá nội dung.
+OWNER_INBOUND = "gh.owner.inbound"
 CLEAN_READY = "gh.clean.ready"
 ACTION_REQUESTED = "gh.action.requested"
 ACTION_DECIDED = "gh.action.decided"
@@ -43,7 +46,10 @@ PLUGIN_HEALTH = "gh.plugin.health"
 #: Khoá payload mang NỘI DUNG tin theo stream: bản ghi gốc không được nằm lại sau khi đã xử lý (consumer tự XDEL khi
 #: xong) và bản sao vào `.dlq` không được mang theo (review v0.1.65 P2-1: `directory` ←
 #: `group.discovered.first_message`).
-CONTENT_PAYLOAD_KEYS: dict[str, tuple[str, ...]] = {BRIDGE_DIRECTORY: ("first_message",)}
+CONTENT_PAYLOAD_KEYS: dict[str, tuple[str, ...]] = {
+    BRIDGE_DIRECTORY: ("first_message",),
+    OWNER_INBOUND: ("text", "code"),
+}
 
 
 def scrub_content(stream: str, fields: dict[Any, Any]) -> tuple[dict[Any, Any], bool]:

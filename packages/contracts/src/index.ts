@@ -31,3 +31,4 @@ export * from './defaults';
 export * from './owner';
 export * from './eventTypes';
 export * from './listenLog';
+export * from './ownerChannel';

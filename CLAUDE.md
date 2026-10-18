@@ -30,11 +30,18 @@ Tiến độ và việc dở ghi ở `docs/ROADMAP.md` và `docs/reports/HANDOFF
 - Ghi mỗi bản: `CHANGELOG.md` (3–5 dòng, mới nhất trên cùng) + `docs/releases/vX.Y.Z.md` (chi tiết, có mục "Boss phải làm").
   `docs/reports/HANDOFF-v0.1.1.md` CHỈ giữ hiện trạng + việc dở, ≤ 200 dòng. Tiến độ + mục Nợ: `docs/ROADMAP.md`.
   Trước khi commit tài liệu: `python3 .github/scripts/check_doc_links.py` (link chết) và `python3 -m unittest discover -s .github/scripts`.
-- Sửa CLAUDE.md cần Boss duyệt (bản 09/10/2026 đã duyệt — QD-18; bổ sung 16/10/2026 theo chỉ đạo Sếp: tạm ngưng Gen-hub/Brain, dùng kỹ năng chính hãng).
+- Sửa CLAUDE.md cần Boss duyệt (bản 09/10/2026 đã duyệt — QD-18; bổ sung 16/10/2026 theo chỉ đạo Sếp: tạm ngưng Gen-hub/Brain, dùng kỹ năng chính hãng; bổ sung 18/10/2026 Sếp duyệt: ngoại lệ bot tự gửi ba trường hợp ở Luật cứng).
 
 ## Luật cứng
 - Gen chỉ ĐỀ XUẤT. Không ghi Kho/Gen-hub khi chưa có Xác nhận + mã PIN của Sếp (QD-18: chỉ Kho — Phiên, Việc; kanban, warroom,
   mail, lịch vẫn không ghi). Trong test chỉ dùng MCP giả.
+- Tin gửi cho người khác luôn chờ Xác nhận + mã PIN của Sếp trên Console. Ngoại lệ duy nhất (Sếp duyệt 18/10/2026, v0.1.72),
+  chỉ khi kênh Zalo/WhatsApp chạy bằng tài khoản riêng của bot: bot tự gửi, không qua PIN, trong đúng ba trường hợp —
+  (1) trả lời và báo cáo cho chính Sếp qua kênh quản trị 1-1 đã ghép bằng mã (chỉ báo khi có sự kiện đặc biệt, không báo định kỳ);
+  (2) trả lời tại chỗ trong nhóm khi chính Sếp (nhận diện theo ID tài khoản, không theo tên) tag bot;
+  (3) trả lời thành viên trong nhóm Sếp đã bật Chế độ hỗ trợ, sau bộ lọc an toàn (không giá/tiền/hợp đồng, không thông tin người khác,
+  không nhân sự, có giới hạn tin/giờ, câu khó chuyển Sếp), model chạy trong hộp riêng agy. Cả ba đi qua một cửa `send_auto`,
+  ghi `ops.auto_sends` và Nhật ký; thêm đường gửi thứ tư phải được Sếp duyệt và có test chứng minh.
 - Token/khoá/bí mật không vào log, Action Log, kết quả, thân lỗi hay repo. Không tạo tài khoản giả, không né chống bot.
 - Không skip/quarantine test để xanh. Mọi thay đổi hành vi có test; migration chạy lại an toàn.
 - Lỗi hiển thị cho người dùng = chuỗi thân thiện + "Chi tiết kỹ thuật"; không bao giờ render object vào JSX.

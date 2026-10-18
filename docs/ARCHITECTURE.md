@@ -13,6 +13,7 @@
 | Ưu tiên | Tài liệu | Phạm vi |
 |---|---|---|
 | 1 | `docs/Gen-Harness-Product-Spec-LOCKED.md` (v2.2) | Mục đích, nghiệp vụ, thực thể, quyền, nguyên tắc có trách nhiệm. Thắng mọi mâu thuẫn. |
+| 1b | `docs/spec/Gen-Harness-Spec-BoSung-01-Bot-Quan-Tri.md` | Bổ sung (Sếp duyệt 18/10/2026, v0.1.72): bot dùng tài khoản riêng, kênh quản trị, Sếp gọi bot, Chế độ hỗ trợ. Không đổi nghĩa cũ của bản LOCKED. |
 | 2 | `docs/design/Gen-Harness Console.dc.html` (+ `screens.json`, `seed-data.json`, `tokens.json`, `_ds/…/styles.css`) | Giao diện 21 màn, dữ liệu mẫu. Dựng lại pixel-perfect ở 1440px/1280px, không "cải tiến". |
 | 3 | `docs/handoff/` (01–07) | Đặc tả kỹ thuật đi kèm thiết kế: màn hình, token, database, kiến trúc, trình cài, thiết lập Owner, nghiệm thu. |
 | 4 | `docs/github.md` | Ánh xạ màn ↔ mục spec. |
@@ -129,7 +130,8 @@ Luật cứng:
 - Gửi đi chỉ nhận từ `gh.bridge.outbound` và chỉ thực hiện khi lệnh mang **permit** hợp lệ (§7.3). Tin đã gửi quay lại `gh.bridge.inbound` như tin `outbound` → cũng vào kho thô và được sàng lọc (handoff 03).
 - Đồng bộ danh sách nhóm/thành viên định kỳ → `gh.bridge.directory`.
 - Heartbeat mỗi 15s → `core.channel_sessions.last_heartbeat_at`; mất heartbeat → plugin kênh `degraded`.
-- Ranh giới `listen_authorized_only` (khoá, không tắt được): tin của nhóm không nằm trong tập nghe (`off`, `paused`, `pending`) bị bridge bỏ ngay, chỉ metadata nhóm được đồng bộ. **Nhóm mới (Sếp chốt 17/10/2026): khi tài khoản được add vào một nhóm, MẶC ĐỊNH vào «Lắng nghe im lặng» (`silent`) — lưu hết tin, KHÔNG BAO GIỜ trả lời, kể cả khi được tag** (mọi bản cài, kể cả cũ; nhóm cũ đang `off` giữ nguyên). `settings.new_group_mode.<kênh>` đổi được: `silent` (mặc định) · `ask` (nhóm vào `pending` + hộp hỏi) · `off`. Thẻ kênh báo «N nhóm mới đã vào Lắng nghe im lặng».
+- Ranh giới `listen_authorized_only` (khoá, không tắt được): tin của nhóm không nằm trong tập nghe (`off`, `paused`, `pending`) bị bridge bỏ ngay, chỉ metadata nhóm được đồng bộ. **Nhóm mới (Sếp chốt 17/10/2026): khi tài khoản được add vào một nhóm, MẶC ĐỊNH vào «Lắng nghe im lặng» (`silent`) — lưu hết tin, KHÔNG BAO GIỜ trả lời, kể cả khi được tag** (mọi bản cài, kể cả cũ; nhóm cũ đang `off` giữ nguyên). `settings.new_group_mode.<kênh>` đổi được: `silent` (mặc định) · `ask` (nhóm vào `pending` + hộp hỏi) · `off`. Thẻ kênh báo «N nhóm mới đã vào Lắng nghe im lặng». **Ngoại lệ (v0.1.72, chỉ tài khoản riêng của bot, §5.2–5.3): bot vẫn không trả lời trong nhóm `silent`, TRỪ KHI chính Sếp (nhận diện theo ID tài khoản) tag bot, hoặc nhóm đã được Sếp bật Chế độ hỗ trợ.**
+- **Tài khoản bot (v0.1.72)**: `core.channel_sessions.account_kind` = `bot` (tài khoản Zalo/WhatsApp RIÊNG của bot, Sếp đánh dấu bằng PIN) | `owner_self` | NULL (bản cài cũ = tài khoản cá nhân của Sếp ⇒ mọi tính năng bot tắt, hành vi y v0.1.70). Với tài khoản bot, bridge thêm các sự kiện `group.self_joined` (ai thêm bot vào nhóm), `group.self_removed`, `group.owner_ping` (Sếp tag bot ở nhóm không nghe — không có nội dung), `owner.dm` (tin 1-1 của Sếp, theo ID), `owner.pair` (mã ghép 6 số), cờ `replies_to_self`. Nhóm do **Sếp** thêm bot → vào chế độ nghe mặc định; nhóm do **người khác hoặc không rõ ai** thêm → `pending` (không lưu nội dung) và hỏi Sếp qua kênh quản trị. Bridge kiểm lại mọi tin tự gửi theo `basis` của permit (lớp hai).
 
 ### 4.2 Ingest → Kho thô
 Consumer `ingest` (trong api) đọc `gh.bridge.inbound`, trong **một transaction**: ánh xạ nhóm/người gửi (`core.groups`, `core.person_identities`, tạo mới nếu chưa có), `INSERT raw.events` (khử trùng `(channel_id, external_msg_id)` + `content_hash`), `INSERT refinery.event_state(state='pending')`, `NOTIFY raw_ingested`; rồi `XACK`. Đẩy dòng mới tới màn Kho dữ liệu thô qua WebSocket (mục tiêu ≤ 2 giây từ lúc tin đến — handoff 07).
@@ -177,6 +179,19 @@ Một **Agent Identity** (`agent.identities` + `agent.channel_scopes`) được 
 - **Owner**: ghim, sửa, xoá mục, nén ngay, đặt lại. Mọi thao tác vào Action Log; sửa giữ bản cũ.
 - Redis giữ bản đệm sổ tay đang nóng để dựng ngữ cảnh nhanh; Postgres là nguồn thật.
 
+### 5.2 Kênh quản trị và Sếp gọi bot (v0.1.72)
+Chỉ khi kênh Zalo/WhatsApp chạy bằng **tài khoản riêng của bot** (`account_kind = 'bot'`).
+- **Ghép**: Console (PIN) cấp mã 6 số, sống 10 phút, chỉ lưu băm có khoá (`ops.owner_channels`); Sếp nhắn mã cho bot từ tài khoản của mình. Lõi kiểm lại (tin 1-1, ≤ 5 phút, không chuyển tiếp, đúng phiên bot, so sánh hằng thời gian, sai 5 lần huỷ mã; sai mã thì KHÔNG trả lời). **Nhận diện Sếp chỉ theo ID** (Zalo `uid`; WhatsApp JID và LID), không bao giờ theo tên. Đổi tài khoản bot ⇒ huỷ ghép + tắt hỗ trợ.
+- **Tin 1-1 của Sếp** (`owner.dm`) không vào Kho thô; qua `gh.owner.inbound` tới lõi lệnh dùng chung với Telegram (`gh/owner_cmd`: chỉ đọc + ĐỀ XUẤT) và lệnh nhóm (`/nhom`, `/nghe`, `/bo`, `/ho_tro`, `/xac_nhan`: chỉ đổi cấu hình, bật hỗ trợ cần 2 bước, không PIN qua chat). Lời đáp đi qua cửa `send_auto(owner_dm)`.
+- **Báo chủ động — chỉ SỰ KIỆN ĐẶC BIỆT** (Sếp quyết 18/10/2026; KHÔNG báo định kỳ, KHÔNG bản tóm tắt, KHÔNG gộp theo giờ): người lạ thêm bot vào nhóm, bot bị mời ra, kênh mất kết nối, câu khó trong chế độ hỗ trợ cần Sếp, hỗ trợ tự tắt vì bị tấn công lặp. Mức tối thiểu «quan trọng», giờ yên lặng 21:00–07:00 giờ VN, trần 6 tin/giờ (`ops.owner_outbox`).
+- **Sếp tag bot trong nhóm** (kể cả nhóm `silent`): model `core.owner_reply` chạy **trong hộp riêng agy**, ngữ cảnh chỉ nhóm đó; trả lời tại chỗ qua `send_auto(owner_tag)`. Câu có giá/tiền/hợp đồng/nhân sự/thông tin riêng, hoặc mức tự trị tổ chức ≤ 2 ⇒ trong nhóm chỉ «Dạ em gửi riêng Sếp ạ», nội dung gửi riêng Sếp kèm bản nháp chờ Xác nhận + PIN (đường cũ).
+
+### 5.3 Chế độ hỗ trợ nhóm (v0.1.72)
+Sếp bật cho từng nhóm (`ops.group_support`; Console có PIN hoặc lệnh 2 bước ở kênh quản trị; nhóm phải đang nghe, do Sếp thêm bot hoặc Sếp đã duyệt nghe). Thành viên tag bot hoặc trả lời tin của bot ⇒ `core.support` (hộp riêng agy, không công cụ, ngữ cảnh chỉ nhóm này): phân loại (`faq`/`product_info` mới được trả lời) → soạn → **bộ lọc tất định sau model** (`gh/owner_channel/guard.py`: không giá/tiền, hợp đồng/cam kết, nhân sự, thông tin cá nhân, người ngoài nhóm, @, link, lộ lời nhắc/canary, quá dài) → `send_auto(support)`. Lần đầu trả lời một thành viên trong mỗi lượt bật: tự giới thiệu là trợ lý tự động. Câu khó / bị lọc ⇒ câu mẫu «xin chuyển anh/chị phụ trách» (≤ 1 lần/thành viên/30 phút) + báo Sếp. Giới hạn (Sếp chỉnh): 20 tin/giờ/nhóm, 5/giờ/người, cách ≥ 20 giây, 150/ngày/kênh, tin cũ > 5 phút không trả lời, người gửi > 10 tin/phút bị bỏ. Tắt khi: Sếp tắt · hết hạn · bot bị mời ra · đổi phiên/loại tài khoản · ≥ 3 lần bị chặn lộ lời nhắc trong 10 phút.
+
+### 5.4 Một cửa tự gửi `send_auto`
+Mọi tin KHÔNG qua bản nháp + PIN đi **một** cửa `gh/owner_channel/autosend.py::send_auto(basis ∈ {owner_dm, owner_tag, support})`. Trong một transaction nó tự đọc lại từ DB/Redis mọi điều kiện (tài khoản bot đang chạy, Sếp theo ID, nhóm, hỗ trợ đang bật, tuổi tin kích hoạt, giới hạn), chạy bộ lọc, ghi `ops.auto_sends` (băm + độ dài + mã luật, KHÔNG nội dung; chỉ-thêm) và Action Log, COMMIT rồi mới ký permit (có `basis`, không `draft_id`) và phát lên `gh.bridge.outbound`. Mỗi tin kích hoạt chỉ một trả lời (`UNIQUE(org, basis, trigger_ref)`). Chỉ có HAI module phát lên luồng gửi: `biz/core/drafts.py` (nháp + PIN) và `owner_channel/autosend.py` — test AST khoá điều này.
+
 ---
 
 ## 6. Chassis và plugin (R4)
@@ -200,7 +215,8 @@ Khớp `plugRows`/`loadOrder` của thiết kế: `@gen/chassis-kernel` (Kernel 
 |---|---|---|
 | `gh.bridge.inbound` | bridge → ingest | envelope tin vào/ra |
 | `gh.bridge.outbound` | api/worker → bridge | lệnh gửi + permit |
-| `gh.bridge.status` / `gh.bridge.directory` | bridge → api/worker | QR, phiên, heartbeat / nhóm, thành viên |
+| `gh.bridge.status` / `gh.bridge.directory` | bridge → api/worker | QR, phiên, heartbeat / nhóm, thành viên, bot được thêm / mời ra (`group.self_*`), Sếp tag ở nhóm không nghe (`group.owner_ping`) |
+| `gh.owner.inbound` | ingest → kênh quản trị (api) | `dm`, `pair`, `call`, `support_ask` (v0.1.72; mang chữ của Sếp / mã ghép nên bản ghi bị xoá sau khi xử lý) |
 | `gh.clean.ready` | refinery → agent, plugin | ID đơn vị ý nghĩa mới |
 | `gh.action.requested` / `gh.action.decided` | agent/người ↔ policy → executor | hành động và quyết định |
 | `gh.plugin.control` / `gh.plugin.health` | api ↔ plugin manager | điều khiển, sức khoẻ |
@@ -222,6 +238,8 @@ Hành động **bắt buộc dừng ở Bàn làm việc** (`biz.action_drafts`,
 - `amount_vnd > approval_threshold_vnd` (mặc định 50.000.000 ₫, `ops.policy_boundaries`);
 - `personnel_related`: đánh giá/quyết định về nhân viên, ứng viên, học viên.
 
+**Ngoại lệ đã Sếp duyệt (18/10/2026, v0.1.72) — không theo thang tự trị**: tài khoản riêng của bot tự gửi trong đúng ba trường hợp qua cửa `send_auto` (§5.4); trong ba trường hợp đó tiền, hợp đồng, nhân sự vẫn bị bộ lọc chặn và chuyển duyệt.
+
 Cờ gắn ở **registry loại hành động** do chassis quản, không do LLM tự khai → model không tự hạ cờ, không tự cấp quyền. Luật này áp ở **mọi** mức tự trị (quyết định Q2): mức 5–6 chỉ tự làm việc nội bộ (tạo việc, nhắc, ghi chú, gắn nhãn, ghi sổ tay); mọi tin gửi ra ngoài đều chờ duyệt. Ngưỡng tiền do Owner đặt.
 
 ### 7.3 Luồng
@@ -234,12 +252,13 @@ Bàn làm việc: Duyệt và gửi · Sửa rồi gửi · Huỷ → `approved 
 Khoá cứng, không tắt được bằng cài đặt:
 1. Chỉ lưu tin của nhóm Sếp đã chọn nghe (`listen_authorized_only`).
 2. Hệ thống không tự ra quyết định nhân sự.
-3. Gửi ra ngoài, vượt ngưỡng tiền, liên quan nhân sự → chờ duyệt (ngưỡng tiền Owner đặt).
+3. Gửi ra ngoài, vượt ngưỡng tiền, liên quan nhân sự → chờ duyệt (ngưỡng tiền Owner đặt), trừ ba trường hợp tự gửi của tài khoản riêng của bot (§5.2–5.4); trong ba trường hợp đó tiền, hợp đồng, nhân sự vẫn bị bộ lọc chặn và chuyển duyệt.
 4. MCP: tool ghi qua duyệt; agent chỉ gọi tool Owner đã mở.
 5. Kho thô và Action Log chỉ INSERT.
 6. PIN cho thao tác nhạy cảm; bí mật mã hoá.
 7. Điểm số, cảnh báo nhân sự phải có chứng cứ.
 8. Ẩn dữ liệu nhạy cảm (số tài khoản, sức khoẻ, đời tư) khỏi vai trò dưới Owner.
+9. Chỉ Sếp đưa bot vào nhóm: nhóm do người khác hoặc không rõ ai thêm thì bot không nghe tới khi Sếp đồng ý (v0.1.72).
 
 Còn lại mặc định **mở** khi cài mới (ví dụ: quan sát nhóm thị trường bên ngoài, cho máy chủ MCP gọi ra mạng ngoài, giới hạn tốc độ, hạn mức model, giới hạn tài nguyên plugin) và Owner đổi được trong Điều khiển hệ thống. Riêng chế độ "Dùng dữ liệu mẫu" nạp đúng trạng thái như thiết kế để màn hình khớp.
 

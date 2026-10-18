@@ -287,6 +287,7 @@ PERSON_REFS_EXCLUDED: dict[str, str] = {
     "ops.data_requests.person_id": "yêu cầu xuất/xoá dữ liệu — bằng chứng pháp lý giữ nguyên hồ sơ gốc",
     "core.identity_merge_log.from_person": "chính nhật ký gộp",
     "core.identity_merge_log.to_person": "chính nhật ký gộp",
+    "ops.owner_questions.subject_id": "câu hỏi chờ Owner (v0.1.71): luôn trỏ về NHÓM (group_id), không phải người",
 }
 _REFS_BY_KEY = {f"{r.table}.{r.col}": r for r in PERSON_REFS}
 

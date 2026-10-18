@@ -23,6 +23,7 @@ import { systemEndpoints } from './p4-system';
 import { defaultsEndpoints } from './defaults';
 import { listenLogEndpoints } from './listenLog';
 import { ownerEndpoints } from './owner';
+import { ownerChannelEndpoints } from './ownerChannel';
 import type { Step10Body, Step11Body, Step10Invited, BackupConfig, Step8Body, Step8Agent, Step9Body, Step9State, SetupFollowUpItem } from './p4-system';
 import type {
   AuditPage,
@@ -336,6 +337,11 @@ export function createEndpoints(client: ApiClient) {
      * proposals() · tasks()`.
      */
     owner: ownerEndpoints(r),
+    /**
+     * v0.1.72: Bot tài khoản riêng — kênh quản trị, loại tài khoản, Chế độ hỗ trợ, sổ tin bot tự gửi (CHỈ Owner):
+     * `api.ownerChannel.get(ch) · update · pairStart · unpair · setAccountKind · getSupport · setSupport · autoSends`.
+     */
+    ownerChannel: ownerChannelEndpoints(r),
   };
 }
 

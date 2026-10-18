@@ -3,7 +3,7 @@
 // Không ghi file, không in QR, không log nội dung tin.
 import { EventEmitter } from 'node:events';
 import { silentLogger } from '../log.js';
-import { RecentIds, errorCode, toIso, toPlain } from '../util.js';
+import { RecentIds, errorCode, toIso, toPlain, withMeta } from '../util.js';
 
 export const ZALO_QR_TTL_MS = 100000; // zca-js tự hết hạn QR sau 100 giây
 export const ZALO_RETRY_MAX_MS = 60000; // lùi tối đa 60 giây giữa hai lần thử nối lại
@@ -242,11 +242,53 @@ export class ZaloAdapter extends EventEmitter {
     this.emit('inbound', p);
   }
 
+  #onGroupEvent(raw) {
+    let ev;
+    try { ev = this.normaliseGroupEvent(raw); } catch (err) {
+      this.log.warn('zalo: không chuẩn hoá được sự kiện nhóm', { error: errorCode(err) });
+      return;
+    }
+    if (ev) this.emit('group_event', ev);
+  }
+
+  /**
+   * Sự kiện nhóm zca-js (`group_event`) → `{type: 'group.self_joined'|'group.self_removed', payload}` hoặc null.
+   * Chỉ quan tâm sự kiện tác động lên CHÍNH MÌNH: `updateMembers` chứa ownId (không tin cờ `isSelf` của thư viện — cờ đó
+   * cũng bật khi mình là người thực hiện). `sourceId` = người thực hiện; vào bằng link thì `sourceId` là chính mình ⇒
+   * `method: 'link'`, không biết người thêm; thiếu `sourceId` ⇒ `unknown`.
+   */
+  normaliseGroupEvent(ev) {
+    const type = ev?.type;
+    if (type !== 'join' && type !== 'remove_member' && type !== 'block_member') return null;
+    const d = ev.data || {};
+    const members = Array.isArray(d.updateMembers) ? d.updateMembers : [];
+    if (!this.ownId || !members.some((m) => String(m?.id ?? m) === this.ownId)) return null;
+    const groupId = String(d.groupId ?? ev.threadId ?? '');
+    if (!groupId) return null;
+    const source = d.sourceId === undefined || d.sourceId === null ? '' : String(d.sourceId);
+    const at = toIso(d.time, 'ms', this.now);
+    if (type === 'join') {
+      if (d.groupName) this.groupNames.set(groupId, String(d.groupName));
+      let method = 'unknown';
+      let addedBy = null;
+      if (source === this.ownId) method = 'link';
+      else if (source) { method = 'add'; addedBy = source; }
+      return {
+        type: 'group.self_joined',
+        payload: {
+          group_id: groupId, name: this.groupNames.get(groupId) || '', added_by: addedBy, added_by_alt: null, method, at,
+        },
+      };
+    }
+    return { type: 'group.self_removed', payload: { group_id: groupId, by: source && source !== this.ownId ? source : null, at } };
+  }
+
   #attach(api) {
     this.api = api;
     const L = api.listener;
     L.on('message', (msg) => this.#onLibEvent(msg));
     L.on('reaction', (r) => this.#onLibEvent(r));
+    L.on('group_event', (ev) => this.#onGroupEvent(ev));
     L.on('error', (err) => this.log.warn('zalo: websocket lỗi', { error: errorCode(err) }));
     L.on('closed', (code) => { this.#onClosed(code); });
     L.start({ retryOnClose: true });
@@ -429,11 +471,14 @@ export class ZaloAdapter extends EventEmitter {
       body_text: body,
       direction: msg.isSelf ? 'outbound' : 'inbound',
       mentions_self: Boolean(this.ownId && mentions.some((m) => String(m?.uid) === this.ownId)),
+      // Trả lời (trích dẫn) tin của chính mình: TQuote.ownerId = người viết tin được trích.
+      replies_to_self: Boolean(this.ownId && d.quote && String(d.quote.ownerId ?? '') === this.ownId),
       payload: toPlain({ type: msg.type, threadId: msg.threadId, isSelf: msg.isSelf, isGroup: msg.isGroup, data: d }),
     };
     if (isGroup && this.groupNames.has(threadId)) {
       out.group_name = this.groupNames.get(threadId);
     }
-    return out;
+    // zca-js 2.2.0 không có cờ «chuyển tiếp» ⇒ forwarded=false; thread 1-1 = threadId (UID người kia, cả khi mình gửi).
+    return withMeta(out, { thread_ids: isGroup ? [] : [threadId], sender_alt_id: null, forwarded: false });
   }
 }

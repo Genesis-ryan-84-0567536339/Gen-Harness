@@ -65,6 +65,36 @@ export class RedisBus {
     return (await this.redis.get(`gh:bridge:new_group_mode:${channel}`)) ?? null;
   }
 
+  // ─── Kênh quản trị (v0.1.72): khoá do lõi ghi (`sync_listen_sets`), bridge CHỈ ĐỌC ───────────────────────────
+
+  async #anyMember(key, ids) {
+    for (const id of [].concat(ids)) {
+      if (id && await this.redis.sIsMember(key, String(id))) return true;
+    }
+    return false;
+  }
+
+  /** `gh:bridge:account_kind:<kênh>:<phiên>` = bot | owner_self; chưa có khoá ⇒ null (coi như không phải bot). */
+  async accountKind(channel, sessionId) {
+    return (await this.redis.get(`gh:bridge:account_kind:${channel}:${sessionId}`)) ?? null;
+  }
+
+  /** Một trong các ID (ID chính + alt) thuộc tập Owner `gh:bridge:owner:<kênh>`. */
+  async isOwner(channel, ids) { return this.#anyMember(`gh:bridge:owner:${channel}`, ids); }
+
+  /** Thread 1-1 (theo một trong các ID) thuộc `gh:bridge:owner_thread:<kênh>`. */
+  async isOwnerThread(channel, ids) { return this.#anyMember(`gh:bridge:owner_thread:${channel}`, ids); }
+
+  /** Đang mở ghép mã: khoá `gh:bridge:pairing:<kênh>` tồn tại (TTL = hạn mã). */
+  async pairingOpen(channel) {
+    return (await this.redis.get(`gh:bridge:pairing:${channel}`)) !== null;
+  }
+
+  /** Nhóm đang bật chế độ hỗ trợ: `gh:bridge:support:<kênh>`. */
+  async isSupportGroup(channel, groupId) {
+    return Boolean(await this.redis.sIsMember(`gh:bridge:support:${channel}`, String(groupId)));
+  }
+
   /** SET gh:permit:used:<nonce> 1 NX EX 600 → true nếu lần đầu. */
   async claimNonce(nonce) {
     return (await this.redis.set(`gh:permit:used:${nonce}`, '1', { NX: true, EX: 600 })) === 'OK';

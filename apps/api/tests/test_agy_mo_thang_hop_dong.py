@@ -55,7 +55,8 @@ ROLE_CASES = [
     ("agent:{id}", "setup_agent_try"),
 ]
 #: Lớp core chạy agy trong tiến trình; `core.refinery` và `core.reply` (có người ngoài) chạy qua hộp (gói H2).
-CORE_KEYS = ("core.gen", "core.refinery", "core.briefing")
+# v0.1.72: + core.owner_reply, core.support (hai khoá chạy trong hộp)
+CORE_KEYS = ("core.gen", "core.refinery", "core.briefing", "core.owner_reply", "core.support")
 DIPLOMATIC_KEY = "core.reply"
 DIPLOMATIC_REASON = "Hộp riêng Antigravity chưa chạy"       # tiền tố câu của agy_policy.REASON_BOX_DOWN
 OLD_RULE = re.compile(r"chỉ (?:dùng )?cho Gen|AGY_OWNER_GEN_ONLY|Antigravity chỉ", re.IGNORECASE)

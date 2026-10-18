@@ -22,7 +22,7 @@ test('chuẩn hoá: tin văn bản trong nhóm (conversation)', () => {
     channel: 'whatsapp', session_id: 'w1', external_msg_id: 'ABCD1', external_group_id: '120363@g.us', group_name: 'Nhóm kho',
     sender_external_id: '84901111111@s.whatsapp.net', sender_name: 'Minh', sender_phone: '+84901111111',
     occurred_at: new Date(1758600000 * 1000).toISOString(), kind: 'text', body_text: 'chào cả nhà',
-    direction: 'inbound', mentions_self: false, payload: undefined,
+    direction: 'inbound', mentions_self: false, replies_to_self: false, payload: undefined,
   });
   assert.equal(p.payload.key.remoteJid, '120363@g.us');
   assert.equal(p.payload.message.conversation, 'chào cả nhà');

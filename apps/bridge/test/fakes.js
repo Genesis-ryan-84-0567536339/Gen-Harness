@@ -11,6 +11,12 @@ export class FakeBus {
     this.groupMode = {}; // channel → 'silent' | 'ask' | 'off' (cờ gh:bridge:new_group_mode; chưa có = null)
     this.nonces = new Set();
     this.heartbeatKey = null;
+    // Khoá kênh quản trị (v0.1.72, lõi ghi — bridge chỉ đọc)
+    this.owners = {}; // channel → Set(ID + alt của Owner)          gh:bridge:owner:<kênh>
+    this.ownerThreads = {}; // channel → Set(thread 1-1 với Owner)   gh:bridge:owner_thread:<kênh>
+    this.pairing = {}; // channel → true khi đang mở ghép mã         gh:bridge:pairing:<kênh>
+    this.support = {}; // channel → Set(nhóm bật chế độ hỗ trợ)      gh:bridge:support:<kênh>
+    this.accountKinds = {}; // '<kênh>:<phiên>' → 'bot' | 'owner_self' gh:bridge:account_kind:<kênh>:<phiên>
   }
 
   async publish(stream, type, payload, opts = {}) {
@@ -23,6 +29,16 @@ export class FakeBus {
   async listenDirect(channel) { return this.direct[channel] !== '0'; } // giống RedisBus: mặc định lưu, chỉ "0" mới chặn
 
   async newGroupMode(channel) { return this.groupMode[channel] ?? null; }
+
+  async accountKind(channel, sessionId) { return this.accountKinds[`${channel}:${sessionId}`] ?? null; }
+
+  async isOwner(channel, ids) { return [].concat(ids).some((id) => id && this.owners[channel]?.has(String(id))); }
+
+  async isOwnerThread(channel, ids) { return [].concat(ids).some((id) => id && this.ownerThreads[channel]?.has(String(id))); }
+
+  async pairingOpen(channel) { return Boolean(this.pairing[channel]); }
+
+  async isSupportGroup(channel, groupId) { return Boolean(this.support[channel]?.has(String(groupId))); }
 
   async claimNonce(nonce) {
     if (this.nonces.has(nonce)) return false;
@@ -130,10 +146,26 @@ export function makeZaloLib({ api = makeZaloApi(), loginError = null } = {}) {
 }
 
 export function zaloMessage({ group = true, threadId = 'G1', uidFrom = '111', dName = 'Lan', msgId = '5001',
-  ts = '1758600000000', content = 'xin chào', msgType = 'webchat', isSelf = false, mentions } = {}) {
+  ts = '1758600000000', content = 'xin chào', msgType = 'webchat', isSelf = false, mentions, quote } = {}) {
   const data = { msgId, cliMsgId: `cli${msgId}`, msgType, uidFrom, idTo: group ? threadId : '900', dName, ts, content };
   if (mentions) data.mentions = mentions;
+  if (quote) data.quote = quote; // TQuote của zca-js 2.2.0: {ownerId, cliMsgId, globalMsgId, msg, ...}
   return { type: group ? ThreadType.Group : ThreadType.User, threadId, isSelf, data };
+}
+
+/**
+ * Sự kiện `group_event` đúng hình zca-js 2.2.0 (`initializeGroupEvent`, models/GroupEvent.js): `{type, act, data, threadId,
+ * isSelf}`; `isSelf` = updateMembers chứa mình HOẶC sourceId là mình (thư viện tính, adapter không tin cờ này).
+ */
+export function zaloGroupEvent({ type = 'join', groupId = 'G7', groupName = 'Nhóm mới', sourceId = '111',
+  members = ['900'], ownId = '900', time = '1758600000000' } = {}) {
+  const updateMembers = members.map((id) => ({ id, dName: `Người ${id}`, avatar: '', type: 0, avatar_25: '' }));
+  const data = {
+    subType: 1, groupId, creatorId: '111', groupName, sourceId, updateMembers, groupSetting: null, groupTopic: null,
+    info: null, extraData: null, time, avt: null, fullAvt: null, isAdd: type === 'join' ? 1 : 0, hideGroupInfo: 0,
+    version: '1', groupType: 1,
+  };
+  return { type, act: type, data, threadId: groupId, isSelf: members.includes(ownId) || sourceId === ownId };
 }
 
 // ─── Baileys giả ──────────────────────────────────────────────────────────────
@@ -212,9 +244,12 @@ export function makeBaileysLib() {
 }
 
 export function waMessage({ remoteJid = '120363@g.us', participant = '84901111111@s.whatsapp.net', fromMe = false,
-  id = 'ABCD1', pushName = 'Minh', message = { conversation: 'chào cả nhà' }, messageTimestamp = 1758600000 } = {}) {
+  id = 'ABCD1', pushName = 'Minh', message = { conversation: 'chào cả nhà' }, messageTimestamp = 1758600000,
+  participantAlt, remoteJidAlt } = {}) {
   const key = { remoteJid, fromMe, id };
   if (participant && remoteJid.endsWith('@g.us')) key.participant = participant;
+  if (participantAlt) key.participantAlt = participantAlt;
+  if (remoteJidAlt) key.remoteJidAlt = remoteJidAlt;
   return { key, pushName, message, messageTimestamp };
 }
 

@@ -1,9 +1,9 @@
 // Sổ phiên: xử lý lệnh gh.bridge.control / gh.bridge.outbound, nối sự kiện adapter → gh.bridge.status /
 // .inbound / .directory, heartbeat từng phiên, đồng bộ danh bạ định kỳ. Credential chỉ nằm trong RAM.
 import { STREAMS } from './envelope.js';
-import { PERMIT_ERRORS, checkPermit } from './crypto.js';
+import { PERMIT_ERRORS, checkPermit, checkPermitBasis } from './crypto.js';
 import { silentLogger } from './log.js';
-import { errorCode } from './util.js';
+import { META, errorCode } from './util.js';
 
 export const QR_MAX = 5;
 export const CREDENTIAL_COALESCE_MS = 5000;
@@ -21,6 +21,16 @@ export const DIRECTORY_MANUAL_GAP_MS = 5 * 60 * 1000;
 export const DIRECTORY_MAX_BACKOFF_MS = 8 * 60 * 60 * 1000;
 
 const keyOf = (channel, sessionId) => `${channel}:${sessionId}`;
+
+// Mẫu tin ghép kênh quản trị (thiết kế v0.1.71 §3.1): `^\s*(/?(ghep|ghép|start)\s*)?\d{6}\s*$`, không phân biệt hoa thường.
+const PAIR_RE = /^\s*(?:\/?(?:ghep|ghép|start)\s*)?(\d{6})\s*$/i;
+
+/** Thân tin 1-1 → mã 6 số nếu khớp mẫu ghép, null nếu không. Chỉ mã được chuyển cho lõi, không chuyển thân tin. */
+export function pairingCode(body) {
+  if (typeof body !== 'string' || !body) return null;
+  const m = PAIR_RE.exec(body.normalize('NFC'));
+  return m ? m[1] : null;
+}
 
 export class SessionManager {
   /**
@@ -217,6 +227,7 @@ export class SessionManager {
       this.#ended(channel, sessionId, reason, error, s);
     });
     adapter.on('inbound', (payload) => { this.#inbound(s, payload); });
+    adapter.on('group_event', (ev) => { this.#groupEvent(s, ev); });
   }
 
   /** Gộp creds.update: tối đa một session.credential mỗi credentialCoalesceMs. */
@@ -244,12 +255,26 @@ export class SessionManager {
    */
   async #inbound(s, payload) {
     try {
+      const meta = payload[META] || {};
+      let kind;
+      const isBot = async () => {
+        if (kind === undefined) kind = await this.bus.accountKind(s.channel, s.sessionId);
+        return kind === 'bot';
+      };
+      const senders = [...new Set([payload.sender_external_id, meta.sender_alt_id,
+        ...(Array.isArray(meta.sender_ids) ? meta.sender_ids : [])].filter(Boolean))];
+      if (!payload.external_group_id) {
+        if (await this.#ownerDirect(s, payload, meta, senders, isBot)) return;
+      }
       const allowed = payload.external_group_id
         ? await this.bus.isListening(s.channel, payload.external_group_id)
         : await this.bus.listenDirect(s.channel);
       if (!allowed) {
         s.dropped += 1;
-        if (payload.external_group_id) await this.#discovered(s, payload);
+        if (payload.external_group_id) {
+          await this.#ownerPing(s, payload, senders, isBot);
+          await this.#discovered(s, payload);
+        }
         return;
       }
       s.inbound += 1;
@@ -257,6 +282,80 @@ export class SessionManager {
     } catch (err) {
       this.log.error('không đẩy được tin vào', { channel: s.channel, session_id: s.sessionId, error: err.message });
     }
+  }
+
+  /**
+   * Kênh quản trị (v0.1.72) — CHỈ khi phiên là tài khoản riêng của bot (`gh:bridge:account_kind:<kênh>:<phiên>` = bot;
+   * khác/chưa có ⇒ hành vi cũ). Trả true khi tin đã được xử lý ở đây (không đi luồng `message`):
+   * - tin mình gửi (selfListen) trong thread Owner ⇒ BỎ (trả lời kênh quản trị không vào Kho thô);
+   * - đang mở ghép (`gh:bridge:pairing:<kênh>`) + thân khớp mẫu + không phải tin chuyển tiếp ⇒ `owner.pair` chỉ mang mã
+   *   (xét TRƯỚC Owner: ghép lại khi Owner đổi máy vẫn đi đúng đường ghép);
+   * - người gửi (ID hoặc alt) ∈ `gh:bridge:owner:<kênh>` ⇒ `owner.dm`, bất kể `direct_mode` / `listen_direct`.
+   */
+  async #ownerDirect(s, payload, meta, senders, isBot) {
+    if (payload.direction === 'outbound') {
+      if (!(await isBot())) return false;
+      const threads = Array.isArray(meta.thread_ids) ? meta.thread_ids : [];
+      if (threads.length && await this.bus.isOwnerThread(s.channel, threads)) {
+        s.dropped += 1;
+        return true;
+      }
+      return false;
+    }
+    if (!(await isBot())) return false;
+    const opts = { actor: `bridge:${s.channel}`, orgId: s.orgId || this.orgId };
+    const code = meta.forwarded ? null : pairingCode(payload.kind === 'text' ? payload.body_text : null);
+    if (code && await this.bus.pairingOpen(s.channel)) {
+      await this.bus.publish(STREAMS.inbound, 'owner.pair', {
+        channel: s.channel, session_id: s.sessionId, sender_external_id: payload.sender_external_id,
+        sender_alt_id: meta.sender_alt_id ?? null, sender_name: payload.sender_name || '', occurred_at: payload.occurred_at, code,
+        external_msg_id: payload.external_msg_id,
+      }, opts);
+      this.log.info('nhận mã ghép kênh quản trị', { channel: s.channel, session_id: s.sessionId });
+      return true;
+    }
+    if (senders.length && await this.bus.isOwner(s.channel, senders)) {
+      s.inbound += 1;
+      await this.bus.publish(STREAMS.inbound, 'owner.dm', {
+        channel: s.channel, session_id: s.sessionId, external_msg_id: payload.external_msg_id,
+        sender_external_id: payload.sender_external_id, sender_alt_id: meta.sender_alt_id ?? null,
+        occurred_at: payload.occurred_at, kind: payload.kind, body_text: payload.body_text ?? null,
+        forwarded: Boolean(meta.forwarded),
+      }, opts);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Owner tag bot trong nhóm KHÔNG nghe (off/paused/pending, hoặc nhóm lạ) ⇒ `group.owner_ping` KHÔNG kèm nội dung tin,
+   * để lõi hỏi Owner có muốn nghe nhóm này không. Chỉ với tài khoản bot.
+   */
+  async #ownerPing(s, payload, senders, isBot) {
+    if (payload.direction !== 'inbound' || !payload.mentions_self || !senders.length) return;
+    if (!(await isBot()) || !(await this.bus.isOwner(s.channel, senders))) return;
+    this.#publish(STREAMS.directory, 'group.owner_ping', {
+      channel: s.channel, session_id: s.sessionId, group_id: String(payload.external_group_id),
+      name: payload.group_name || '', at: payload.occurred_at,
+    }, s);
+  }
+
+  /**
+   * Mình được thêm vào / bị mời ra khỏi nhóm (v0.1.72) ⇒ `gh.bridge.directory` `group.self_joined` / `group.self_removed`.
+   * Phát với mọi loại tài khoản (lõi quyết định theo `account_kind`). Được thêm ⇒ hẹn quét lại danh bạ để lấy thành viên;
+   * KHÔNG đánh dấu nhóm là đã biết, để tin đầu vẫn đi kèm `group.discovered` như cũ.
+   */
+  #groupEvent(s, ev) {
+    if (!ev || (ev.type !== 'group.self_joined' && ev.type !== 'group.self_removed')) return;
+    this.#publish(STREAMS.directory, ev.type, { channel: s.channel, session_id: s.sessionId, ...ev.payload }, s);
+    this.log.info(ev.type === 'group.self_joined' ? 'được thêm vào nhóm' : 'bị mời ra khỏi nhóm',
+      { channel: s.channel, session_id: s.sessionId });
+    if (ev.type === 'group.self_removed') {
+      s.knownGroups.delete(String(ev.payload.group_id));
+      return;
+    }
+    s.pendingDiscover = true;
+    this.#armDiscover(s);
   }
 
   /**
@@ -438,10 +537,26 @@ export class SessionManager {
     if (chk.claims && typeof chk.claims === 'object') {
       result.nonce = typeof chk.claims.nonce === 'string' ? chk.claims.nonce : null;
       result.draft_id = chk.claims.draft_id ?? null;
+      // Permit tự gửi (v0.1.72): lõi đối chiếu `ops.auto_sends` theo auto_send_id. Không có thì không thêm trường.
+      if (chk.claims.auto_send_id !== undefined && chk.claims.auto_send_id !== null) result.auto_send_id = chk.claims.auto_send_id;
     }
     if (!chk.ok) return finish({ error: chk.error });
     const s = this.sessions.get(keyOf(p.channel, p.session_id));
     if (!s || s.state !== 'active') return finish({ error: 'SESSION_NOT_ACTIVE' });
+    // Lớp 2: claims có `basis` ⇒ đích phải thuộc đúng tập Redis lõi ghi và phiên phải là tài khoản bot (trước khi tiêu nonce).
+    let scope;
+    try {
+      scope = await checkPermitBasis(chk.claims, p, {
+        accountKind: () => this.bus.accountKind(p.channel, p.session_id),
+        ownerThread: (id) => this.bus.isOwnerThread(p.channel, [id]),
+        listening: (id) => this.bus.isListening(p.channel, id),
+        support: (id) => this.bus.isSupportGroup(p.channel, id),
+      });
+    } catch (err) {
+      this.log.error('không kiểm được căn cứ tự gửi', { error: err.message });
+      return finish({ error: 'SCOPE_CHECK_FAILED' });
+    }
+    if (!scope.ok) return finish({ error: scope.error });
     let fresh;
     try { fresh = await this.bus.claimNonce(chk.claims.nonce); } catch (err) {
       this.log.error('không kiểm được nonce', { error: err.message });

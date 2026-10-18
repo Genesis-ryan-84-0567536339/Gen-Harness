@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gh.defaults import profiles
 
 #: Dòng gán lõi mà "Áp model chuẩn theo vai" xoá (khoá/nguồn giữ nguyên; agent:* giữ nguyên).
-CORE_BINDING_KEYS = ("core.gen", "core.briefing", "core.refinery", "core.reply")
+CORE_BINDING_KEYS = ("core.gen", "core.briefing", "core.refinery", "core.reply", "core.owner_reply", "core.support")
 #: Khoá mục "Mức tự trị của tổ chức": nâng mức tự trị là thay đổi liên quan an toàn ⇒ Về mặc định MỘT mục này cũng đòi
 #: phiên mã PIN (như tất cả); mục hiện trong sổ để hộp Xác nhận nói thẳng, đếm vào "Đã đổi N mục".
 AUTONOMY_KEY = "autonomy"

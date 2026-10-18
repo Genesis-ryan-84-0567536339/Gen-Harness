@@ -128,7 +128,8 @@ async def owner_uid(db: Any) -> uuid.UUID:
 # (a) GET /defaults
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-CORE_ITEMS = {"binding:core.gen", "binding:core.briefing", "binding:core.refinery", "binding:core.reply"}
+CORE_ITEMS = {"binding:core.gen", "binding:core.briefing", "binding:core.refinery", "binding:core.reply",
+              "binding:core.owner_reply", "binding:core.support"}   # v0.1.72: + 2 khoá chạy trong hộp
 STATIC_ITEMS = {"gen", "coach", "triage", "refinery.schedule", "jev.preset", "ai_cost", "backup", "autonomy",
                 "kho_label"}
 
@@ -1016,6 +1017,7 @@ async def test_migration_0034_is_rerunnable_and_keeps_old_data_byte_for_byte(dap
 
 
 def test_registry_helpers_expose_the_contract() -> None:
-    assert registry.CORE_BINDING_KEYS == ("core.gen", "core.briefing", "core.refinery", "core.reply")
+    assert registry.CORE_BINDING_KEYS == ("core.gen", "core.briefing", "core.refinery", "core.reply",
+                                          "core.owner_reply", "core.support")
     assert profiles.normalize_tier("deep") == "strong" and profiles.normalize_tier("auto") is None
     assert profiles.normalize_tier("balanced") == "balanced" and profiles.normalize_tier("zzz") is None

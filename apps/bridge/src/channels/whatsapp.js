@@ -5,7 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { VERSION } from '../config.js';
 import { silentLogger } from '../log.js';
-import { RecentIds, errorCode, toIso, toPlain } from '../util.js';
+import { RecentIds, errorCode, toIso, toPlain, withMeta } from '../util.js';
 
 export const WA_FIRST_QR_TTL_MS = 60000; // Baileys: QR đầu sống 60 giây, các QR sau 20 giây
 export const WA_NEXT_QR_TTL_MS = 20000;
@@ -267,6 +267,15 @@ export class WhatsAppAdapter extends EventEmitter {
       if (gen !== this.gen || ev?.type !== 'notify') return;
       for (const m of ev.messages || []) this.#onLibMessage(m);
     });
+    // v0.1.72: ai thêm / mời mình ra khỏi nhóm. Baileys phát cho cả stub `notify` lẫn `append` (offline).
+    sock.ev.on('group-participants.update', (u) => {
+      if (gen !== this.gen || this.state !== 'active') return;
+      this.#emitGroupEvent(() => this.normaliseParticipants(u));
+    });
+    sock.ev.on('groups.upsert', (list) => {
+      if (gen !== this.gen || this.state !== 'active') return;
+      for (const g of Array.isArray(list) ? list : []) this.#emitGroupEvent(() => this.normaliseGroupCreate(g));
+    });
     // Baileys chưa xử lý companion_reg_refresh: tự nghe thông báo thô trên websocket của socket này.
     if (typeof sock.ws?.on === 'function') {
       const onRefresh = (node) => {
@@ -421,6 +430,72 @@ export class WhatsAppAdapter extends EventEmitter {
     this.emit('inbound', p);
   }
 
+  #emitGroupEvent(fn) {
+    let ev;
+    try { ev = fn(); } catch (err) {
+      this.log.warn('whatsapp: không chuẩn hoá được sự kiện nhóm', { error: errorCode(err) });
+      return;
+    }
+    if (ev) this.emit('group_event', ev);
+  }
+
+  #mine() {
+    return new Set([this.own?.jid, this.own?.lid].filter(Boolean));
+  }
+
+  /** Người tác động (author LID / authorPn JID) → {by, alt, self}. author là mình ⇒ self (tự vào bằng link / tự rời). */
+  #actor(author, authorPn) {
+    const mine = this.#mine();
+    const a = bareJid(author);
+    const pn = bareJid(authorPn);
+    const self = [a, pn].some((j) => j && mine.has(j));
+    if (self) return { by: null, alt: null, self: true };
+    return { by: a || pn || null, alt: a ? (pn || null) : null, self: false };
+  }
+
+  /**
+   * `group-participants.update` ({id, author, authorPn, participants[], action}) → self_joined / self_removed hoặc null.
+   * `participants[]` là object {id, phoneNumber?, lid?} (bản cũ là chuỗi) ⇒ so cả JID lẫn LID của mình.
+   */
+  normaliseParticipants(u) {
+    const action = u?.action;
+    if (action !== 'add' && action !== 'remove') return null;
+    const groupId = String(u.id || '');
+    if (!groupId.endsWith('@g.us')) return null;
+    const mine = this.#mine();
+    const parts = Array.isArray(u.participants) ? u.participants : [];
+    const hit = parts.some((p) => (typeof p === 'string' ? [p] : [p?.id, p?.lid, p?.phoneNumber])
+      .map(bareJid).some((j) => j && mine.has(j)));
+    if (!hit) return null;
+    const at = new Date(this.now()).toISOString();
+    const actor = this.#actor(u.author, u.authorPn);
+    if (action === 'remove') return { type: 'group.self_removed', payload: { group_id: groupId, by: actor.by, at } };
+    let method = 'add';
+    if (actor.self) method = 'link';
+    else if (!actor.by) method = 'unknown';
+    return {
+      type: 'group.self_joined',
+      payload: {
+        group_id: groupId, name: this.groupNames.get(groupId) || '', added_by: actor.by, added_by_alt: actor.alt, method, at,
+      },
+    };
+  }
+
+  /** `groups.upsert` (nhóm vừa được tạo có mình, Socket/messages-recv.js) → self_joined method=create. */
+  normaliseGroupCreate(g) {
+    const groupId = String(g?.id || '');
+    if (!groupId.endsWith('@g.us')) return null;
+    if (g.subject) this.groupNames.set(groupId, String(g.subject));
+    const actor = this.#actor(g.author || g.owner, g.authorPn || g.ownerPn);
+    return {
+      type: 'group.self_joined',
+      payload: {
+        group_id: groupId, name: this.groupNames.get(groupId) || '', added_by: actor.by, added_by_alt: actor.alt,
+        method: 'create', at: new Date(this.now()).toISOString(),
+      },
+    };
+  }
+
   #settle(result) {
     const s = this.settle;
     this.settle = null;
@@ -538,11 +613,20 @@ export class WhatsAppAdapter extends EventEmitter {
       body_text: cls.body,
       direction: fromMe ? 'outbound' : 'inbound',
       mentions_self: mentioned.some((j) => mine.includes(j)),
+      // Trả lời (trích dẫn) tin của chính mình: contextInfo.participant = người viết tin được trích (JID hoặc LID).
+      replies_to_self: Boolean(cls.ctx?.participant && mine.includes(bareJid(cls.ctx.participant))),
       payload: toPlain(m),
     };
     if (isGroup && this.groupNames.has(remote)) out.group_name = this.groupNames.get(remote);
     const phone = phoneOf(sender) || phoneOf(senderAlt);
     if (phone) out.sender_phone = phone;
-    return out;
+    const forwarded = Boolean(cls.ctx?.isForwarded || Number(cls.ctx?.forwardingScore || 0) > 0);
+    return withMeta(out, {
+      thread_ids: isGroup ? [] : [remote, key.remoteJidAlt].map(bareJid).filter(Boolean),
+      sender_alt_id: fromMe ? null : (senderAlt || null),
+      // Lõi ghi tập Owner ở dạng chuẩn hoá (bỏ hậu tố thiết bị) ⇒ so thêm dạng đó.
+      sender_ids: fromMe ? [] : [sender, senderAlt].map(bareJid).filter(Boolean),
+      forwarded,
+    });
   }
 }
