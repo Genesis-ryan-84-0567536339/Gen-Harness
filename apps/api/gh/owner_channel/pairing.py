@@ -3,7 +3,8 @@
 1. Console (PIN) `start_pairing`: cần tài khoản `bot` đang chạy; sinh mã 6 số, chỉ lưu BĂM có khoá, sống 10 phút.
 2. Sếp nhắn mã cho bot từ tài khoản của mình ⇒ bridge phát `owner.pair` ⇒ `try_pair` kiểm lại ở lõi (tin 1-1, ≤
 5 phút, không
-   chuyển tiếp, đúng phiên bot, mã còn hạn, so sánh hằng thời gian, mỗi người gửi sai 5 lần ⇒ khoá người đó; tổng sai 20 lần ⇒ huỷ mã). Sai mã: KHÔNG trả lời.
+   chuyển tiếp, đúng phiên bot, mã còn hạn, so sánh hằng thời gian, mỗi người gửi sai 5 lần ⇒ khoá người đó;
+   tổng sai 20 lần ⇒ huỷ mã). Sai mã: KHÔNG trả lời.
 3. Đúng: ghi ID Owner (Zalo `uid`; WhatsApp JID và LID), bật kênh, Nhật ký + chuông + Nhật ký lắng nghe; lời
 đáp đi qua cửa
    `send_auto(owner_dm)`.
