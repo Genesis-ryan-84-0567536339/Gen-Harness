@@ -218,7 +218,7 @@ function ChannelGroupsCard({
                   <th style={{ width: 110 }}>Độ nhiệt</th>
                   <th style={{ width: 150 }}>Chế độ nghe</th>
                   <th style={{ width: 170 }}>Agent trực</th>
-                  <th style={{ width: 100 }}>Ai thêm bot</th>
+                  <th style={{ width: 110 }}>Thêm bởi</th>
                   {onSupport ? <th style={{ width: 120 }}>Chế độ hỗ trợ</th> : null}
                 </tr>
               </thead>
