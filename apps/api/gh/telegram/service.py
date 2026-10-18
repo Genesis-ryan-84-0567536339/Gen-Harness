@@ -105,6 +105,18 @@ def public_url() -> str:
     return get_settings().public_url.rstrip("/")
 
 
+#: Chưa bật Truy cập từ xa (public_url còn là localhost) thì link trong tin trên điện thoại không mở được (F092).
+LOCAL_CONSOLE_LINE = "Mở Console từ máy chủ Gen-Harness (chưa bật Truy cập từ xa nên điện thoại chưa mở được link)."
+
+
+def console_line(path: str) -> str:
+    """Dòng "Mở Console" cuối tin: chỉ chèn link khi `public_url` đã là địa chỉ mở được từ ngoài máy chủ."""
+    from gh.system_api.access import is_local_url  # nhập muộn: chỉ cần khi dựng tin
+
+    url = public_url()
+    return LOCAL_CONSOLE_LINE if is_local_url(url) else f"Mở Console: {url}{path}"
+
+
 # ─── cấu hình ───────────────────────────────────────────────────────────────
 
 async def get_config(db: AsyncSession, org_id: uuid.UUID) -> Any:
@@ -212,15 +224,16 @@ async def forget_tests(db: AsyncSession, org_id: uuid.UUID) -> None:
                      {"o": org_id, "k": CHECK_KEY})
 
 
-async def delete_config(db: AsyncSession, org_id: uuid.UUID) -> bool:
+async def delete_config(db: AsyncSession, org_id: uuid.UUID, *, redis: Any = None) -> bool:
     """Xoá cấu hình + tin đang chờ gửi + kết quả Gửi thử cũ của tổ chức, đóng sự cố telegram.failed (Sếp tắt Telegram
-    là đã xử lý xong cảnh báo — không còn đường nào gửi được để tự đóng). Không commit."""
+    là đã xử lý xong cảnh báo — không còn đường nào gửi được để tự đóng). Có `redis` thì chuông đang mở đổi ngay. Không
+    commit."""
     from gh import health
 
     res = await db.execute(text("DELETE FROM ops.notify_channels WHERE org_id = :o"), {"o": org_id})
     await db.execute(text("""DELETE FROM ops.telegram_outbox WHERE org_id = :o AND sent_at IS NULL"""), {"o": org_id})
     await forget_tests(db, org_id)
-    await health.clear(db, org_id, ALERT_KEY)
+    await health.clear(db, org_id, ALERT_KEY, redis=redis)
     return bool(getattr(res, "rowcount", 0))
 
 
@@ -281,7 +294,7 @@ async def sync_host_file(sm: Any) -> bool:
 def test_text() -> str:
     at = datetime.now(UTC).astimezone(VN_TZ).strftime("%H:%M %d/%m")
     return (f"Gen-Harness · Tin thử từ Console lúc {at}. Sếp nhận được tin này nghĩa là kênh Báo động & bản tin "
-            f"đã thông.\nMở Console: {public_url()}/connections#telegram\n{ONE_WAY}")
+            f"đã thông.\n{console_line('/connections#telegram')}\n{ONE_WAY}")
 
 
 def request_host_test() -> bool:
@@ -312,7 +325,7 @@ def _transient(code: str, detail: dict[str, Any]) -> dict[str, Any]:
 
 
 async def run_test(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID | None, *,
-                   client: tg.TelegramClient) -> tuple[dict[str, Any], dict[str, Any]]:
+                   client: tg.TelegramClient, redis: Any = None) -> tuple[dict[str, Any], dict[str, Any]]:
     """Gửi tin thử bằng cấu hình đã lưu; ghi boss_checks 'telegram' (pass/fail — 429 là lỗi TẠM, không ghi).
     Trả (kết quả khuôn BossCheck, chi tiết cho Action Log — không bí mật). Không commit."""
     from gh import health
@@ -336,7 +349,7 @@ async def run_test(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID | Non
         assert code is not None
         return _transient(code, detail), log_detail
     if code is None:
-        await health.clear(db, org_id, ALERT_KEY)
+        await health.clear(db, org_id, ALERT_KEY, redis=redis)
         rec = await boss.record(db, org_id, CHECK_KEY, "pass", detail=detail, user_id=user_id)
     else:
         rec = await boss.record(db, org_id, CHECK_KEY, "fail", error_code=code, message=MESSAGES.get(code),
@@ -502,13 +515,13 @@ def briefing_text(slot_label: str, summary: str | None, sections: list[dict[str,
     # Mục chưa đọc được (lỗi / Gen-hub tạm không trả lời) luôn có dòng ⇒ không có dòng nào = mọi mục đã đọc và đều 0.
     items = _briefing_items(sections)
     lines += ["", *items] if items else ["", NOTHING]
-    lines += ["", f"Mở Console: {public_url()}/overview", ONE_WAY]
+    lines += ["", console_line("/overview"), ONE_WAY]
     return "\n".join(lines)
 
 
 def reminder_text(title: str, code: str, priority: str, due: str | None) -> str:
     meta = f"{code} · {priority}" + (f" · hạn {due}" if due else "")
-    return f"Nhắc việc: {defang(_line(title, 300))}\n{meta}\nMở Console: {public_url()}/tasks\n{ONE_WAY}"
+    return f"Nhắc việc: {defang(_line(title, 300))}\n{meta}\n{console_line('/tasks')}\n{ONE_WAY}"
 
 
 async def _org_token(db: AsyncSession, org_id: uuid.UUID) -> tuple[str, str] | None:
@@ -607,7 +620,8 @@ async def flush_outbox(sm: Any, *, transport: Any = None, redis: Any = None) -> 
             delivered.add(r.org_id)
             stats["sent"] += 1
         for org in delivered:
-            await side_effect("đóng sự cố telegram.failed", lambda org=org: health.clear(db, org, ALERT_KEY))
+            await side_effect("đóng sự cố telegram.failed",
+                              lambda org=org: health.clear(db, org, ALERT_KEY, redis=redis))
         await db.execute(text("""DELETE FROM ops.telegram_outbox
                                  WHERE (sent_at IS NOT NULL AND sent_at < now() - make_interval(secs => :k))
                                     OR created_at < now() - make_interval(secs => :k)"""),

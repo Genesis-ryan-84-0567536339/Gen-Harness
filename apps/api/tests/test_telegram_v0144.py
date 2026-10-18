@@ -184,7 +184,9 @@ async def test_send_test_payload_and_boss_check(owner_api: Api, fake_tg: FakeTel
     assert path == f"/bot{TOKEN}/sendMessage"
     assert payload is not None and set(payload) == {"chat_id", "text", "disable_web_page_preview"}
     assert payload["chat_id"] == CHAT and payload["disable_web_page_preview"] is True
-    assert payload["text"].startswith("Gen-Harness · Tin thử từ Console") and "Mở Console: " in payload["text"]
+    assert payload["text"].startswith("Gen-Harness · Tin thử từ Console")
+    # F092: chưa bật Truy cập từ xa ⇒ không in link localhost
+    assert "localhost" not in payload["text"] and "Mở Console từ máy chủ" in payload["text"]
     assert "mọi thao tác Sếp xác nhận trong Console" in payload["text"]
     ov = (await owner_api.get("/boss-checks")).json()
     assert next(x for x in ov["rows"] if x["key"] == "telegram")["done"] is True

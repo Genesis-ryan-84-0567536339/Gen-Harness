@@ -273,7 +273,7 @@ async def test_opportunities_signals_and_breakdown(owner: Api, db: Any) -> None:
     assert [(e["event_type"], e["units"]) for e in et] == [("AskedPrice", 4), ("Complained", 3), ("OfferedSupply", 2),
                                                            # top 5, cùng số thì theo tên
                                                            ("Greeting", 1), ("SentQuotation", 1)]
-    assert et[0]["label"] == "Hỏi giá" and et[1]["label"] == "Than phiền" and et[3]["label"] == "Tin khác"
+    assert et[0]["label"] == "Hỏi giá / nhu cầu mua" and et[1]["label"] == "Phàn nàn" and et[3]["label"] == "Tin khác"
     fn = {f["stage"]: f for f in d["breakdown"]["funnel"]}
     assert [f["stage"] for f in d["breakdown"]["funnel"]] == ["raw_signal", "negotiating", "won", "lost"]
     assert fn["negotiating"] == {"stage": "negotiating", "label": "Đang đàm phán", "n": 2, "value_vnd": 1_500_000}

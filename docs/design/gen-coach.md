@@ -112,7 +112,7 @@ Mỗi việc có **khoá**, **mức**, **đích làm sáng** (hoặc `link` củ
 | `drafts.pending` | P2 | `drafts.any` (tiêu đề có số bản nháp) | `workbench.drafts` |
 | `boss.hub` | P3 | `!boss.hub.done` (gợi ý nhẹ, không chuông) | `boss_checks.row.hub` |
 | `boss.remote` | P3 | `staff.active` và `!boss.remote.done` (chỉ nhắc khi đã có người dùng khác Owner) | `boss_checks.row.remote` |
-| `followup.<n>`, n = 5..10 | P3 | `!followup.<n>.done` | `guide.item.do:<n>` |
+| `followup.<n>`, n = 5..10 | P3 | `!followup.<n>.done` — **không đứng riêng** (v0.1.70): các việc còn hiện gộp thành MỘT việc `followup` "Việc thiết lập tiếp" ("Còn N việc tuỳ chọn", N đếm như thẻ cùng tên ở Tổng quan: mọi `followup.<n>.done` chưa xong, n ∈ 5–11, 13, 14) | `overview.setup_followup` (chính thẻ ở Tổng quan; khoá `followup.<n>` giữ cho hàng "Không dùng việc này" cũ và bài `G<n>`) |
 
 Các việc thiết lập 11, 13, 14 không thành việc riêng vì trùng `backup.unset`, `boss.facebook`, `boss.hub`. Dòng "Việc Sếp cần làm" mới thêm sau này (chưa có câu riêng) vẫn có câu chung — thẻ không hỏng.
 
@@ -165,7 +165,9 @@ và 9 bài `G05`–`G11`, `G13`, `G14` **sinh từ Hướng dẫn thiết lập*
 | N06 | 145 | Cho Gen ghi vào Kho dữ liệu | `boss_checks.row.kho_write` | `boss.hub.done` | `boss.kho_write.done` |
 
 Luật chọn bài hôm nay: bài kế tiếp trong lộ trình chưa hiểu / chưa xong / chưa hoãn, đã mở khoá, chưa đạt `done_signal`; giữ bài đã hiện hôm nay (không đổi giữa ngày); không quá `lessons_per_day` (0–2, mặc định 1; 0 ⇒ không bài).
-Bài đã hiện ≥ 3 ngày mà Sếp chưa phản hồi coi như hoãn (quay lại sau 10 ngày kể từ lần hiện đầu). Bài `G<n>` bị bỏ khi việc `followup.<n>` đang nằm trong 3 việc hôm nay hoặc Sếp đã chọn không dùng việc đó (không nói hai lần một chuyện).
+Bài đã hiện ≥ 3 ngày mà Sếp chưa phản hồi coi như hoãn (quay lại sau 10 ngày kể từ lần hiện đầu). Bài `G<n>` bị bỏ khi việc `followup.<n>` đang nằm trong 3 việc hôm nay (nay: nằm trong việc gộp `followup` đang hiện) hoặc Sếp đã chọn không dùng việc đó (không nói hai lần một chuyện).
+
+**"Để sau 7 ngày" của thẻ "Việc thiết lập tiếp"** (`card:setup_followup`, v0.1.70) ẩn luôn MỌI việc P3 của Gen (`followup`, `boss.hub`, `boss.remote`) cho tới hết hạn; việc P0/P1/P2 không bị ảnh hưởng.
 Trạng thái bài: `new` · `shown` · `understood` · `snoozed` · `done` (`done_signal` đạt = xong thật, không cần bấm).
 
 ### 7.3 Quy ước viết nội dung
@@ -185,7 +187,7 @@ Job `gen_coach` (worker, **09:05 / 11:05 / 14:05 giờ Asia/Ho_Chi_Minh**, `gh.g
 - **Điều kiện** (`bell_due`): hướng dẫn bật + chuông bật + không "Hoãn tất cả" + không ổn định + ngoài giờ yên lặng + có việc P0/P1 hiện trên thẻ + (có khoá P0/P1 **mới** so với lần chuông trước, hoặc cùng tập khoá mà lần chuông trước đã ≥ 3 ngày).
   Sự cố `health.*` và `hub.token_expiring` không tính là "mới" vì đã có chuông riêng.
 - **Cổng nguyên tử** `claim_bell`: MỘT câu `UPDATE … RETURNING` — chỉ thắng khi hôm nay chưa chuông **và** Sếp chưa xem thẻ hôm nay; hai tiến trình chạy cùng lúc chỉ một bên chuông; chạy lại cùng ngày không chuông thứ hai.
-- **Giờ yên lặng** theo `core.organizations.timezone` (mặc định 22:00 → 07:00; `quiet_start == quiet_end` ⇒ không có giờ yên lặng).
+- **Giờ yên lặng** theo `core.organizations.timezone` (mặc định 21:00 → 07:00, QD-20; `quiet_start == quiet_end` ⇒ không có giờ yên lặng).
 - **Liên kết chuông**: `/overview?gen=coach` khi Gen đang bật cho Owner (mở khung Gen với thẻ), `/guide/viec-sep` khi Gen tắt. **Không đẩy Telegram.**
 
 ## 9. "Hệ thống đã ổn định"
@@ -235,7 +237,7 @@ Một nguồn sinh việc P0/P1 đọc lỗi ⇒ giữ nguyên mốc và **khôn
 
 ## 12. Dữ liệu — migration `0033` (`db/sql/0033_v0154_gen_coach.sql`, `revision 0033 ← 0032`)
 
-- **`agent.gen_coach_prefs`** (một hàng / Owner, khoá `user_id`): `enabled`, `bell`, `lessons_per_day` (0..2, mặc định 1), `quiet_start` 22, `quiet_end` 7, `snooze_until`, `stable_since`, `last_seen_at`, `last_bell_at`, `last_bell_keys`.
+- **`agent.gen_coach_prefs`** (một hàng / Owner, khoá `user_id`): `enabled`, `bell`, `lessons_per_day` (0..2, mặc định 1), `quiet_start` 21, `quiet_end` 7, `snooze_until`, `stable_since`, `last_seen_at`, `last_bell_at`, `last_bell_keys`.
 - **`agent.gen_coach_items`** (khoá `(user_id, item_key)`): `status` ∈ `shown` · `understood` · `snoozed` · `done` · `dismissed`, `snooze_until`, `shown_count`, `first_shown_at`, `last_shown_at`.
 - RLS `org_isolation` + `GRANT … TO gh_app` như 0032; chạy lại an toàn (`IF NOT EXISTS`, `DROP … IF EXISTS`). v0.1.53 không có migration nên 0033 nối thẳng sau 0032.
 - Hai bảng **không** thuộc `purge_gen` (hạn lưu hội thoại Gen): lựa chọn "Tắt hướng dẫn"/"Để mai" của Sếp phải sống lâu hơn hội thoại.

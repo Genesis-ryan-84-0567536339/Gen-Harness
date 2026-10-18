@@ -24,6 +24,7 @@ async def _quota(db, pid, name):  # type: ignore[no-untyped-def]
 
 
 async def test_delete_model_removes_bindings_and_logs(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    await verify_pin(owner_api)   # v0.1.70: thêm / gỡ model cần PIN ai.route_change
     org = await org_id(db)
     pid, ids = await add_source(db, org, API, "alpha", 1, ["m-flash", "m-pro"])
     await bind(db, org, "core.gen", ids["m-pro"])
@@ -46,6 +47,7 @@ async def test_delete_model_removes_bindings_and_logs(owner_api: Api, db) -> Non
 
 
 async def test_quota_is_kept_when_only_choosing_default(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    await verify_pin(owner_api)   # v0.1.70: thêm / gỡ model cần PIN ai.route_change
     org = await org_id(db)
     pid, _ = await add_source(db, org, API, "alpha", 1, ["m-flash"])
     r = await owner_api.send("POST", f"/providers/{pid}/models",
@@ -89,6 +91,7 @@ async def _call(db, org, model, days_ago: int) -> None:  # type: ignore[no-untyp
 
 
 async def test_delete_model_with_recent_calls_is_refused_and_keeps_price(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    await verify_pin(owner_api)   # v0.1.70: thêm / gỡ model cần PIN ai.route_change
     org = await org_id(db)
     pid, ids = await add_source(db, org, API, "alpha", 1, ["m-flash", "m-pro"])
     await bind(db, org, "core.gen", ids["m-pro"])
@@ -112,6 +115,7 @@ async def test_delete_model_with_recent_calls_is_refused_and_keeps_price(owner_a
 
 
 async def test_delete_model_with_only_old_calls_is_allowed(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    await verify_pin(owner_api)   # v0.1.70: thêm / gỡ model cần PIN ai.route_change
     org = await org_id(db)
     pid, ids = await add_source(db, org, API, "alpha", 1, ["m-flash", "m-pro"])
     await _call(db, org, ids["m-pro"], 45)          # quá 30 ngày ⇒ gỡ được
@@ -121,6 +125,7 @@ async def test_delete_model_with_only_old_calls_is_allowed(owner_api: Api, db) -
 
 
 async def test_model_can_be_disabled_and_enabled_keeping_history(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    await verify_pin(owner_api)   # v0.1.70: thêm / gỡ model cần PIN ai.route_change
     org = await org_id(db)
     pid, ids = await add_source(db, org, API, "alpha", 1, ["m-flash", "m-pro"], default="m-pro")
     await _call(db, org, ids["m-pro"], 1)
@@ -141,6 +146,7 @@ async def test_model_can_be_disabled_and_enabled_keeping_history(owner_api: Api,
 # ─── review v0.1.66 (P3): model cuối của Jev / CLI không gỡ được; Action Log ghi vai bị gỡ gán ─────────────────────
 
 async def test_last_model_of_jev_or_cli_cannot_be_deleted(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    await verify_pin(owner_api)   # v0.1.70: thêm / gỡ model cần PIN ai.route_change
     org = await org_id(db)
     jev, jids = await add_source(db, org, "system_one", "Jev", 1, ["typesafe/jev-1.13"])
     r = await owner_api.send("DELETE", f"/providers/{jev}/models/{jids['typesafe/jev-1.13']}")
@@ -158,6 +164,7 @@ async def test_last_model_of_jev_or_cli_cannot_be_deleted(owner_api: Api, db) ->
 
 
 async def test_delete_model_log_lists_unbound_roles(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    await verify_pin(owner_api)   # v0.1.70: thêm / gỡ model cần PIN ai.route_change
     org = await org_id(db)
     pid, ids = await add_source(db, org, API, "alpha", 1, ["m-flash", "m-pro"])
     await bind(db, org, "core.gen", ids["m-pro"])

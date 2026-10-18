@@ -27,7 +27,7 @@ async def _count_log(action: str) -> int:
 async def test_empty_then_role_change_notifies_target_only(owner_api: Api, app: Any) -> None:
     r = await owner_api.get("/notifications")
     assert r.status_code == 200, r.text
-    assert r.json() == {"items": [], "unread": 0}
+    assert r.json() == {"items": [], "unread": 0, "total": 0}
 
     await _pin(owner_api)
     r = await owner_api.send("POST", "/users", {"display_name": "Lan", "email": "lan@example.vn", "role": "operator"})

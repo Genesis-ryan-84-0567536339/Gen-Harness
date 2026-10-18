@@ -19,6 +19,8 @@ import { InlineError, Panel } from '../common';
  * v0.1.54 (Gen hướng dẫn): bỏ nút "Ẩn" lưu trên trình duyệt; thay bằng "Để sau 7 ngày" — lưu Ở MÁY CHỦ
  * (`POST /gen/coach/items/card:setup_followup` snooze 7 ngày), nên ẩn đúng trên mọi máy của Sếp. Thẻ ẩn khi
  * `GET /gen/coach/prefs` báo `followup_snoozed_until` còn ở tương lai; hết hạn là hiện lại.
+ * v0.1.70 (F031/F138): hoãn thẻ cũng ẩn mọi việc P3 trên thẻ "Hôm nay của Sếp" (máy chủ), và các việc thiết lập 5–10 của Gen
+ * gộp thành MỘT dòng trỏ vào thẻ này (`data-gen-target="overview.setup_followup"`) — một cách đếm, không đứng riêng.
  */
 export function SetupFollowUp() {
   const me = useMe();
@@ -38,6 +40,7 @@ export function SetupFollowUp() {
       title="Việc thiết lập tiếp"
       kicker={`${items.length} việc tuỳ chọn — không bắt buộc, làm khi sẵn sàng, xong sẽ tự biến mất`}
       label="Việc thiết lập tiếp"
+      genTarget="overview.setup_followup"
       bodyClass="ov-followup"
       aside={
         <span className="ov-followup__aside">

@@ -16,7 +16,7 @@ import { restoreIfNeeded, retryRestore, sendFeedback, sendQuestion } from './gen
 import { GenHistory } from './GenHistory';
 import { ModelPicker } from './ModelPicker';
 import { ProposalCard } from './ProposalCard';
-import { toolLabel } from './toolLabels';
+import { toolLabel, toolLabelHasKho } from './toolLabels';
 import { useGenStore, type GenChatMessage } from './genStore';
 
 const EXAMPLES = ['Hôm nay có gì cần tôi xử lý?', 'Khách nào hỏi giá hôm nay?', 'Nhắc tôi gọi lại khách lúc 3 giờ chiều'];
@@ -37,6 +37,26 @@ function useAddressing(): string {
   return me.data?.addressing?.bot_calls_me || 'Sếp';
 }
 
+/**
+ * Chip "Đã tra …": nhãn tra Kho theo tên Kho Sếp tự đặt (F117). Tên lấy từ truy vấn thật `GET /hub/link` (cùng khoá với thẻ
+ * Gen-hub nên React Query gộp một lần gọi) — không đọc cache của truy vấn đã tắt: mở lại hội thoại cũ thì cache còn trống và
+ * chip nói tên mặc định. Chỉ hỏi khi nhãn của bước thật sự có tên Kho và người xem đọc được cài đặt; lỗi ⇒ tên mặc định.
+ */
+function ToolChip({ name }: { name: string }) {
+  const canReadSystem = useCan('system.read');
+  const hub = useQuery({
+    queryKey: qkMcp.hubLink,
+    queryFn: ({ signal }) => api.hub.link.get(signal),
+    enabled: canReadSystem && toolLabelHasKho(name),
+    retry: false,
+  });
+  return (
+    <span className="gen-chip">
+      <Icon name="ph ph-magnifying-glass" size={11} /> Đã tra {toolLabel(name, hub.data?.kho_label)}
+    </span>
+  );
+}
+
 function Step({ step, turnId }: { step: GenStep; turnId?: string }) {
   if (step.kind === 'say') return <p className="gen-msg__text">{step.text}</p>;
   // v0.1.55 (G3): thông báo của hệ thống (vd hạ về Tự động) — một dòng nhỏ, luôn là chuỗi.
@@ -47,12 +67,7 @@ function Step({ step, turnId }: { step: GenStep; turnId?: string }) {
         <span>{typeof step.text === 'string' ? step.text : ''}</span>
       </p>
     );
-  if (step.kind === 'tool')
-    return (
-      <span className="gen-chip">
-        <Icon name="ph ph-magnifying-glass" size={11} /> Đã tra {toolLabel(step.name)}
-      </span>
-    );
+  if (step.kind === 'tool') return <ToolChip name={step.name} />;
   if (step.kind === 'ui')
     return (
       <button type="button" className="gen-chip gen-chip--btn" onClick={() => void executeUiAction(step.action, turnId)} title="Làm lại">

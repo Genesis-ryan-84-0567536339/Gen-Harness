@@ -6,7 +6,7 @@ export const ORG_KEY = ['system', 'org'] as const;
 export const USERS_KEY = ['system', 'users'] as const;
 
 export const INVITE_ROLES: Array<{ value: InviteRole; label: string }> = [
-  { value: 'manager', label: 'Quản lý — thấy team mình' },
+  { value: 'manager', label: 'Quản lý — thấy việc được giao' },
   { value: 'operator', label: 'Vận hành — xử lý hàng đợi việc' },
   { value: 'agent_staff', label: 'Nhân viên phụ trách — chỉ khách được phân' },
   { value: 'auditor', label: 'Kiểm soát — chỉ xem' },

@@ -91,9 +91,14 @@ _FREQ = {"daily": "hằng ngày", "weekly": "hằng tuần", "monthly": "hằng 
 def _backup_text(cfg: dict[str, Any] | None) -> str:
     if not cfg:
         return "Chưa đặt lịch sao lưu tự động"
+    from gh import backup  # nhập muộn: gh.backup kéo arq/psycopg, không cần cho mọi lần nạp registry
+
     where = "trên máy chủ này" if cfg.get("destination") == "local" else str(cfg.get("destination"))
+    # Vòng đời thật là GFS; `retention_count` của cấu hình KHÔNG dùng nên không in ra (F108).
+    keep = (f"giữ {backup.DAILY_KEEP} bản theo ngày, {backup.WEEKLY_KEEP} theo tuần, "
+            f"{backup.MONTHLY_KEEP} theo tháng")
     return (f"Sao lưu {_FREQ.get(str(cfg.get('frequency')), str(cfg.get('frequency')))} lúc {cfg.get('time_of_day')} · "
-            f"giữ {cfg.get('retention_count')} bản · lưu {where}")
+            f"{keep} · lưu {where}")
 
 
 def _ai_cost_text(budget: int | None) -> str:
@@ -367,11 +372,13 @@ async def _binding_items(db: AsyncSession, org: uuid.UUID) -> list[Item]:
         FROM agent.bindings b JOIN agent.models m ON m.id = b.model_id JOIN agent.providers p ON p.id = m.provider_id
         WHERE b.org_id = :o"""), {"o": org})).all()
     bound = {r.agent_key: r for r in rows}
-    agents = (await db.execute(text("SELECT id, name FROM agent.identities WHERE org_id = :o ORDER BY created_at"),
-                               {"o": org})).all()
+    agents = (await db.execute(text("SELECT id, name, archived_at FROM agent.identities WHERE org_id = :o "
+                                    "ORDER BY created_at"), {"o": org})).all()
     keys: list[tuple[str, str]] = [(k, v) for k, v in CORE_AGENT_KEYS.items()]
+    # Agent đã Lưu trữ (archived_at) ẩn khỏi bảng Gán model như mọi nơi khác — kể cả dòng gán còn sót (lưu trữ đã gỡ nó)
+    # cũng không hiện lại thành "Agent đã xoá".
     known = {f"agent:{a.id}" for a in agents}
-    keys += [(f"agent:{a.id}", str(a.name)) for a in agents]
+    keys += [(f"agent:{a.id}", str(a.name)) for a in agents if a.archived_at is None]
     # Dòng gán của agent đã bị xoá (không còn trong agent.identities) vẫn nằm trong sổ để "Về mặc định tất cả" dọn được.
     keys += [(k, "Agent đã xoá") for k in sorted(bound) if k.startswith("agent:") and k not in known]
     std, why = await profiles.standard_with_reasons(db, org, [k for k, _ in keys])
@@ -434,6 +441,16 @@ async def reset_autonomy(db: AsyncSession, org_id: uuid.UUID) -> None:
 
 # ─── hợp đồng với G5: gợi ý trên màn Hôm nay ──────────────────────────────────
 
+#: MỘT bản chữ cho gợi ý thiếu khoá nền — dùng chung với Mặt tiền Owner (`gh.owner.service.BG_SUGGESTION`, khi sự cố
+#: `ai.background_no_source` mở mà registry chưa nêu) để Sếp không gặp hai tiêu đề cho cùng một việc (F024).
+BACKGROUND_KEY_SUGGESTION: dict[str, str] = {
+    "key": "background_key_missing",
+    "title": "Cần 1 khoá API để chạy lọc tin và bản tin",
+    "body": ("Lọc tin, trực việc và Bản tin Gen chạy nền. Sếp dán 1 khoá OpenRouter hoặc Gemini, "
+             "hoặc đăng nhập Antigravity CLI ở Bộ não AI là đủ."),
+    "to": BRAIN_TAB,
+}
+
 async def suggestions(db: AsyncSession, org_id: uuid.UUID) -> list[dict[str, Any]]:
     """`[{key, title, body, to}]` — Gen chỉ ĐỀ XUẤT, không tự làm.
 
@@ -455,9 +472,5 @@ async def suggestions(db: AsyncSession, org_id: uuid.UUID) -> list[dict[str, Any
                     "to": APPLY_STANDARD_TO})
     if (not await has_api_source(db, org_id) and not await has_agy_source(db, org_id)
             and not await background_cli_allowed(db, org_id)):
-        out.append({"key": "background_key_missing",
-                    "title": "Cần 1 khóa API để chạy lọc tin và bản tin",
-                    "body": ("Lọc tin, trực việc và Bản tin Gen chạy nền. Sếp dán 1 khóa OpenRouter hoặc Gemini, "
-                             "hoặc đăng nhập Antigravity CLI ở Bộ não AI là đủ."),
-                    "to": BRAIN_TAB})
+        out.append(dict(BACKGROUND_KEY_SUGGESTION))
     return out

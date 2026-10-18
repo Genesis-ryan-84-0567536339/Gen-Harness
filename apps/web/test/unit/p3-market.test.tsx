@@ -206,7 +206,7 @@ describe('Kho hội thoại', () => {
     expect(await screen.findByText('Trần Văn Hậu')).toBeInTheDocument();
     expect(screen.getByText('Nguyễn Văn Bảo')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /Hỏi giá · 1/ }));
+    await user.click(screen.getByRole('button', { name: /Hỏi giá \/ nhu cầu mua · 1/ }));
     await waitFor(() => expect(calls.some((c) => c.url.includes('event_type=AskedPrice'))).toBe(true));
     expect(await screen.findByText('Trần Văn Hậu')).toBeInTheDocument();
     expect(screen.queryByText('Nguyễn Văn Bảo')).not.toBeInTheDocument();

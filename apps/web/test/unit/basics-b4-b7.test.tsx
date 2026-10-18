@@ -180,6 +180,55 @@ describe('B6 — chuông thông báo', () => {
     expect(await screen.findByText('Chưa có thông báo nào.')).toBeInTheDocument();
   });
 
+  it('F098: chuông đã xử lý hiện nhãn "Đã xử lý"; nhiều hơn 20 thì "Xem thêm" tải đủ', async () => {
+    const first: NotificationsPage = {
+      items: [N({ id: 'a', title: 'Cập nhật chưa thành công', read: true, resolved: true }), N({ id: 'b', title: 'Ổ đĩa sắp đầy' })],
+      unread: 3,
+      total: 4,
+    };
+    const full: NotificationsPage = {
+      items: [...first.items, N({ id: 'c', title: 'Việc nền c' }), N({ id: 'd', title: 'Việc nền d', read: true })],
+      unread: 3,
+      total: 4,
+    };
+    stubApi((m, url) => {
+      if (m === 'GET' && url.includes('limit=100')) return { status: 200, body: full };
+      if (m === 'GET' && url.includes('/notifications')) return { status: 200, body: first };
+      return undefined;
+    });
+    wrap(<NotificationBell />);
+    await userEvent.click(await screen.findByRole('button', { name: /Thông báo — 3 chưa đọc/ }));
+    const dlg = screen.getByRole('dialog', { name: 'Thông báo' });
+    const resolvedItem = within(dlg).getByRole('button', { name: /Cập nhật chưa thành công/ });
+    expect(within(resolvedItem).getByText('Đã xử lý')).toBeInTheDocument();
+    expect(within(dlg).queryByText('Việc nền c')).toBeNull();
+    await userEvent.click(within(dlg).getByRole('button', { name: /Xem thêm \(2\)/ }));
+    expect(await within(dlg).findByText('Việc nền c')).toBeInTheDocument();
+    expect(within(dlg).getByText('Việc nền d')).toBeInTheDocument();
+    expect(within(dlg).queryByRole('button', { name: /Xem thêm/ })).toBeNull();
+  });
+
+  it('"Xem thêm" lật tiếp trang kế khi có quá 100 thông báo (offset), không sót không trùng', async () => {
+    const mk = (from: number, to: number) => Array.from({ length: to - from }, (_, i) => N({ id: `n${from + i}`, title: `Việc ${from + i}`, read: true }));
+    const body = (items: ReturnType<typeof mk>) => ({ items, unread: 1, total: 130 });
+    stubApi((m, url) => {
+      if (m !== 'GET' || !url.includes('/notifications')) return undefined;
+      if (url.includes('offset=100')) return { status: 200, body: body(mk(100, 130)) };
+      if (url.includes('limit=100')) return { status: 200, body: body(mk(0, 100)) };
+      return { status: 200, body: body(mk(0, 20)) };
+    });
+    wrap(<NotificationBell />);
+    await userEvent.click(await screen.findByRole('button', { name: /Thông báo — 1 chưa đọc/ }));
+    const dlg = screen.getByRole('dialog', { name: 'Thông báo' });
+    await userEvent.click(await within(dlg).findByRole('button', { name: /Xem thêm \(110\)/ }));
+    expect(await within(dlg).findByText('Việc 99')).toBeInTheDocument();
+    expect(within(dlg).queryByText('Việc 100')).toBeNull();
+    await userEvent.click(await within(dlg).findByRole('button', { name: /Xem thêm \(30\)/ }));
+    expect(await within(dlg).findByText('Việc 129')).toBeInTheDocument();
+    expect(within(dlg).getAllByRole('listitem')).toHaveLength(130);
+    expect(within(dlg).queryByRole('button', { name: /Xem thêm/ })).toBeNull();
+  });
+
   it('WS notification.new chèn đầu danh sách, tăng số chưa đọc, không trùng', () => {
     const qc = new QueryClient();
     qc.setQueryData<NotificationsPage>(qk.notifications, page);
@@ -189,6 +238,16 @@ describe('B6 — chuông thông báo', () => {
     const d = qc.getQueryData<NotificationsPage>(qk.notifications)!;
     expect(d.items.map((n) => n.id)).toEqual(['c', 'a', 'b']);
     expect(d.unread).toBe(2);
+  });
+
+  it('WS notification.resolved làm mới chuông (đã đọc / "Đã xử lý") thay vì đợi lượt tải 120 giây', () => {
+    const qc = new QueryClient();
+    qc.setQueryData<NotificationsPage>(qk.notifications, page);
+    qc.setQueryData([...qk.notifications, 'all'], page);
+    expect(qc.getQueryState(qk.notifications)?.isInvalidated).toBe(false);
+    applyEvent(qc, { type: 'notification.resolved', data: N({ id: 'a', read: true, resolved: true }) } as RealtimeEvent);
+    expect(qc.getQueryState(qk.notifications)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState([...qk.notifications, 'all'])?.isInvalidated).toBe(true);
   });
 
   it('huy hiệu gọn: 9+', () => {

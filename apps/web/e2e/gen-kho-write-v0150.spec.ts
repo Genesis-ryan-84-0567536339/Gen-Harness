@@ -131,7 +131,7 @@ test('Token thiếu quyền ghi Kho: khoá Xác nhận + nút "Mở thẻ Gen-hu
   await expect(write).toBeVisible();
   await expect(write).toContainText('Quyền ghi Kho (tuỳ chọn)');
   await expect(write.getByText('Chưa', { exact: true })).toHaveCount(2);
-  await expect(write).toContainText('Vào Gen-hub tick quyền kho_create, kho_update cho token của Gen-Harness rồi bấm Kiểm tra.');
+  await expect(write).toContainText('Vào Gen-hub tick quyền ghi Kho (tạo và sửa bản ghi — tên trong Gen-hub: kho_create, kho_update) cho token của Gen-Harness rồi bấm Kiểm tra.');
   await expect(write).toContainText('Gen chỉ ghi khi Sếp bấm Xác nhận + nhập mã PIN trên thẻ đề xuất.');
 
   // Sếp tick quyền ghi ở Gen-hub (mock: hook) rồi bấm Kiểm tra (cần PIN) ⇒ "Có" ×2; thẻ đề xuất mở khoá.

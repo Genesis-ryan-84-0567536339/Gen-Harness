@@ -398,11 +398,11 @@ test.describe('cụm Cơ hội & Thị trường', () => {
     await expect(page.getByText('Trần Văn Hậu')).toBeVisible();
     await expect(page.getByText('Trịnh Mỹ Duyên')).toBeVisible();
 
-    await page.getByRole('button', { name: /Đã im lặng/ }).click();
+    await page.getByRole('button', { name: /^Im lặng/ }).click();
     await expect(page).toHaveURL(/et=WentSilent/);
     await expect(page.getByText('Trịnh Mỹ Duyên')).toBeVisible();
     await expect(page.getByText('Trần Văn Hậu')).toHaveCount(0);
-    await page.getByRole('button', { name: /Đã im lặng/ }).click(); // bỏ lọc lại
+    await page.getByRole('button', { name: /^Im lặng/ }).click(); // bỏ lọc lại
 
     await page.getByLabel('Chọn Trần Văn Hậu').check();
     await page.getByLabel('Chọn Đặng Hữu Trí').check();
@@ -816,7 +816,7 @@ test.describe('giai đoạn 4.5/4.6: Điều khiển hệ thống', () => {
 
       // v0.1.40 (F-2): việc nền dọn theo hạn lưu đã chạy thật — nút "Sửa" hoạt động, không còn nhãn "Chưa tự xoá".
       await expect(page.getByText(/Chưa tự xoá/)).toHaveCount(0);
-      const rawRow = page.locator('tr', { has: page.getByText('Kho thô') });
+      const rawRow = page.locator('tr', { has: page.getByText('Tin gốc') });
       await rawRow.getByRole('button', { name: /Sửa/ }).click();
       await rawRow.getByLabel(/Giữ trong \(ngày\)/).fill('500');
       await rawRow.getByRole('button', { name: 'Lưu', exact: true }).click();

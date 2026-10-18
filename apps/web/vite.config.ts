@@ -34,7 +34,7 @@ export default defineConfig(({ mode }) => ({
         : {
             // Realtime socket first: same origin + cookie, forwarded as a WebSocket.
             '/api/v1/ws': { target: API_TARGET, ws: true, changeOrigin: false },
-            '/api': { target: API_TARGET, changeOrigin: false },
+            '/api/': { target: API_TARGET, changeOrigin: false },
           },
   },
   build: {

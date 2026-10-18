@@ -29,4 +29,5 @@ export * from './telegram';
 export * from './diagnostics';
 export * from './defaults';
 export * from './owner';
+export * from './eventTypes';
 export * from './listenLog';

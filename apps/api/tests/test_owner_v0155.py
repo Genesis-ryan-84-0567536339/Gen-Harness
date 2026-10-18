@@ -331,7 +331,7 @@ async def test_inbox_group_counts_only_kept_units(owner: Api, db: Any) -> None:
                          {"o": org, "i": mu, "t": now - timedelta(hours=1), "s": spam, "q": quality})
     await db.commit()
     inbox = (await owner.get("/owner/tasks")).json()["groups"][0]
-    assert inbox["count"] == 1 and inbox["items"][0]["title"] == "Hỏi giá: Tin keep"
+    assert inbox["count"] == 1 and inbox["items"][0]["title"] == "Hỏi giá / nhu cầu mua: Tin keep"
     # tổ chức tắt lọc đầu ⇒ lấy hết mọi tin trong 7 ngày
     await db.execute(text("""UPDATE core.organizations SET settings = jsonb_set(settings, '{triage}',
                              '{"enabled": false, "min_score": 30, "use_jev": false}')"""))

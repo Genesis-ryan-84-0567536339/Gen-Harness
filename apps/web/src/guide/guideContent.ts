@@ -1,3 +1,6 @@
+import { KHO_LABEL } from '@gen-harness/contracts';
+import { AI_SOURCE_PATH } from '../setup/steps';
+
 /**
  * Hướng dẫn thiết lập: các việc tuỳ chọn 5–11 của trình thiết lập + (v0.1.39) 13 Kết nối Facebook, 14 Nối Gen-hub. Chữ viết cho Owner không rành kỹ
  * thuật: vì sao cần, chuẩn bị gì, bấm gì theo đúng nhãn nút trên màn hình, và làm sao biết đã xong. Nút "Làm bước
@@ -77,7 +80,8 @@ export const GUIDE: GuideItem[] = [
     n: 8,
     title: 'Tạo agent đầu tiên',
     why: 'Agent là "nhân viên AI" làm việc thay Sếp trên các kênh — có tên, vai trò và giọng nói riêng.',
-    prepare: ['Bộ não AI đã chạy (bước 4 của trình thiết lập — đã xong nếu Sếp đang ở Console).'],
+    // v0.1.70 (F029): Console mở sau bước 1–3 — bước 4 có thể đang "Để sau", nên KHÔNG nói "đã xong nếu Sếp ở Console".
+    prepare: ['Có ít nhất một nguồn AI chạy được (bước 4 của trình thiết lập — nếu Sếp đã để sau thì làm ở Thiết lập nguồn AI trước).'],
     steps: [
       'Bấm "Làm bước này".',
       'Chọn một "Mẫu" (ví dụ Trợ lý thương mại, CSKH, Thư ký cá nhân) — tên và vai trò được điền sẵn, chọn mẫu là xong.',
@@ -122,7 +126,7 @@ export const GUIDE: GuideItem[] = [
     n: 11,
     title: 'Đặt lịch sao lưu',
     why: 'Máy hỏng hay lỡ tay xoá vẫn khôi phục được dữ liệu — bản sao lưu được mã hoá và giữ ngay trong máy.',
-    prepare: ['Không cần chuẩn bị gì — sao lưu đã tự bật: hằng ngày lúc 02:00, giữ 7 bản gần nhất.'],
+    prepare: ['Không cần chuẩn bị gì — sao lưu đã tự bật: hằng ngày lúc 02:00, giữ 7 bản theo ngày, 4 theo tuần, 12 theo tháng.'],
     steps: [
       'Bấm "Làm bước này".',
       'Đọc dòng "Sao lưu đã tự bật"; muốn giữ nguyên thì bấm "Tiếp tục" (hoặc "Để sau" — lịch này vẫn chạy).',
@@ -134,7 +138,7 @@ export const GUIDE: GuideItem[] = [
   {
     n: 13,
     title: 'Kết nối Facebook',
-    why: 'Để Gen đọc thông báo, tin nhắn và — khi Sếp bấm Xác nhận + nhập PIN — trả lời bình luận / nhắn tin thay Sếp; không đăng bài.',
+    why: 'Để Gen đọc thông báo, tin nhắn và — khi Sếp bấm Xác nhận + nhập mã PIN — trả lời bình luận / nhắn tin thay Sếp; không đăng bài.',
     prepare: ['Tài khoản Facebook thật của chính Sếp (không dùng tài khoản phụ hay nick ảo).', 'Điện thoại để nhận mã xác minh nếu Facebook hỏi.'],
     steps: [
       'Bấm "Mở trang Tài khoản mạng xã hội" bên dưới.',
@@ -151,15 +155,15 @@ export const GUIDE: GuideItem[] = [
   {
     n: 14,
     title: 'Nối Gen-hub',
-    why: 'Để Gen đọc Kho tri thức của Sếp trên Gen-hub — trả lời có căn cứ từ việc, quyết định, bài học đã ghi. Gen chỉ ghi Kho (Phiên, Việc) khi Sếp bấm Xác nhận và nhập mã PIN.',
+    why: `Để Gen đọc ${KHO_LABEL} của Sếp trên Gen-hub — trả lời có căn cứ từ việc, quyết định, bài học đã ghi. Gen chỉ ghi vào ${KHO_LABEL} (Phiên, Việc) khi Sếp bấm Xác nhận và nhập mã PIN.`,
     prepare: ['Tài khoản Gen-hub của Sếp.', 'Địa chỉ Gen-hub của Sếp (dạng https://…/mcp, lấy trong Gen-hub).'],
     steps: [
       'Trong Gen-hub: tạo trợ lý mới, chọn thẻ truy cập (token) 90 ngày, bật quyền ĐỌC Kho.',
       'Tuỳ chọn: tick thêm quyền ĐỌC lịch, đọc mail, đọc việc (Google Tasks) và tìm Drive để bản tin Gen có lịch hôm nay, mail cần trả lời, việc đang mở — KHÔNG bật quyền ghi lịch, mail hay Drive.',
-      'Tuỳ chọn: tick kho_create, kho_update nếu muốn Gen ghi Phiên, Việc vào Kho — mỗi lần ghi Sếp vẫn bấm Xác nhận và nhập mã PIN.',
+      'Tuỳ chọn: tick quyền ghi Kho (tạo và sửa bản ghi — tên trong Gen-hub: kho_create, kho_update) nếu muốn Gen ghi Phiên, Việc vào Kho — mỗi lần ghi Sếp vẫn bấm Xác nhận và nhập mã PIN.',
       'Chép token vừa tạo.',
       'Bấm "Mở thẻ Gen-hub" bên dưới, dán địa chỉ và token vào thẻ Gen-hub.',
-      'Bấm "Lưu & kiểm tra" (nhập PIN khi được hỏi) và chờ báo Đã nối Kho.',
+      'Bấm "Lưu & kiểm tra" (nhập mã PIN khi được hỏi) và chờ báo Đã nối Kho.',
     ],
     doneWhen: 'Kiểm tra xanh ít nhất một lần.',
     console: { label: 'Kết nối › Gen-hub', to: '/connections#genhub' },
@@ -183,7 +187,8 @@ export const MODEL_GUIDE: GuideItem = {
     'Bấm "Tiếp tục".',
   ],
   doneWhen: 'Gen hoặc Sàng lọc đã được gán một model.',
-  console: { label: 'API & Model', to: '/api' },
+  // v0.1.70 (F029): cùng đích với mọi nút "Chọn model" / `readiness.FIX_AI` — màn Thiết lập nguồn AI.
+  console: { label: 'Thiết lập nguồn AI', to: AI_SOURCE_PATH },
 };
 
 export const GUIDE_BY_N: Record<number, GuideItem> = Object.fromEntries([MODEL_GUIDE, ...GUIDE].map((g) => [g.n, g]));

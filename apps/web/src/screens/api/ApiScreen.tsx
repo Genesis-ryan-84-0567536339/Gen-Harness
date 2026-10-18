@@ -8,6 +8,7 @@ import { useProviders } from '../../lib/dataQueries';
 import { errorDetail, errorReasons, errorText } from '../../lib/errorText';
 import { useCan } from '../../lib/permissions';
 import { toast } from '../../lib/toast';
+import { AI_SOURCE_PATH } from '../../setup/steps';
 import { CardError, FriendlyErrorText, InlineError, Panel, PinHint, PIN_ROUTE_CHANGE_TITLE, ScreenHead, SkeletonLines, StateChip } from '../common';
 import { DefaultBadge } from '../../defaults/DefaultBadge';
 import { ModelPicker } from './ModelPicker';
@@ -134,7 +135,20 @@ export function ApiScreen() {
           </div>
         ) : providers.data.length === 0 ? (
           <div className="gh-card">
-            <EmptyState icon="ph ph-plugs" title="Chưa có nhà cung cấp nào" description={canManage ? 'Thêm nhà cung cấp đầu tiên để agent có model để gọi.' : 'Owner chưa thêm nhà cung cấp nào.'} />
+            <EmptyState
+              icon="ph ph-plugs"
+              title="Chưa có nhà cung cấp nào"
+              description={canManage ? 'Thêm nguồn AI đầu tiên để agent có model để gọi.' : 'Owner chưa thêm nhà cung cấp nào.'}
+              // v0.1.70 (F029): MỘT đường tới "thêm nguồn AI" (cùng `readiness.FIX_AI`): màn Thiết lập nguồn AI.
+              action={
+                canManage ? (
+                  <Link to={AI_SOURCE_PATH} className="gh-btn gh-btn--secondary btn-27" data-testid="api-add-source">
+                    <Icon name="ph ph-plus-circle" size={13} />
+                    Thêm / kiểm tra nguồn AI
+                  </Link>
+                ) : undefined
+              }
+            />
           </div>
         ) : (
           providers.data.map((p) => <ProviderCard key={p.id} provider={p} canManage={canManage} onAddKey={() => setAddingKeyFor(p)} />)
@@ -338,7 +352,7 @@ function ModelLimitRow({ provider: p, model: m, onRemove, removing }: { provider
         <span className="muted-note">Lượt/phút</span>
         <input className="gh-input" inputMode="numeric" placeholder="không giới hạn" aria-label={`Lượt mỗi phút của ${m.model_name}`} value={perMin} onChange={(e) => setPerMin(e.target.value)} />
       </label>
-      <Button variant="secondary" className="btn-22" loading={save.isPending} aria-label={`Lưu hạn mức của ${m.model_name}`} onClick={submit}>
+      <Button variant="secondary" className="btn-22" loading={save.isPending} aria-label={`Lưu hạn mức của ${m.model_name}`} title={PIN_ROUTE_CHANGE_TITLE} onClick={submit}>
         Lưu hạn mức
       </Button>
       <Button
@@ -346,6 +360,7 @@ function ModelLimitRow({ provider: p, model: m, onRemove, removing }: { provider
         className="btn-22"
         loading={save.isPending && save.variables?.body.enabled !== undefined}
         aria-label={`${enabled ? 'Tắt' : 'Bật'} model ${m.model_name}`}
+        title={PIN_ROUTE_CHANGE_TITLE}
         onClick={() =>
           save.mutate(
             { id: p.id, body: { model_name: m.model_name, enabled: !enabled } },
@@ -361,6 +376,7 @@ function ModelLimitRow({ provider: p, model: m, onRemove, removing }: { provider
         icon="ph ph-trash"
         loading={removing}
         aria-label={`Gỡ model ${m.model_name}`}
+        title={PIN_ROUTE_CHANGE_TITLE}
         onClick={() => {
           if (window.confirm(`Gỡ model "${m.model_name}" khỏi "${p.name}"? Vai nào đang gán model này sẽ quay về model chuẩn.`)) onRemove();
         }}

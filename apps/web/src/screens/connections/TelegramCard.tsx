@@ -166,7 +166,8 @@ function SetupForm({ t, onDone, onCancel }: { t: TelegramConfig | null; onDone: 
     const needChat = !configured && !cid;
     setChatError(needChat ? 'Chọn một chat ở "Tìm chat_id" hoặc nhập chat_id.' : null);
     if (tok === false || needChat) return;
-    const body: TelegramSaveBody = { enabled: true, briefing, reminders };
+    // Chưa cấu hình ⇒ nối mới = bật; đã cấu hình ⇒ GIỮ trạng thái hiện tại (đang Tạm dừng rồi sửa token không tự bật lại).
+    const body: TelegramSaveBody = { enabled: configured ? t?.enabled === true : true, briefing, reminders };
     if (cid) body.chat_id = cid;
     if (tok) body.token = tok;
     save.mutate(body);
@@ -302,6 +303,14 @@ function ConfiguredView({ t, onEdit, onHostRequested }: { t: TelegramConfig; onE
       void queryClient.invalidateQueries({ queryKey: BOSS_CHECKS_KEY });
     },
   });
+  // v0.1.70 (F092): tạm dừng / bật lại KHÔNG xoá token (PUT {enabled}, cần PIN) — "Tắt Telegram" bên dưới mới là gỡ hẳn.
+  const pause = useMutation({
+    mutationFn: (enabled: boolean) => api.notify.saveTelegram({ enabled }),
+    onSuccess: (c) => {
+      applyConfig(c);
+      toast(c.enabled ? 'Đã bật lại Telegram.' : 'Đã tạm dừng Telegram — token vẫn giữ, bấm Bật lại khi cần.', 'ok');
+    },
+  });
   const bot = str(t.bot_username);
   const chat = str(t.chat_id_masked);
   const last = t.last_test;
@@ -318,6 +327,9 @@ function ConfiguredView({ t, onEdit, onHostRequested }: { t: TelegramConfig; onE
         </Button>
         <Button variant="secondary" className="btn-27" icon="ph ph-pencil-simple" onClick={onEdit}>
           Đổi token/chat_id
+        </Button>
+        <Button variant="secondary" className="btn-27" icon={t.enabled ? 'ph ph-pause' : 'ph ph-play'} loading={pause.isPending} onClick={() => pause.mutate(!t.enabled)}>
+          {t.enabled ? 'Tạm dừng' : 'Bật lại'}
         </Button>
         <Button variant="ghost" className="btn-27" icon="ph ph-power" onClick={() => setConfirmOff(true)}>
           Tắt Telegram
@@ -343,6 +355,7 @@ function ConfiguredView({ t, onEdit, onHostRequested }: { t: TelegramConfig; onE
         <p className="muted-note">Chưa Gửi thử lần nào — bấm Gửi thử để chắc tin tới được điện thoại.</p>
       )}
       {test.isError ? <InlineError detail={errorDetail(test.error)}>{errorText(test.error)}</InlineError> : null}
+      {pause.isError ? <InlineError detail={errorDetail(pause.error)}>{errorText(pause.error)}</InlineError> : null}
       <InboundBlock t={t} />
       {confirmOff ? <DisableDialog onClose={() => setConfirmOff(false)} /> : null}
     </>

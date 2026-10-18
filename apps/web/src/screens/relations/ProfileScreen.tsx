@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { AUTONOMY_AUTO_LABEL, AUTONOMY_CHOICES, AUTONOMY_LEVELS, autonomyChoice, autonomyPatch, type DirRelation, type PersonType, type Profile } from '@gen-harness/contracts';
+import { AUTONOMY_AUTO_LABEL, AUTONOMY_CHOICES, AUTONOMY_LEVELS, autonomyChoice, autonomyPatch, eventTypeLabel, type DirRelation, type PersonType, type Profile } from '@gen-harness/contracts';
 import { Button, Card, Dialog, EmptyState, Icon, SelectField, TextField } from '@gen-harness/ui';
 import { fmtDMClock } from '../../lib/format';
 import { useCan } from '../../lib/permissions';
@@ -162,7 +162,7 @@ function ProfileBody({ id, p }: { id: string; p: Profile }) {
                   <div className="pf-timeline__row" key={tl.id}>
                     <span className="pf-timeline__time">{fmtDMClock(tl.observed_at)}</span>
                     <span className="mono-tag" style={{ color: eventTone(tl.event_type) }}>
-                      {tl.event_type}
+                      {eventTypeLabel(tl.event_type)}
                     </span>
                     <span className="pf-timeline__detail" title={tl.conclusion}>
                       {tl.conclusion}

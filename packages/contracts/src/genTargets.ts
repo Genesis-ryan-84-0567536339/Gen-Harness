@@ -63,6 +63,7 @@ export const GEN_SCREEN_BY_KEY: Record<string, GenScreen> = Object.fromEntries(G
 export const GEN_TARGETS: GenTarget[] = [
   // ── Hôm nay (overview) ──
   { id: 'overview.needs_boss', screen: 'overview', label: 'Dải "Cần Sếp xử lý"', description: 'Đầu trang Hôm nay: các sự cố Sếp cần tự tay xử lý (kênh rớt, model hết đăng nhập, cập nhật lỗi, sao lưu quá hạn…)', permission: 'system.manage' },
+  { id: 'overview.setup_followup', screen: 'overview', label: 'Thẻ "Việc thiết lập tiếp"', description: 'Thẻ ở Tổng quan liệt kê các việc thiết lập tuỳ chọn còn lại (Zalo/WhatsApp, nhóm lắng nghe, sàng lọc, agent, đội, sao lưu, Facebook, Gen-hub); nút "Để sau 7 ngày" ẩn thẻ cùng các việc P3 của Gen', permission: 'system.manage' },
   { id: 'overview.kpis', screen: 'overview', label: 'Hàng chỉ số chính', description: 'Các ô số liệu đầu trang Hôm nay (cơ hội, cảnh báo, chờ duyệt…)' },
   { id: 'overview.queue', screen: 'overview', label: 'Hàng đợi cần xử lý', description: 'Khung liệt kê cơ hội, cảnh báo, bản nháp chờ duyệt, việc đến hạn' },
   { id: 'overview.queue.row', screen: 'overview', label: 'Một dòng hàng đợi', description: 'Một mục cụ thể trong Hàng đợi cần xử lý', dynamic: 'row' },
@@ -80,7 +81,7 @@ export const GEN_TARGETS: GenTarget[] = [
   { id: 'boss_checks.row.ai', screen: 'boss_checks', label: 'Dòng 0 "Nguồn AI" (bắt buộc duy nhất)', description: 'Dòng 0 của Việc Sếp cần làm: có ít nhất 1 nguồn AI chạy được — bấm Kiểm tra hoặc mở Bộ não AI để thêm nguồn' },
   { id: 'boss_checks.row.hub', screen: 'boss_checks', label: 'Dòng 1 "Nối Gen-hub"', description: 'Dòng 1 của Việc Sếp cần làm: dán địa chỉ + token Gen-hub rồi bấm Kiểm tra (cần mã PIN)' },
   { id: 'boss_checks.row.facebook', screen: 'boss_checks', label: 'Dòng 2 "Kết nối Facebook"', description: 'Dòng 2 của Việc Sếp cần làm: chọn tài khoản Facebook đã đăng nhập rồi bấm Đọc ngay' },
-  { id: 'boss_checks.row.agy', screen: 'boss_checks', label: 'Dòng 3 "Google (Antigravity)"', description: 'Dòng 3 của Việc Sếp cần làm: đăng nhập hai tài khoản Google, gọi thử và đổi qua lại' },
+  { id: 'boss_checks.row.agy', screen: 'boss_checks', label: 'Dòng 3 "Google (Antigravity)"', description: 'Dòng 3 của Việc Sếp cần làm: đăng nhập tài khoản Google rồi bấm Gọi thử' },
   { id: 'boss_checks.row.claude', screen: 'boss_checks', label: 'Dòng 4 "Claude Code CLI"', description: 'Dòng 4 của Việc Sếp cần làm: đăng nhập Claude Code rồi gọi thử' },
   { id: 'boss_checks.row.jev', screen: 'boss_checks', label: 'Dòng 5 "Jev" (không bắt buộc)', description: 'Dòng 5 của Việc Sếp cần làm: kiểm tra khoá Jev — không bắt buộc' },
   { id: 'boss_checks.row.telegram', screen: 'boss_checks', label: 'Dòng 6 "Telegram"', description: 'Dòng 6 của Việc Sếp cần làm: Gửi thử một tin Telegram báo động và bản tin' },
@@ -108,7 +109,7 @@ export const GEN_TARGETS: GenTarget[] = [
   { id: 'system.brain.coach', screen: 'system', label: 'Thẻ "Gen hướng dẫn"', description: 'Bật/tắt Gen hướng dẫn, chuông nhắc, số bài học mỗi ngày (0–2), giờ yên lặng và danh sách việc Sếp đã chọn không dùng (có nút Bật lại)', params: { tab: 'brain' }, permission: 'system.manage' },
   { id: 'system.brain.jev', screen: 'system', label: 'Thẻ Jev (System One)', description: 'Cấu hình nguồn model quyết định nhanh Jev', params: { tab: 'brain' } },
   { id: 'system.brain.jev.test', screen: 'system', label: 'Nút "Kiểm tra 1 lần" Jev', description: 'Gọi thử Jev một lần để biết khoá và địa chỉ đúng chưa', params: { tab: 'brain' } },
-  { id: 'system.brain.jev.enable', screen: 'system', label: 'Nút "Bật Jev" (1 chạm)', description: 'Bật Jev bằng khóa OpenRouter đang có hoặc dán khóa mới (cần mã PIN); sau đó bấm "Thử 12 câu mẫu"', params: { tab: 'brain' }, permission: 'system.manage' },
+  { id: 'system.brain.jev.enable', screen: 'system', label: 'Nút "Bật Jev" (1 chạm)', description: 'Bật Jev bằng khoá OpenRouter đang có hoặc dán khoá mới (cần mã PIN); sau đó bấm "Thử 12 câu mẫu"', params: { tab: 'brain' }, permission: 'system.manage' },
   { id: 'system.brain.triage', screen: 'system', label: 'Thẻ "Lọc tin"', description: 'Bật/tắt lọc tin, chọn mức Thấp/Vừa/Cao; Jev và ngưỡng số ở Nâng cao (chỉ Owner sửa)', params: { tab: 'brain' } },
   { id: 'system.storage.health', screen: 'system', label: 'Sức khoẻ hệ thống', description: 'Bộ xử lý nền, Trình duyệt nền, hàng lỗi, sao lưu, cập nhật, ổ đĩa; chi tiết kỹ thuật lịch chạy', params: { tab: 'storage' } },
   { id: 'system.storage.retention', screen: 'system', label: 'Hạn lưu dữ liệu', description: 'Mỗi tập dữ liệu giữ bao lâu', params: { tab: 'storage' } },
@@ -136,8 +137,8 @@ export const GEN_TARGETS: GenTarget[] = [
   // ── API & Model ──
   { id: 'api.add_provider', screen: 'api', label: 'Nút "Thêm nhà cung cấp"', description: 'Thêm Gemini/DeepSeek/API tương thích OpenAI' },
   { id: 'api.bindings', screen: 'api', label: 'Gán model cho từng agent', description: 'Chọn model cho từng mục đích, gồm core.gen của Gen' },
-  // ── Gen-hub (v0.1.26, Đợt D1: Gen đọc Kho dữ liệu, chỉ đọc, chỉ Owner) — v0.1.42: thẻ ở Kết nối (id giữ nguyên) ──
-  { id: 'mcp.hub_link', screen: 'connections', label: 'Thẻ "Gen-hub"', description: `Nối Gen-hub để Gen đọc ${KHO_LABEL}, lịch, mail, việc, Drive (chỉ đọc, chỉ Sếp): địa chỉ, token, hạn token, trạng thái`, permission: 'system.manage' },
+  // ── Gen-hub (v0.1.26, Đợt D1: Gen đọc Kho dữ liệu, chỉ Owner; v0.1.50 ghi Kho qua Xác nhận + PIN) — v0.1.42: thẻ ở Kết nối (id giữ nguyên) ──
+  { id: 'mcp.hub_link', screen: 'connections', label: 'Thẻ "Gen-hub"', description: `Nối Gen-hub để Gen đọc ${KHO_LABEL}, lịch, mail, việc, Drive (đọc; ghi Kho chỉ khi Sếp Xác nhận + mã PIN; chỉ Sếp thao tác): địa chỉ, token, hạn token, trạng thái`, permission: 'system.manage' },
   { id: 'mcp.hub_link.token', screen: 'connections', label: 'Ô "Token Gen-hub"', description: 'Dán token agent tạo trong Gen-hub (chỉ ghi — không bao giờ hiện lại)', permission: 'system.manage', sensitive: true },
   { id: 'mcp.hub_link.test', screen: 'connections', label: 'Nút "Kiểm tra" Gen-hub', description: 'Thử kết nối, mở đúng tool đọc Kho cho Gen rồi bật liên kết (cần PIN)', permission: 'system.manage' },
   // ── Tài khoản của tôi ──

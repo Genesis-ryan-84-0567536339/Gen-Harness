@@ -126,7 +126,7 @@ describe('mcpModel — quyền ghi Kho (hàm thuần)', () => {
   });
 
   it('writeScopesMessage: thiếu ⇒ hướng dẫn tick kho_create, kho_update; đủ ⇒ câu đủ quyền; chưa biết ⇒ null', () => {
-    expect(WRITE_MISSING_TEXT).toBe('Vào Gen-hub tick quyền kho_create, kho_update cho token của Gen-Harness rồi bấm Kiểm tra.');
+    expect(WRITE_MISSING_TEXT).toBe('Vào Gen-hub tick quyền ghi Kho (tạo và sửa bản ghi — tên trong Gen-hub: kho_create, kho_update) cho token của Gen-Harness rồi bấm Kiểm tra.');
     expect(writeScopesMessage(['ghi Kho (kho_create, kho_update)'], { kho: false })).toEqual({ tone: 'warn', text: WRITE_MISSING_TEXT });
     expect(writeScopesMessage(undefined, { kho: false })).toEqual({ tone: 'warn', text: WRITE_MISSING_TEXT });
     expect(writeScopesMessage([], { kho: true })).toEqual({ tone: 'ok', text: WRITE_ENOUGH_TEXT });
@@ -148,12 +148,20 @@ describe('Thẻ Gen-hub — Quyền ghi Kho (tuỳ chọn)', () => {
     stubHub(SAVED, testOut());
     const { container } = renderCard(<HubLinkCard />);
     await screen.findByTestId('hub-write-scopes');
-    expect(container).toHaveTextContent('Gen-hub — Gen đọc và ghi Kho tri thức');
+    expect(container).toHaveTextContent('Gen-hub — Gen đọc và ghi Kho dữ liệu');
     expect(container).toHaveTextContent(`· ${HUB_KICKER}`);
     expect(HUB_KICKER).toBe('Gen đọc; ghi Kho khi Sếp xác nhận + mã PIN · chỉ Sếp · tắt tới khi Kiểm tra xanh');
     // "chỉ đọc" chỉ còn ở khối "Quyền đọc thêm" (lịch, mail, việc, Drive — đúng là chỉ đọc), không còn ở tiêu đề / dòng phụ của thẻ.
     expect(container.textContent?.toLowerCase()).not.toContain('chỉ đọc · chỉ sếp');
     expect(container.textContent?.toLowerCase()).not.toContain('gen đọc kho tri thức');
+  });
+
+  it('v0.1.70 (F117): tiêu đề thẻ theo Tên Kho Sếp tự đặt (một nguồn tên), không còn "Kho tri thức"', async () => {
+    stubHub({ ...SAVED, kho_label: 'Kho của Ryan', kho_label_custom: true }, testOut());
+    const { container } = renderCard(<HubLinkCard />);
+    await screen.findByTestId('hub-write-scopes');
+    expect(container).toHaveTextContent('Gen-hub — Gen đọc và ghi Kho của Ryan');
+    expect(container.textContent).not.toContain('Kho tri thức');
   });
 
   it('Kiểm tra xanh có tool ghi: "mở 3 tool đọc + 2 tool ghi Kho cho Gen" (không gộp 2 tool ghi vào "tool đọc")', async () => {
@@ -171,8 +179,8 @@ describe('Thẻ Gen-hub — Quyền ghi Kho (tuỳ chọn)', () => {
     let box = screen.getByTestId('hub-write-scopes');
     await within(box).findByText(WRITE_MISSING_TEXT);
     let items = within(box).getAllByRole('listitem');
-    expect(items[0]).toHaveTextContent('kho_create — Tạo bản ghi Phiên/ViệcCó');
-    expect(items[1]).toHaveTextContent('kho_update — Sửa bản ghi Phiên/ViệcChưa');
+    expect(items[0]).toHaveTextContent('Tạo bản ghi Phiên/Việc (kho_create)Có');
+    expect(items[1]).toHaveTextContent('Sửa bản ghi Phiên/Việc (kho_update)Chưa');
     first.unmount();
     vi.unstubAllGlobals();
 
@@ -215,13 +223,13 @@ describe('Thẻ Gen-hub — Quyền ghi Kho (tuỳ chọn)', () => {
     expect(within(box).getAllByText('Chưa kiểm')).toHaveLength(2);
     const items = within(box).getAllByRole('listitem');
     expect(items).toHaveLength(2);
-    expect(items[0]).toHaveTextContent('kho_create — Tạo bản ghi Phiên/Việc');
-    expect(items[1]).toHaveTextContent('kho_update — Sửa bản ghi Phiên/Việc');
+    expect(items[0]).toHaveTextContent('Tạo bản ghi Phiên/Việc (kho_create)');
+    expect(items[1]).toHaveTextContent('Sửa bản ghi Phiên/Việc (kho_update)');
     expect(within(box).getByText('Gen chỉ ghi khi Sếp bấm Xác nhận + nhập mã PIN trên thẻ đề xuất.')).toBe(within(box).getByText(WRITE_CONFIRM_ONLY_TEXT));
     expect(box.compareDocumentPosition(read) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy(); // khối ghi đứng sau khối đọc
     // Khối đọc vẫn đúng 4 dòng "Chưa kiểm" của riêng nó (không lẫn dòng ghi).
     expect(within(read).getAllByText('Chưa kiểm')).toHaveLength(4);
-    expect(within(box).queryByText(/Vào Gen-hub tick quyền kho_create/)).toBeNull();
+    expect(within(box).queryByText(/Vào Gen-hub tick quyền ghi Kho/)).toBeNull();
     expect(within(box).queryByText(/Đủ quyền ghi Kho/)).toBeNull();
   });
 
@@ -230,7 +238,7 @@ describe('Thẻ Gen-hub — Quyền ghi Kho (tuỳ chọn)', () => {
     const first = renderCard(<HubLinkCard />);
     const box = await screen.findByTestId('hub-write-scopes');
     expect(within(box).getAllByText('Chưa')).toHaveLength(2);
-    expect(within(box).getByText('Vào Gen-hub tick quyền kho_create, kho_update cho token của Gen-Harness rồi bấm Kiểm tra.')).toBeInTheDocument();
+    expect(within(box).getByText('Vào Gen-hub tick quyền ghi Kho (tạo và sửa bản ghi — tên trong Gen-hub: kho_create, kho_update) cho token của Gen-Harness rồi bấm Kiểm tra.')).toBeInTheDocument();
     first.unmount();
     vi.unstubAllGlobals();
 
@@ -248,7 +256,7 @@ describe('Thẻ Gen-hub — Quyền ghi Kho (tuỳ chọn)', () => {
     expect(await screen.findByText(/Đã nối Kho · 240 ms/)).toBeInTheDocument();
     expect(screen.getByText(/Đã nối Kho/).closest('.apm-test-result')).toHaveClass('apm-test-result--ok');
     const box = screen.getByTestId('hub-write-scopes');
-    expect(await within(box).findByText('Vào Gen-hub tick quyền kho_create, kho_update cho token của Gen-Harness rồi bấm Kiểm tra.')).toBeInTheDocument();
+    expect(await within(box).findByText('Vào Gen-hub tick quyền ghi Kho (tạo và sửa bản ghi — tên trong Gen-hub: kho_create, kho_update) cho token của Gen-Harness rồi bấm Kiểm tra.')).toBeInTheDocument();
     expect(within(box).getAllByText('Chưa')).toHaveLength(2);
     // Phần đọc không bị ảnh hưởng.
     expect(within(screen.getByTestId('hub-scopes')).getAllByText('Có')).toHaveLength(4);
@@ -262,7 +270,7 @@ describe('Thẻ Gen-hub — Quyền ghi Kho (tuỳ chọn)', () => {
     const box = screen.getByTestId('hub-write-scopes');
     expect(await within(box).findByText('Đủ quyền ghi Kho (Phiên, Việc).')).toBeInTheDocument();
     expect(within(box).getAllByText('Có')).toHaveLength(2);
-    expect(screen.queryByText(/Vào Gen-hub tick quyền kho_create/)).toBeNull();
+    expect(screen.queryByText(/Vào Gen-hub tick quyền ghi Kho/)).toBeNull();
   });
 
   it('write_tools có kho_create / kho_update ⇒ KHÔNG nhắc "nên tắt"; quyền ghi khác (gmail_send) vẫn bị nhắc', async () => {
@@ -287,7 +295,7 @@ describe('Thẻ Gen-hub — Quyền ghi Kho (tuỳ chọn)', () => {
     expect(await screen.findByText('Chi tiết kỹ thuật')).toBeInTheDocument();
     const box = screen.getByTestId('hub-write-scopes');
     expect(within(box).getAllByText('Chưa kiểm')).toHaveLength(2);
-    expect(within(box).queryByText(/Vào Gen-hub tick quyền kho_create/)).toBeNull();
+    expect(within(box).queryByText(/Vào Gen-hub tick quyền ghi Kho/)).toBeNull();
   });
 
   it('chưa nối / chưa từng kiểm xanh: write_scopes toàn false (máy chủ cũ) vẫn "Chưa kiểm", không giục tick quyền', async () => {

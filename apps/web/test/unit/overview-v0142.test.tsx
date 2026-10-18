@@ -117,6 +117,17 @@ describe('Hôm nay — hàng số chính và Sức khoẻ hệ thống', () => {
     expect(within(container.querySelector('[data-gen-target="overview.health"]') as HTMLElement).getByText('Tin chờ sàng lọc')).toBeInTheDocument();
   });
 
+  it('v0.1.70 (F143): dòng kênh ở Sức khoẻ có tên đẹp (Telegram), bỏ kênh chỉ đọc LinkedIn, không in khoá thô', async () => {
+    const d = mockOverview();
+    stub({ ...d, health: { ...d.health, channels: [{ type: 'zalo', active: 1 }, { type: 'telegram', active: 0 }, { type: 'linkedin', active: 0 }] } });
+    const { container } = renderOverview();
+    await screen.findByText('Tỉ lệ cơ hội được nhận');
+    const card = container.querySelector('[data-gen-target="overview.health"]') as HTMLElement;
+    expect(within(card).getByText('Kênh Zalo')).toBeInTheDocument();
+    expect(within(card).getByText('Kênh Telegram')).toBeInTheDocument();
+    expect(card.textContent).not.toMatch(/linkedin/i);
+  });
+
   it('skeleton 4 ô khi đang tải', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
     const { container } = renderOverview();

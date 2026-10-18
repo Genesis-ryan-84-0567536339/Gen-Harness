@@ -28,13 +28,13 @@ export function PinHistoryDialog({ open, onClose }: { open: boolean; onClose: ()
     enabled: open,
   });
   return (
-    <Dialog open={open} onClose={onClose} width={480} title="Lịch sử nhập PIN (cả tổ chức)" kicker="30 lần gần nhất của mọi người dùng · từ Nhật ký hành động">
+    <Dialog open={open} onClose={onClose} width={480} title="Lịch sử nhập mã PIN (cả tổ chức)" kicker="30 lần gần nhất của mọi người dùng · từ Nhật ký hành động">
       {q.isPending ? (
         <SkeletonLines rows={4} padding="0" />
       ) : q.isError ? (
         <CardError error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} />
       ) : q.data.items.length === 0 ? (
-        <EmptyState icon="ph ph-password" title="Chưa có lần nhập PIN nào" />
+        <EmptyState icon="ph ph-password" title="Chưa có lần nhập mã PIN nào" />
       ) : (
         <div>
           {q.data.items.map((a) => {

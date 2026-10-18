@@ -137,6 +137,15 @@
       "permission": "system.manage"
     },
     {
+      "id": "overview.setup_followup",
+      "screen": "overview",
+      "label": "Thẻ \"Việc thiết lập tiếp\"",
+      "description": "Thẻ ở Tổng quan liệt kê các việc thiết lập tuỳ chọn còn lại (Zalo/WhatsApp, nhóm lắng nghe, sàng lọc, agent, đội, sao lưu, Facebook, Gen-hub); nút \"Để sau 7 ngày\" ẩn thẻ cùng các việc P3 của Gen",
+      "dynamic": null,
+      "params": null,
+      "permission": "system.manage"
+    },
+    {
       "id": "overview.kpis",
       "screen": "overview",
       "label": "Hàng chỉ số chính",
@@ -245,7 +254,7 @@
       "id": "boss_checks.row.agy",
       "screen": "boss_checks",
       "label": "Dòng 3 \"Google (Antigravity)\"",
-      "description": "Dòng 3 của Việc Sếp cần làm: đăng nhập hai tài khoản Google, gọi thử và đổi qua lại",
+      "description": "Dòng 3 của Việc Sếp cần làm: đăng nhập tài khoản Google rồi bấm Gọi thử",
       "dynamic": null,
       "params": null
     },
@@ -450,7 +459,7 @@
       "id": "system.brain.jev.enable",
       "screen": "system",
       "label": "Nút \"Bật Jev\" (1 chạm)",
-      "description": "Bật Jev bằng khóa OpenRouter đang có hoặc dán khóa mới (cần mã PIN); sau đó bấm \"Thử 12 câu mẫu\"",
+      "description": "Bật Jev bằng khoá OpenRouter đang có hoặc dán khoá mới (cần mã PIN); sau đó bấm \"Thử 12 câu mẫu\"",
       "dynamic": null,
       "params": {
         "tab": "brain"
@@ -712,7 +721,7 @@
       "id": "mcp.hub_link",
       "screen": "connections",
       "label": "Thẻ \"Gen-hub\"",
-      "description": "Nối Gen-hub để Gen đọc Kho dữ liệu, lịch, mail, việc, Drive (chỉ đọc, chỉ Sếp): địa chỉ, token, hạn token, trạng thái",
+      "description": "Nối Gen-hub để Gen đọc Kho dữ liệu, lịch, mail, việc, Drive (đọc; ghi Kho chỉ khi Sếp Xác nhận + mã PIN; chỉ Sếp thao tác): địa chỉ, token, hạn token, trạng thái",
       "dynamic": null,
       "params": null,
       "permission": "system.manage"
@@ -1024,7 +1033,7 @@
     {
       "n": 13,
       "title": "Kết nối Facebook",
-      "why": "Để Gen đọc thông báo, tin nhắn và — khi Sếp bấm Xác nhận + nhập PIN — trả lời bình luận / nhắn tin thay Sếp; không đăng bài.",
+      "why": "Để Gen đọc thông báo, tin nhắn và — khi Sếp bấm Xác nhận + nhập mã PIN — trả lời bình luận / nhắn tin thay Sếp; không đăng bài.",
       "steps": [
         "Bấm \"Mở trang Tài khoản mạng xã hội\" bên dưới.",
         "Bấm \"Thêm tài khoản\", đặt tên dễ nhận ra.",
@@ -1041,14 +1050,14 @@
     {
       "n": 14,
       "title": "Nối Gen-hub",
-      "why": "Để Gen đọc Kho tri thức của Sếp trên Gen-hub — trả lời có căn cứ từ việc, quyết định, bài học đã ghi. Gen chỉ ghi Kho (Phiên, Việc) khi Sếp bấm Xác nhận và nhập mã PIN.",
+      "why": "Để Gen đọc Kho dữ liệu của Sếp trên Gen-hub — trả lời có căn cứ từ việc, quyết định, bài học đã ghi. Gen chỉ ghi vào Kho dữ liệu (Phiên, Việc) khi Sếp bấm Xác nhận và nhập mã PIN.",
       "steps": [
         "Trong Gen-hub: tạo trợ lý mới, chọn thẻ truy cập (token) 90 ngày, bật quyền ĐỌC Kho.",
         "Tuỳ chọn: tick thêm quyền ĐỌC lịch, đọc mail, đọc việc (Google Tasks) và tìm Drive để bản tin Gen có lịch hôm nay, mail cần trả lời, việc đang mở — KHÔNG bật quyền ghi lịch, mail hay Drive.",
-        "Tuỳ chọn: tick kho_create, kho_update nếu muốn Gen ghi Phiên, Việc vào Kho — mỗi lần ghi Sếp vẫn bấm Xác nhận và nhập mã PIN.",
+        "Tuỳ chọn: tick quyền ghi Kho (tạo và sửa bản ghi — tên trong Gen-hub: kho_create, kho_update) nếu muốn Gen ghi Phiên, Việc vào Kho — mỗi lần ghi Sếp vẫn bấm Xác nhận và nhập mã PIN.",
         "Chép token vừa tạo.",
         "Bấm \"Mở thẻ Gen-hub\" bên dưới, dán địa chỉ và token vào thẻ Gen-hub.",
-        "Bấm \"Lưu & kiểm tra\" (nhập PIN khi được hỏi) và chờ báo Đã nối Kho."
+        "Bấm \"Lưu & kiểm tra\" (nhập mã PIN khi được hỏi) và chờ báo Đã nối Kho."
       ],
       "done_when": "Kiểm tra xanh ít nhất một lần.",
       "console": {

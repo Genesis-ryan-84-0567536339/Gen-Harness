@@ -10,7 +10,7 @@ cả chuông (core.notifications) lẫn dải "Cần Sếp xử lý" ở Tổng 
   `/ready` để quyết rollback (apps/genh/internal/ops/update.go) — bộ xử lý nền im không được làm hỏng một bản cập
   nhật tốt.
 - `evaluate` + `watch_loop` (chạy trong api, `Settings.health_watch_seconds`): mỗi phút tính lại các sự cố theo dõi
-  định kỳ (cập nhật lỗi trong 24 giờ, quá hạn sao lưu theo tần suất bước 11, bộ xử lý nền im, ổ đĩa sắp đầy, model
+  định kỳ (cập nhật lỗi trong 26 giờ, quá hạn sao lưu theo tần suất bước 11, bộ xử lý nền im, ổ đĩa sắp đầy, model
   đang hết đăng nhập, bản sao ngoài máy cũ/lỗi — v0.1.40, chi phí AI hôm nay vượt trần — v0.1.41, lịch tự cập nhật
   đêm im quá 36 giờ — v0.1.53, cầu nối tin nhắn im quá 2 phút và hàng lỗi tin khách vào > 0 — v0.1.62) và dọn dòng sự
   kiện cũ.
@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -45,9 +46,13 @@ BACKUP_STALE_LIMITS: dict[str, tuple[timedelta, str]] = {
     "weekly": (timedelta(days=7, hours=12), "một tuần"),
     "monthly": (timedelta(days=31, hours=12), "một tháng"),
 }
-#: Cập nhật lỗi chỉ còn là sự cố trong 24 giờ sau khi xong — khớp thẻ cập nhật ở web (updateModel.ts RECENT_MS):
-#: quá hạn thì thẻ không còn lỗi để xem/thử lại, dải "Cần Sếp xử lý" cũng thôi báo.
-UPDATE_FAILED_RECENT = timedelta(hours=24)
+#: Cập nhật lỗi chỉ còn là sự cố trong 26 giờ sau khi xong — khớp thẻ cập nhật ở web (updateModel.ts RECENT_MS):
+#: quá hạn thì thẻ không còn lỗi để xem/thử lại, dải "Cần Sếp xử lý" cũng thôi báo. 26 giờ (không phải 24): lịch đêm
+#: chạy 03:00 + trễ ngẫu nhiên tới 30 phút (genh autoupdate RandomizedDelaySec=1800) nên hai lần thử liền nhau cách tới
+#: 24 giờ 30 phút — hạn 24 giờ sẽ đóng sự cố giữa hai lần rồi mở lại (chuông lặp mỗi đêm).
+UPDATE_FAILED_RECENT = timedelta(hours=26)
+#: F103: tổ chức chưa đặt lịch sao lưu quá thời gian này (kể từ lúc tạo) ⇒ sự cố backup.stale "chưa cấu hình".
+BACKUP_UNCONFIGURED_GRACE = timedelta(hours=24)
 WORKER_SILENT_MINUTES = 10
 HEARTBEAT_KEY = "gh:worker:heartbeat"
 #: Nhịp tim cầu nối tin nhắn (apps/bridge ghi mỗi 15 giây, TTL 45 giây). Khoá HẾT HẠN sau 45 giây nên "mất khoá" không
@@ -250,16 +255,32 @@ async def raise_once(db: AsyncSession, org_id: uuid.UUID, *, key: str, kind: str
             {"o": org_id, "k": key, "t": title, "b": body, "l": link})
         return False
     await notifications.notify(db, org_id, await notifications.owner_ids(db, org_id), kind=kind, title=title,
-                               body=body, link=link, redis=redis)
+                               body=body, link=link, redis=redis, incident_key=key)
     return True
 
 
-async def clear(db: AsyncSession, org_id: uuid.UUID, key: str) -> bool:
-    """Đóng sự cố `key` đang mở (hết sự cố). Trả True nếu có dòng được đóng. Bên gọi commit."""
-    res = await db.execute(text("""UPDATE ops.health_alerts SET cleared_at = now()
-                                   WHERE org_id = :o AND key = :k AND cleared_at IS NULL"""),
-                           {"o": org_id, "k": key})
-    return bool(getattr(res, "rowcount", 0))
+async def clear(db: AsyncSession, org_id: uuid.UUID, key: str, *, label: bool = True, redis: Any = None) -> bool:
+    """Đóng sự cố `key` đang mở (hết sự cố). Trả True nếu có dòng được đóng. Bên gọi commit.
+
+    v0.1.69 (F098): đóng sự cố thì chuông của nó cũng tắt — đã đọc + "Đã xử lý" (`notifications.resolve_incident`).
+    `label=False` (gộp sự cố này vào sự cố khác, vd. offsite.failed → offsite.stale) chỉ đánh dấu đã đọc, không nói
+    "Đã xử lý" vì vấn đề vẫn còn. Có `redis` thì chuông đang mở đổi ngay (WebSocket `notification.resolved`, sau
+    commit)."""
+    from gh import notifications
+
+    row = (await db.execute(text("""UPDATE ops.health_alerts SET cleared_at = now()
+                                    WHERE org_id = :o AND key = :k AND cleared_at IS NULL
+                                    RETURNING kind, title"""), {"o": org_id, "k": key})).first()
+    if row is None:
+        return False
+    # Còn sự cố MỞ khác cùng `kind` (job.timeout:<tên>, model.auth_expired:<id>) ⇒ chỉ chuông cùng tiêu đề; không thì
+    # mọi chuông của kind (tiêu đề từng đổi theo số phút/ngày giữa các lần mở).
+    others = (await db.execute(text("""SELECT EXISTS (SELECT 1 FROM ops.health_alerts
+                                       WHERE org_id = :o AND kind = :kind AND key <> :k AND cleared_at IS NULL)"""),
+                               {"o": org_id, "kind": row.kind, "k": key})).scalar_one()
+    await notifications.resolve_incident(db, org_id, kind=row.kind, title=row.title if others else None, label=label,
+                                         key=key, redis=redis)
+    return True
 
 
 async def active_issues(db: AsyncSession, org_id: uuid.UUID, *, is_owner: bool = True) -> list[dict[str, Any]]:
@@ -730,12 +751,31 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
 # ─── vòng theo dõi: mở/đóng sự cố định kỳ ────────────────────────────────────────────────────────────────────
 
 def _update_failed_recent(st: dict[str, Any], now: datetime) -> bool:
-    """Lần cập nhật lỗi còn là sự cố: state 'failed' VÀ `finished_at` trong 24 giờ — cùng điều kiện với thẻ cập nhật
+    """Lần cập nhật lỗi còn là sự cố: state 'failed' VÀ `finished_at` trong 26 giờ — cùng điều kiện với thẻ cập nhật
     ở web (updateModel.ts `recent`): thiếu/hỏng `finished_at` ⇒ không tính."""
     if st.get("state") != "failed":
         return False
     finished = _parse_ts(st.get("finished_at"))
     return finished is not None and now - finished < UPDATE_FAILED_RECENT
+
+
+_GH_CODE = re.compile(r"GH-E[0-9A-F]{3}")
+
+
+def _update_fingerprint(st: dict[str, Any]) -> str:
+    """Dấu vân của sự cố update.failed: bản đích + mã lỗi genh (GH-Exxx cuối thông điệp) + mức độ — KHÔNG gồm giờ kết
+    thúc (F104: lịch đêm thử lại cùng một lỗi mỗi đêm từng sinh thêm một chuông đỏ mỗi sáng). Lỗi khác mã hoặc kết cục
+    nặng hơn (quay về bản cũ cũng lỗi) thì dấu vân đổi ⇒ vẫn có chuông mới."""
+    codes = _GH_CODE.findall(st.get("message") or "") if isinstance(st.get("message"), str) else []
+    if st.get("interrupted"):
+        level = f"interrupted-{st['interrupted']}"
+    elif st.get("blocked_rollback_failed") is True:
+        level = "rollback_failed"
+    elif st.get("blocked_version"):
+        level = "rolled_back"
+    else:
+        level = "failed"
+    return f"{st.get('to') or ''}|{codes[-1] if codes else 'no_code'}|{level}"
 
 
 async def _eval_update(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: datetime) -> None:
@@ -747,8 +787,8 @@ async def _eval_update(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
     state = st.get("state")
     if _update_failed_recent(st, now):
         target = st.get("to") or "bản mới"
-        fingerprint = f"{st.get('finished_at') or ''}|{st.get('to') or ''}"
         interrupted = st.get("interrupted")
+        fingerprint = _update_fingerprint(st)
         if interrupted:
             # GH-E94B (máy tắt/khởi động lại/bị dừng tay) mà không dở dang: không phải bản mới hỏng ⇒ 'warn', không
             # gióng chuông đỏ "chưa thành công" trái với thẻ cập nhật ("Đây không phải lỗi của bản mới").
@@ -771,21 +811,35 @@ async def _eval_update(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
         await raise_once(db, org_id, key="update.failed", kind="update.failed", severity="bad",
                          title=f"Cập nhật lên {target} chưa thành công", body=body, link=STORAGE_LINK,
                          fingerprint=fingerprint, redis=redis)
-    elif state in ("done", "idle", "failed"):  # 'failed' quá 24 giờ: thẻ cập nhật đã thôi báo ⇒ đóng sự cố
-        await clear(db, org_id, "update.failed")
+    elif state in ("done", "idle", "failed"):  # 'failed' quá hạn: thẻ cập nhật đã thôi báo ⇒ đóng sự cố
+        # Chỉ 'done' là đã xử lý thật; 'idle'/'failed' quá hạn là tự hết hạn, chưa chắc đã hết vấn đề ⇒ không dán nhãn.
+        await clear(db, org_id, "update.failed", label=(state == "done"), redis=redis)
 
 
 async def _eval_backup(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: datetime) -> None:
     from zoneinfo import ZoneInfo
 
     cfg = await _org_backup_cfg(db, org_id)
-    if cfg is None or not cfg.configured:
-        await clear(db, org_id, "backup.stale")
+    if cfg is None:
+        await clear(db, org_id, "backup.stale", redis=redis)
+        return
+    if not cfg.configured:
+        # F103: chưa có lịch sao lưu (Sếp rời thiết lập trước bước 11) thì KHÔNG có bản sao lưu tự động nào — trước đây
+        # chỉ có dòng vàng "Chưa cấu hình" nằm sâu trong Cài đặt. Quá `BACKUP_UNCONFIGURED_GRACE` kể từ lúc tạo tổ
+        # chức ⇒ sự cố backup.stale có chuông (tổ chức mới cài chưa kịp đi tới bước 11 thì chưa báo); có lịch ⇒ tự đóng.
+        if cfg.created_at is not None and now - cfg.created_at > BACKUP_UNCONFIGURED_GRACE:
+            await raise_once(db, org_id, key="backup.stale", kind="backup.stale", severity="warn",
+                             title="Chưa đặt lịch sao lưu tự động",
+                             body="Máy chưa tự sao lưu — hỏng ổ đĩa là mất dữ liệu. Mở mục Sao lưu, chọn tần suất và "
+                                  "giờ chạy rồi bấm lưu.",
+                             link=BACKUP_LINK, fingerprint="not_configured", redis=redis)
+        else:
+            await clear(db, org_id, "backup.stale", redis=redis)
         return
     latest = await _latest_backup()
     limit_text = backup_stale_limit(cfg.frequency)[1]
     if not _backup_stale(True, latest, cfg.created_at, now, cfg.frequency):
-        await clear(db, org_id, "backup.stale")
+        await clear(db, org_id, "backup.stale", redis=redis)
         return
     if latest is not None:
         try:
@@ -810,7 +864,7 @@ async def _eval_worker(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
                          body="Sàng lọc tin, nhắc việc và sao lưu theo lịch đang dừng. "
                               "Bấm để xem cách khởi động lại.", link=STORAGE_LINK, redis=redis)
     elif state == "ok":
-        await clear(db, org_id, "worker.silent")
+        await clear(db, org_id, "worker.silent", redis=redis)
 
 
 async def _eval_bridge(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: datetime) -> None:
@@ -824,7 +878,7 @@ async def _eval_bridge(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
                               "gửi, dù thẻ kênh vẫn ghi \"Đang kết nối\". Bấm để xem cách khởi động lại.",
                          link=HEALTH_LINK, redis=redis)
     else:
-        await clear(db, org_id, "bridge.silent")
+        await clear(db, org_id, "bridge.silent", redis=redis)
 
 
 async def sync_dlq_alert(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:
@@ -838,7 +892,7 @@ async def sync_dlq_alert(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> Non
                               "phát lại; phát lại vẫn lỗi thì gửi kèm khi báo lỗi (Trợ giúp › Báo lỗi).",
                          link=HEALTH_LINK, redis=redis)
     else:
-        await clear(db, org_id, "dlq.inbound")
+        await clear(db, org_id, "dlq.inbound", redis=redis)
 
 
 class DlqError(Exception):
@@ -909,7 +963,7 @@ async def _eval_disk(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:
                          body=f"Còn {_gb(ds.get('free_bytes'))} GB trống, cần tối thiểu {_gb(ds.get('min_bytes'))} GB"
                               " — cập nhật tự động đang tạm dừng.", link=STORAGE_LINK, redis=redis)
     elif ds.get("state") == "ok":
-        await clear(db, org_id, "disk.low")
+        await clear(db, org_id, "disk.low", redis=redis)
 
 
 async def _eval_autostart(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:
@@ -928,7 +982,7 @@ async def _eval_autostart(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> No
     good = ("yes", "not_applicable")
     linger_ok = st["linger"] in good or st["linger_required"] is False
     if st["docker_enabled"] in good and linger_ok:  # đã biết chắc không còn vấn đề; còn 'unknown' ⇒ để nguyên
-        await clear(db, org_id, "host.autostart")
+        await clear(db, org_id, "host.autostart", redis=redis)
 
 
 async def _eval_nightly(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: datetime) -> None:
@@ -960,7 +1014,7 @@ async def _eval_nightly(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: da
         await raise_once(db, org_id, key="host.nightly", kind="host.nightly", severity="warn", title=title,
                          body=body, link=HEALTH_LINK, fingerprint=fingerprint, redis=redis)
     elif st["state"] in ("ok", "off", "other"):
-        await clear(db, org_id, "host.nightly")
+        await clear(db, org_id, "host.nightly", redis=redis)
 
 
 ACCESS_LINK = "/system?tab=storage&focus=access"
@@ -986,7 +1040,7 @@ async def _eval_network(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None
                          title=OPEN_LAN_TITLE, body=OPEN_LAN_BODY, link=ACCESS_LINK, fingerprint="lan_legacy",
                          redis=redis)
     else:
-        await clear(db, org_id, "network.open_lan")
+        await clear(db, org_id, "network.open_lan", redis=redis)
 
 
 def _offsite_stale(st: dict[str, Any], org_created: datetime | None, now: datetime) -> bool:
@@ -998,6 +1052,10 @@ def _offsite_stale(st: dict[str, Any], org_created: datetime | None, now: dateti
         return now - last > limit
     return org_created is not None and now - org_created > limit
 
+
+#: Mã lỗi offsite cùng nguyên nhân với offsite.stale (chưa chọn nơi lưu / chưa thấy ổ) — F104: khi bản sao đã cũ thì
+#: không mở thêm offsite.failed, cách chữa của hai sự cố là một.
+OFFSITE_SAME_CAUSE = frozenset({"GH-EB00", "GH-EB01"})
 
 #: Thân chuông offsite.failed theo mã genh — chuỗi cố định (không lấy chữ từ run/).
 OFFSITE_FAILED_BODY = {
@@ -1029,7 +1087,8 @@ async def _eval_offsite(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: da
     cfg = await _org_backup_cfg(db, org_id)
     created = cfg.created_at if cfg else None
 
-    if _offsite_stale(st, created, now):
+    stale = _offsite_stale(st, created, now)
+    if stale:
         last = _parse_ts(st["last_success_at"])
         if not st["configured"]:
             await raise_once(db, org_id, key="offsite.stale", kind="offsite.stale", severity="warn",
@@ -1051,20 +1110,24 @@ async def _eval_offsite(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: da
                              body="Cắm ổ USB/NAS rồi bấm 'Sao lưu ra ổ ngoài ngay' để có bản sao mới ngoài máy chủ",
                              link=OFFSITE_LINK, fingerprint=severity, redis=redis)
     else:
-        await clear(db, org_id, "offsite.stale")
+        await clear(db, org_id, "offsite.stale", redis=redis)
 
     attempt = _parse_ts(st["last_attempt_at"])
     success = _parse_ts(st["last_success_at"])
     failed = (st["state"] in ("failed", "not_mounted") and attempt is not None
               and (success is None or attempt > success))
-    if failed:
-        code = st["error_code"] or ("GH-EB01" if st["state"] == "not_mounted" else "")
+    code = st["error_code"] or ("GH-EB01" if st["state"] == "not_mounted" else "")
+    if failed and stale and code in OFFSITE_SAME_CAUSE:
+        # F104: ổ chưa cắm/chưa chọn nơi lưu VÀ bản sao đã cũ là MỘT nguyên nhân, MỘT cách chữa ⇒ một sự cố (stale),
+        # không hai dòng + hai chuông. Dòng failed đang mở (mở lúc bản sao chưa đủ cũ) đóng gộp vào stale.
+        await clear(db, org_id, "offsite.failed", label=False, redis=redis)
+    elif failed:
         await raise_once(db, org_id, key="offsite.failed", kind="offsite.failed", severity="warn",
                          title="Sao lưu ra ổ ngoài chưa thành công",
                          body=OFFSITE_FAILED_BODY.get(code, OFFSITE_FAILED_GENERIC), link=OFFSITE_LINK,
                          fingerprint=f"{st['last_attempt_at'] or ''}|{st['error_code'] or ''}", redis=redis)
     elif st["state"] != "running":  # đang chạy ⇒ chưa biết kết quả, để nguyên
-        await clear(db, org_id, "offsite.failed")
+        await clear(db, org_id, "offsite.failed", redis=redis)
 
 
 async def raise_model_expired(db: AsyncSession, org_id: uuid.UUID, provider_id: uuid.UUID, name: str, *,
@@ -1110,13 +1173,19 @@ async def _eval_budget(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
     from gh import ai_cost
 
     budget = await ai_cost.get_budget(db, org_id)
-    if budget is None:
-        await clear(db, org_id, "ai.budget")
-        return
     day = ai_cost.today_vn(now)
+    # Đóng sự cố do Sếp nâng/bỏ trần ngay trong ngày vượt ⇒ "Đã xử lý"; sự cố của NGÀY CŨ hết vì sang ngày mới (tổng chi
+    # về 0) là tự hết, không ai xử lý ⇒ chỉ đánh dấu đã đọc (fingerprint của sự cố = ngày VN lúc mở).
+    opened_day = (await db.execute(text("""SELECT fingerprint FROM ops.health_alerts
+                                           WHERE org_id = :o AND key = 'ai.budget' AND cleared_at IS NULL"""),
+                                   {"o": org_id})).scalar_one_or_none()
+    handled = opened_day == day.isoformat()
+    if budget is None:
+        await clear(db, org_id, "ai.budget", label=handled, redis=redis)
+        return
     total = (await ai_cost.day_cost(db, org_id, day))["total_vnd"]
     if total <= budget:
-        await clear(db, org_id, "ai.budget")
+        await clear(db, org_id, "ai.budget", label=handled, redis=redis)
         return
     await raise_once(db, org_id, key="ai.budget", kind="ai.budget_exceeded", severity="warn",
                      fingerprint=day.isoformat(), title=f"Chi phí AI hôm nay vượt trần {ai_cost.fmt_vnd(budget)}",
@@ -1145,7 +1214,7 @@ async def _eval_background_source(db: AsyncSession, org_id: uuid.UUID, redis: An
         return
     if (await has_api_source(db, org_id) or await has_agy_source(db, org_id)
             or await background_cli_allowed(db, org_id)):
-        await clear(db, org_id, BG_NO_SOURCE_KEY)
+        await clear(db, org_id, BG_NO_SOURCE_KEY, redis=redis)
         await redis.delete(BG_NO_SOURCE_FLAG.format(org_id), BG_NO_SOURCE_TRY.format(org_id))
 
 
@@ -1163,7 +1232,7 @@ async def _eval_agy_box(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: da
     st = await box_status()
     if st["state"] != "down":
         await redis.delete(AGY_BOX_DOWN_SINCE_KEY)
-        await clear(db, org_id, "agy_box.down")
+        await clear(db, org_id, "agy_box.down", redis=redis)
         return
     raw = await redis.get(AGY_BOX_DOWN_SINCE_KEY)
     since = _parse_ts(raw)
@@ -1175,7 +1244,7 @@ async def _eval_agy_box(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: da
                          body=AGY_BOX_DOWN_BODY, link=HEALTH_LINK, redis=redis)
 
 
-async def _eval_events(db: AsyncSession, org_id: uuid.UUID) -> None:
+async def _eval_events(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:
     """Dọn dòng sự kiện cũ: kênh đã đăng nhập lại (hoặc không còn kênh loại đó dùng được — bị xoá, plugin cầu nối bị
     tắt) / model đã ổn (hoặc bị tắt, bị xoá) ⇒ đóng sự cố."""
     keys = (await db.execute(text("""SELECT key FROM ops.health_alerts WHERE org_id = :o AND cleared_at IS NULL
@@ -1193,17 +1262,17 @@ async def _eval_events(db: AsyncSession, org_id: uuid.UUID) -> None:
                 WHERE c.org_id = :o AND c.type = :t AND (c.plugin_id IS NULL OR pl.is_enabled) LIMIT 1"""),
                 {"o": org_id, "t": ref})).first() is not None
             if live is not None or not usable:  # không còn kênh để "Đăng nhập lại" ⇒ dòng nút chết, đóng
-                await clear(db, org_id, key)
+                await clear(db, org_id, key, redis=redis)
         else:
             try:
                 pid = uuid.UUID(ref)
             except ValueError:
-                await clear(db, org_id, key)
+                await clear(db, org_id, key, redis=redis)
                 continue
             p = (await db.execute(text("SELECT is_enabled, auth_state FROM agent.providers WHERE id = :i"),
                                   {"i": pid})).one_or_none()
             if p is None or not p.is_enabled or p.auth_state != "expired":
-                await clear(db, org_id, key)
+                await clear(db, org_id, key, redis=redis)
 
 
 async def evaluate(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datetime,
@@ -1222,7 +1291,7 @@ async def evaluate(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: date
         ("host.nightly", lambda: _eval_nightly(db, org_id, redis, now)),
         ("offsite", lambda: _eval_offsite(db, org_id, redis, now)),
         ("models", lambda: _eval_models(db, org_id, redis)),
-        ("events", lambda: _eval_events(db, org_id)),
+        ("events", lambda: _eval_events(db, org_id, redis)),
         ("ai.budget", lambda: _eval_budget(db, org_id, redis, now)),
         ("ai.background_source", lambda: _eval_background_source(db, org_id, redis)),
         ("network", lambda: _eval_network(db, org_id, redis)),

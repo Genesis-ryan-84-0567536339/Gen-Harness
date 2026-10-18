@@ -210,7 +210,7 @@ async def step2(body: Step2In, request: Request, response: Response,
     if not service.valid_pin(body.pin):
         errors["pin"] = "PIN gồm đúng 6 chữ số"
     elif body.pin != body.pin_confirm:
-        errors["pin_confirm"] = "Hai lần nhập PIN không khớp"
+        errors["pin_confirm"] = "Hai lần nhập mã PIN không khớp"
     if errors:
         raise field_errors(errors)
 

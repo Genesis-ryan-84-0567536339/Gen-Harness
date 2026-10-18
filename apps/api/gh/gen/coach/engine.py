@@ -44,7 +44,7 @@ class Prefs:
     enabled: bool = True
     bell: bool = True
     lessons_per_day: int = 1
-    quiet_start: int = 22
+    quiet_start: int = 21   # QD-20 (Sếp duyệt 10/10): yên lặng 21:00–07:00 (v0.1.54 từng đặt 22 — F121)
     quiet_end: int = 7
     snooze_until: datetime | None = None
     stable_since: datetime | None = None
@@ -74,6 +74,8 @@ class Todo:
     link: str | None = None
     raised_at: datetime | None = None
     order: int = 0
+    #: Việc gộp (`followup`): khoá các `followup.<n>` đã gộp vào — để bài G<n> bị bỏ đúng và không đếm hai lần.
+    members: tuple[str, ...] = ()
 
     def payload(self) -> dict[str, Any]:
         can = self.level in ("P1", "P3")
@@ -161,9 +163,35 @@ class TodoPlan:
     last_alert_raised_at: datetime | None
 
 
+def merge_followups(visible: Sequence[Todo], sig: sg.Signals, items: Mapping[str, Item], now: datetime) -> list[Todo]:
+    """v0.1.70 (F031/F138): các việc P3 `followup.5`–`followup.10` còn hiện gộp thành MỘT việc `followup` đặt đúng chỗ
+    của việc đầu tiên. Số "Còn N việc" đếm như thẻ "Việc thiết lập tiếp" ở Tổng quan (mọi việc tuỳ chọn chưa xong theo
+    tín hiệu `followup.<n>.done`). Sếp tắt / hoãn chính việc gộp thì nó ẩn."""
+    members = [t for t in visible if t.key.startswith("followup.")]
+    if not members:
+        return list(visible)
+    item = items.get(f"todo:{sg.MERGED_FOLLOWUP_KEY}")
+    if (item is not None and item.status in ("dismissed", "done", "understood")) or active_snooze(item, now):
+        return [t for t in visible if t not in members]
+    left = sum(1 for n in sg.FOLLOWUP_NS if sig.state.get(f"followup.{n}.done") is False)
+    merged = Todo(key=sg.MERGED_FOLLOWUP_KEY, level="P3", title=sg.todo_copy(sg.MERGED_FOLLOWUP_KEY)[0],
+                  why=sg.followup_why(max(left, len(members))), target=sg.TODO_TARGETS.get(sg.MERGED_FOLLOWUP_KEY),
+                  order=members[0].order, members=tuple(t.key for t in members))
+    out: list[Todo] = []
+    for t in visible:
+        if t is members[0]:
+            out.append(merged)
+        elif t not in members:
+            out.append(t)
+    return out
+
+
 def plan_todos(sig: sg.Signals, items: Mapping[str, Item], now: datetime) -> TodoPlan:
+    """Việc hiện (đã lọc hoãn / không dùng, đã gộp followup, CHƯA cắt 3). Thẻ "Việc thiết lập tiếp" đang hoãn ("Để sau
+    7 ngày") ⇒ ẩn luôn MỌI việc P3 của Gen (P0/P1/P2 không bị ảnh hưởng)."""
     visible: list[Todo] = []
     pending = False
+    p3_hidden = active_snooze(items.get(sg.CARD_FOLLOWUP), now)
     for t in candidate_todos(sig):
         item = items.get(f"todo:{t.key}")
         resolved = item is not None and item.status in ("dismissed", "done", "understood") and t.level != "P0"
@@ -171,10 +199,10 @@ def plan_todos(sig: sg.Signals, items: Mapping[str, Item], now: datetime) -> Tod
             continue
         if t.level in ("P0", "P1"):
             pending = True
-        if active_snooze(item, now):
+        if active_snooze(item, now) or (p3_hidden and t.level == "P3"):
             continue
         visible.append(t)
-    return TodoPlan(visible, pending, sg.parse_ts(sig.last_alert_raised_at))
+    return TodoPlan(merge_followups(visible, sig, items, now), pending, sg.parse_ts(sig.last_alert_raised_at))
 
 
 # ─── ổn định ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -324,7 +352,7 @@ def plan_today(sig: sg.Signals, prefs: Prefs, items: Mapping[str, Item], now: da
     if not prefs.enabled or snoozed_until is not None:
         return plan
 
-    keys = {t.key for t in shown_todos}
+    keys = {t.key for t in shown_todos} | {m for t in shown_todos for m in t.members}
     payload["todos"] = [t.payload() for t in shown_todos]
     plan.p01_keys = [t.key for t in shown_todos if t.level in ("P0", "P1")]
     plan.shown = [f"todo:{t.key}" for t in shown_todos]

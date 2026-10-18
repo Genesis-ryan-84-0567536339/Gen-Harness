@@ -203,7 +203,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.model_router = ModelRouter(sm, app.state.redis)
     app.state.cli_logins = climod.CliLogins(sm, app.state.redis)
     with contextlib.suppress(Exception):
-        await climod.restore_active(sm)
+        await climod.restore_active(sm, redis=app.state.redis)
     stop = asyncio.Event()
     consumers = start_ingest(app, stop)
     consumers.append(asyncio.create_task(_permit_sweep_loop(sm, app.state.redis, stop), name="permit-sweep"))

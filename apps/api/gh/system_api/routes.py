@@ -261,7 +261,8 @@ async def channel_logout(type_: str, request: Request, user: service.CurrentUser
                            target_type="channel", target_id=type_,
                            target_label=rows[0].account_label if rows else None,
                            detail={"sessions": [str(r.id) for r in rows]}, ip=user.ip)
-    await health.clear(db, user.org_id, f"channel.down:{type_}")  # v0.1.36 (F-6a): Sếp chủ động đăng xuất
+    # v0.1.36 (F-6a): Sếp chủ động đăng xuất
+    await health.clear(db, user.org_id, f"channel.down:{type_}", redis=request.app.state.redis)
     if rows:   # v0.1.68: dòng "Kênh … đã đăng xuất" cho Nhật ký lắng nghe
         await listen_events.record(db, user.org_id, "channel_ended", channel_id=ch.id, channel_type=type_,
                                    detail={"reason": "logged_out", "by": "owner"})
@@ -760,7 +761,7 @@ async def delete_provider(pid: uuid.UUID, request: Request, user: service.Curren
                      {"o": user.org_id, "p": pid})
     await db.execute(text("DELETE FROM agent.models WHERE provider_id = :p"), {"p": pid})
     await db.execute(text("DELETE FROM agent.providers WHERE id = :p"), {"p": pid})
-    await health.clear(db, user.org_id, f"model.auth_expired:{pid}")  # v0.1.36 (F-6b)
+    await health.clear(db, user.org_id, f"model.auth_expired:{pid}", redis=request.app.state.redis)  # v0.1.36 (F-6b)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="provider.deleted", target_type="provider", target_id=str(pid),
                            target_label=p.name, detail={"kind": p.kind}, ip=user.ip)
@@ -823,7 +824,11 @@ async def _probe_budget(redis: Any, org_id: uuid.UUID) -> None:
 
 @router.post("/providers/{pid}/models", status_code=201)
 async def add_model(pid: uuid.UUID, body: ModelIn, request: Request, user: service.CurrentUser = Depends(MANAGE),
+                    _pin: Any = Depends(require_pin("ai.route_change")),
                     db: AsyncSession = DB) -> dict[str, Any]:
+    """Thêm / sửa / tắt-bật / chọn mặc định một model của nguồn — cần PIN `ai.route_change` (dọn sót v0.1.70, như
+    `delete_provider`): "Dùng model này" và Tắt model đổi model nào Gen gọi, tức đổi chuỗi nguồn AI. Thứ tự kiểm:
+    quyền (403) → PIN (423) → 404 / 422."""
     p = await _provider(db, user.org_id, pid)
     # v0.1.32: tên biến thể cũ của agy ("gemini-3.8-flash-high") → model gốc + mức suy nghĩ.
     name, var_effort = catalog.split_variant(p.kind, body.model_name.strip())
@@ -894,8 +899,10 @@ async def add_model(pid: uuid.UUID, body: ModelIn, request: Request, user: servi
 
 @router.delete("/providers/{pid}/models/{mid}", status_code=204)
 async def delete_model(pid: uuid.UUID, mid: uuid.UUID, request: Request, user: service.CurrentUser = Depends(MANAGE),
+                       _pin: Any = Depends(require_pin("ai.route_change")),
                        db: AsyncSession = DB) -> Response:
-    """v0.1.66 (F008): gỡ một model đã thêm nhầm. Gỡ luôn dòng gán model trỏ vào nó (vai đó quay về model chuẩn).
+    """v0.1.66 (F008): gỡ một model đã thêm nhầm. Cần PIN `ai.route_change` (dọn sót v0.1.70, như `delete_provider`).
+    Gỡ luôn dòng gán model trỏ vào nó (vai đó quay về model chuẩn).
     Model còn lượt gọi trong 30 ngày ⇒ 409 `MODEL_HAS_CALLS` (gỡ sẽ xoá dây chuyền bảng giá, chi phí lịch sử tụt về 0) —
     dùng "Tắt model" (`POST /providers/{id}/models` với `enabled: false`)."""
     p = await _provider(db, user.org_id, pid)
@@ -1145,6 +1152,16 @@ async def cli_delete(profile_id: uuid.UUID, request: Request, user: service.Curr
 FAILOVER_RULES: tuple[dict[str, str], ...] = (
     {"key": "hết hạn mức", "value": "chuyển xuống nhà cung cấp kế tiếp trong chuỗi (hạn mức Sếp đặt ở từng model)"},
     {"key": "ngắt mạch", "value": "giữ nguyên hội thoại, thử lại sau 60 giây"},
+    # v0.1.70 (F029 sót): hai luật việc nền — câu chữ khớp `gh.providers.placement` / `agy_policy.decide` / `router`
+    # (test_failover_rules_v0170 đối chiếu từng vai và từng loại việc).
+    {"key": "hộp Antigravity",
+     "value": "vai chạy Antigravity qua hộp riêng (soạn lại / dịch nháp tin khách, sàng lọc tin, Bản tin Gen, agent "
+              "ngoại giao, Gen của nhân viên) mà hộp chưa chạy thì bỏ qua Antigravity và chuyển nguồn kế tiếp — không "
+              "bao giờ chạy thay trong tiến trình; chỉ Gen của Sếp và agent nội bộ không cần hộp"},
+    {"key": "việc nền",
+     "value": "việc nền (sàng lọc tin, trực việc, Bản tin Gen) bỏ qua Claude Code CLI trừ khi Sếp đã cho phép ở Bộ não "
+              "AI; Antigravity không cần cho phép này. Chỉ còn Claude Code CLI chưa được phép thì hết chuỗi và báo "
+              "Sếp"},
     {"key": "hết chuỗi", "value": "xếp hàng và báo Sếp qua hàng đợi cần xử lý"},
     {"key": "ngưỡng cảnh báo", "value": "còn dưới 20% hạn mức ngày trên model nào Sếp đã đặt hạn mức"},
 )
@@ -1204,7 +1221,7 @@ async def patch_permissions(body: PermissionPatch, user: service.CurrentUser = D
     if body.role == rbac.OWNER and body.scope != rbac.ALL:
         raise field_errors({"scope": "Owner luôn toàn quyền ở mọi cột — khoá cứng, không sửa được"})
     if body.role == rbac.AUDITOR and body.permission in rbac.WRITE_PERMISSIONS and body.scope != rbac.NONE:
-        raise field_errors({"scope": "Auditor không bao giờ có quyền ghi — khoá cứng, không sửa được"})
+        raise field_errors({"scope": "Vai Kiểm soát không bao giờ có quyền ghi — khoá cứng, không sửa được"})
     row = (await db.execute(text("""
         SELECT rp.scope, r.id AS role_id FROM core.role_permissions rp JOIN core.roles r ON r.id = rp.role_id
         WHERE r.org_id = :o AND r.code = :role AND rp.permission_code = :perm"""),

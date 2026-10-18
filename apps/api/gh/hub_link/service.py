@@ -60,7 +60,10 @@ log = logging.getLogger("gh.hub_link")
 AGENT_KEY = "core.gen"
 SERVER_NAME = "Gen-hub"
 # v0.1.56: ghi chú máy chủ lưu vào DB của Owner — tên Kho chung; ghi chú cũ (tên riêng) do migration 0035 cập nhật.
-SERVER_NOTE = f"Liên kết Gen-hub — Gen đọc {KHO_LABEL}, lịch, mail, việc, Drive (chỉ đọc). Quản lý ở thẻ Gen-hub."
+# v0.1.69 (F124): Gen đọc tự do nhưng GHI Kho (Phiên, Việc) được — chỉ khi Sếp Xác nhận + mã PIN (QD-18); migration 0041
+# cập nhật ghi chú cũ "(chỉ đọc)" đã lưu trong DB.
+SERVER_NOTE = (f"Liên kết Gen-hub — Gen đọc {KHO_LABEL}, lịch, mail, việc, Drive "
+               "(đọc; ghi Kho chỉ khi Sếp Xác nhận + mã PIN). Quản lý ở thẻ Gen-hub.")
 
 
 def server_note(label: str = KHO_LABEL) -> str:
@@ -527,7 +530,7 @@ async def _breaker_ok(db: AsyncSession, redis: Any, org_id: uuid.UUID) -> None:
     if redis is None:
         return
     await redis.delete(_bk("fails", org_id), _bk("open_until", org_id), _bk("down_since", org_id), _bk("half", org_id))
-    await health.clear(db, org_id, BREAKER_KEY)  # no-op khi không có sự cố đang mở
+    await health.clear(db, org_id, BREAKER_KEY, redis=redis)  # no-op khi không có sự cố đang mở
 
 
 async def breaker_state(redis: Any, org_id: uuid.UUID) -> dict[str, Any]:
@@ -547,7 +550,7 @@ async def _watch_org(db: AsyncSession, redis: Any, org_id: uuid.UUID, now: float
     "bắt đầu im" ⇒ đóng. Trả True khi vừa gửi chuông. Bên gọi commit."""
     down = _epoch(await redis.get(_bk("down_since", org_id)))
     if down is None:
-        await health.clear(db, org_id, BREAKER_KEY)
+        await health.clear(db, org_id, BREAKER_KEY, redis=redis)
         return False
     if now - down >= BREAKER_ALERT_AFTER_S and await redis.exists(_bk("half", org_id)):
         return await health.raise_once(

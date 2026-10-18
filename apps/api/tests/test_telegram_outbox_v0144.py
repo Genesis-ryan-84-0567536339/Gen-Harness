@@ -44,6 +44,12 @@ class Sink:
 
 
 @pytest.fixture(autouse=True)
+def _remote_public_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """v0.1.70 (F092): link Console chỉ chèn khi đã bật Truy cập từ xa — ở đây coi như đã cấu hình địa chỉ."""
+    monkeypatch.setattr(tsvc, "public_url", lambda: "https://gen.tail1234.ts.net")
+
+
+@pytest.fixture(autouse=True)
 def _no_bridge(monkeypatch: pytest.MonkeyPatch) -> None:
     async def boom(*_a: Any, **_k: Any) -> None:
         raise AssertionError("Không được gửi gì qua bridge/Zalo")
@@ -100,7 +106,7 @@ async def test_briefing_enqueues_one_per_org(owner_api: Any, db: Any, redis: Any
     assert rows[0].kind == "briefing" and rows[0].dedupe_key == f"briefing:{slot.at.isoformat()}"
     body = rows[0].text
     assert body.startswith(f"Bản tin Gen · {slot.label}")
-    assert "Mở Console: https://localhost:8443/overview" in body
+    assert "Mở Console: https://gen.tail1234.ts.net/overview" in body
     assert body.endswith("(Tin một chiều — mọi thao tác Sếp xác nhận trong Console.)")
     assert TOKEN not in body
     # Hai Owner ⇒ hai chuông, nhưng chỉ một tin Telegram.
@@ -147,7 +153,7 @@ async def test_reminders_only_for_owner_tasks(owner_api: Any, db: Any) -> None:
     assert all(r.kind == "reminder" and r.dedupe_key.startswith("reminder:") for r in rows)
     mine = next(r for r in rows if "Việc của Sếp" in r.text)
     assert mine.text.splitlines()[1].startswith("TSK-8001 · P1 · hạn ")
-    assert "Mở Console: https://localhost:8443/tasks" in mine.text
+    assert "Mở Console: https://gen.tail1234.ts.net/tasks" in mine.text
     async with sessionmaker()() as s:
         assert await due_reminders(s) == 0
     assert len(await _outbox(db)) == 2

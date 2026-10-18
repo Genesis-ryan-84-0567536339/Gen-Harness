@@ -541,8 +541,9 @@ def claude_home_shared() -> bool:
         return False
 
 
-async def _report_claude_home(sm: async_sessionmaker[AsyncSession] | None, shared: bool) -> None:
-    """Mở/đóng sự cố `cli.claude_home_shared` cho từng tổ chức (gh.health — v0.1.36). Lỗi thì bỏ qua."""
+async def _report_claude_home(sm: async_sessionmaker[AsyncSession] | None, shared: bool, *, redis: Any = None) -> None:
+    """Mở/đóng sự cố `cli.claude_home_shared` cho từng tổ chức (gh.health — v0.1.36). Lỗi thì bỏ qua. Có `redis` thì
+    chuông đang mở của sự cố vừa đóng đổi ngay (v0.1.70)."""
     if sm is None:
         return
     from gh import health
@@ -559,13 +560,14 @@ async def _report_claude_home(sm: async_sessionmaker[AsyncSession] | None, share
                              "bản mới (dùng volume claude_state riêng). Chi tiết kỹ thuật: " + CLAUDE_HOME_SHARED_MSG,
                         link=None)
                 else:
-                    await health.clear(db, org_id, CLAUDE_HOME_SHARED_KEY)
+                    await health.clear(db, org_id, CLAUDE_HOME_SHARED_KEY, redis=redis)
             await db.commit()
     except Exception as exc:  # noqa: BLE001 — báo sự cố là phụ, không làm hỏng khởi động
         log.warning("Không ghi được sự cố %s: %s", CLAUDE_HOME_SHARED_KEY, type(exc).__name__)
 
 
-async def restore_active(sm: async_sessionmaker[AsyncSession] | None, *, owns_logins: bool = True) -> None:
+async def restore_active(sm: async_sessionmaker[AsyncSession] | None, *, owns_logins: bool = True,
+                         redis: Any = None) -> None:
     """Khi khởi động: tệp phiên trong volume trống mà có hồ sơ hoạt động → ghi lại tệp (từng loại CLI).
 
     Còn bản "gửi tạm" (api chết giữa lúc thêm tài khoản) thì api trả nó về trước — đó là tài khoản đang dùng. Worker
@@ -584,7 +586,7 @@ async def restore_active(sm: async_sessionmaker[AsyncSession] | None, *, owns_lo
             shared = False
         elif shared:
             log.error(CLAUDE_HOME_SHARED_MSG)
-        await _report_claude_home(sm, shared)
+        await _report_claude_home(sm, shared, redis=redis)
     need: list[str] = []
     for kind in CLI_KINDS:
         if owns_logins:

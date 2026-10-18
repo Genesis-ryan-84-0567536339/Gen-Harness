@@ -583,7 +583,7 @@ class ModelRouter:
                         if state == "expired":
                             await health.raise_model_expired(db, row.org_id, p.id, row.name, redis=self.redis)
                         else:
-                            await health.clear(db, row.org_id, f"model.auth_expired:{p.id}")
+                            await health.clear(db, row.org_id, f"model.auth_expired:{p.id}", redis=self.redis)
                 except asyncio.CancelledError:
                     raise
                 except Exception:  # noqa: BLE001 — chuông lỗi không được làm hỏng lượt gọi model
@@ -839,7 +839,7 @@ class ModelRouter:
             if not await self.redis.exists(flag):
                 return
             async with self.sm() as db:
-                await health.clear(db, org_id, BG_NO_SOURCE_KEY)
+                await health.clear(db, org_id, BG_NO_SOURCE_KEY, redis=self.redis)
                 await db.commit()
             await self.redis.delete(flag, BG_NO_SOURCE_TRY.format(org_id))
         except asyncio.CancelledError:
@@ -1069,7 +1069,7 @@ class ModelRouter:
                 # cố ý: dải "Cần Sếp xử lý" phải nhắc tiếp nếu Sếp rời trang mà chưa đăng nhập lại.
                 from gh import health
 
-                await health.clear(db, org_id, f"model.auth_expired:{provider_id}")
+                await health.clear(db, org_id, f"model.auth_expired:{provider_id}", redis=self.redis)
             await db.commit()
         return result
 

@@ -103,11 +103,11 @@ test.describe('v0.1.55 — Việc Sếp cần làm chỉ 1 dòng bắt buộc', 
     await page.goto('/overview');
     await page.getByRole('button', { name: /Hỏi Gen|Đóng Gen/ }).click();
     await expect(card()).toBeVisible();
-    expect(await titles()).toEqual(['Kiểm tra nguồn AI chạy được', 'Nối Gen-hub nếu Sếp muốn']);
+    expect(await titles()).toEqual(['Kiểm tra nguồn AI chạy được', 'Nối Gen-hub']);
 
     await p3Hook(page.request, 'genCoach', 'scenario', { staff: true });
     await page.reload();
     await expect(card()).toBeVisible();
-    await expect.poll(titles).toEqual(['Kiểm tra nguồn AI chạy được', 'Nối Gen-hub nếu Sếp muốn', 'Thử mở Console từ điện thoại']);
+    await expect.poll(titles).toEqual(['Kiểm tra nguồn AI chạy được', 'Nối Gen-hub', 'Thử mở Console từ điện thoại']);
   });
 });

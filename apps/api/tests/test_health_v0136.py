@@ -274,17 +274,17 @@ async def test_update_failed_rings_per_attempt(owner_api: Api, app, db, redis, l
     assert await health.active_issues(db, org) == []
 
 
-async def test_update_failed_older_than_24h_is_not_an_issue(owner_api: Api, app, db, redis, link: Path) -> None:  # type: ignore[no-untyped-def]
-    """Thẻ cập nhật ở web thôi báo lỗi sau 24 giờ (updateModel.ts RECENT_MS) ⇒ dải/chuông/thẻ Sức khoẻ cũng vậy."""
+async def test_update_failed_older_than_26h_is_not_an_issue(owner_api: Api, app, db, redis, link: Path) -> None:  # type: ignore[no-untyped-def]
+    """Thẻ cập nhật ở web thôi báo lỗi sau 26 giờ (updateModel.ts RECENT_MS) ⇒ dải/chuông/thẻ Sức khoẻ cũng vậy."""
     org = await org_id(db)
     status_file = link / "update-status.json"
     status_file.write_text(json.dumps({"state": "failed", "from": "v0.1.35", "to": "v0.1.36",
                                        "finished_at": _iso(datetime.now(UTC) - timedelta(hours=23))}))
     await evaluate(redis, org)
     assert [i["key"] for i in await health.active_issues(db, org)] == ["update.failed"]
-    # cùng lần lỗi đó, giờ đã 25 giờ ⇒ đóng sự cố, /system/health không còn báo lỗi
+    # cùng lần lỗi đó, giờ đã 27 giờ ⇒ đóng sự cố, /system/health không còn báo lỗi
     status_file.write_text(json.dumps({"state": "failed", "from": "v0.1.35", "to": "v0.1.36",
-                                       "finished_at": _iso(datetime.now(UTC) - timedelta(hours=25))}))
+                                       "finished_at": _iso(datetime.now(UTC) - timedelta(hours=27))}))
     await evaluate(redis, org)
     await db.commit()
     assert await health.active_issues(db, org) == []

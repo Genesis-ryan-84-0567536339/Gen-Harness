@@ -52,19 +52,8 @@ export function scoreTone(score: number): string {
 }
 
 // ── Kho hội thoại ──
-export const EVENT_TYPE_LABEL: Record<string, string> = {
-  AskedPrice: 'Hỏi giá',
-  RequestedSample: 'Yêu cầu mẫu',
-  ComparedVendor: 'So sánh nhà cung cấp',
-  WentSilent: 'Đã im lặng',
-  Complained: 'Than phiền',
-  OfferedSupply: 'Chào bán',
-  SentQuotation: 'Đã gửi báo giá',
-  DealWon: 'Đã chốt deal',
-};
-export function eventTypeLabel(t: string): string {
-  return EVENT_TYPE_LABEL[t] ?? t;
-}
+// v0.1.69 (F062): nhãn loại sự kiện dùng MỘT bảng chung của contracts (`eventTypes.ts`), không giữ bảng riêng ở đây.
+export { eventTypeLabel } from '@gen-harness/contracts';
 export const CHANNEL_LABEL: Record<string, string> = { zalo: 'Zalo', whatsapp: 'WhatsApp', telegram: 'Telegram', linkedin: 'LinkedIn' };
 export const BULK_ACTION_LABEL: Record<SearchBulkAction, string> = { tag: 'Gắn nhãn vào sổ tay', task: 'Giao việc theo dõi' };
 

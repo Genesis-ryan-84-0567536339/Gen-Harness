@@ -631,6 +631,18 @@ describe('Tổng quan', () => {
     expect(coachCalls((c) => c.url.includes('/items/'))[0].body).toEqual({ action: 'snooze', days: 7 });
     await waitFor(() => expect(screen.queryByText('Việc thiết lập tiếp')).toBeNull());
   });
+
+  it('SetupFollowUp: thẻ là đích của việc gộp ở Hôm nay (v0.1.70, F031/F138) — "Chỉ cho em" mở Tổng quan và làm sáng đúng thẻ', async () => {
+    const item: SetupFollowUpItem = { n: 5, key: 'k5', title: 'Bước 5', status: 'skipped', done: false };
+    queryClient.setQueryData(['setup', 'follow-up'], [item]);
+    queryClient.setQueryData(COACH_PREFS_KEY, PREFS());
+    wrap(<SetupFollowUp />);
+    await screen.findByRole('button', { name: 'Để sau 7 ngày' });
+    expect(document.querySelector('[data-gen-target="overview.setup_followup"]')).not.toBeNull();
+    const steps = showMe(todo('followup', 'P3', { target: 'overview.setup_followup' }));
+    expect(steps[0]).toMatchObject({ type: 'navigate', screen: 'overview' });
+    expect(steps[1]).toMatchObject({ type: 'highlight', target: 'overview.setup_followup' });
+  });
 });
 
 // ── uiStore ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -687,7 +699,7 @@ describe('hợp đồng gen.ts ↔ mock-gen-coach', () => {
       expect(typeof x.dismiss_warning).toBe('string');
     }
     expect(t.todos[0]).toMatchObject({ title: 'Kiểm tra nguồn AI chạy được', link: '/setup?buoc=nguon-ai' });
-    expect(t.todos[1]).toMatchObject({ title: 'Nối Gen-hub nếu Sếp muốn', target: 'boss_checks.row.hub' });
+    expect(t.todos[1]).toMatchObject({ title: 'Nối Gen-hub', target: 'boss_checks.row.hub' });
     expect(t.tip?.key).toBe('telegram_briefing');
     expect(t.lesson).toMatchObject({ id: 'N01', k: 1, total: 19, status: 'new' });
     expect(t.progress).toEqual({ required_done: 0, required_total: 1, lessons_done: 0, lessons_total: 19, stable: false, stable_since: null });

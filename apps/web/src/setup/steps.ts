@@ -67,7 +67,7 @@ export const SETUP_STEPS: StepMeta[] = [
   },
   {
     n: 11, key: 'backup', title: 'Sao lưu', required: false, built: true,
-    content: 'Sao lưu tự bật hằng ngày lúc 02:00, giữ 7 bản gần nhất; nơi lưu trên máy chủ (bản sao ra ổ USB/NAS chọn ở Cài đặt › Sao lưu & cập nhật). Đổi giờ hoặc tần suất ở mục "Đổi lịch" nếu muốn.',
+    content: 'Sao lưu tự bật hằng ngày lúc 02:00, giữ 7 bản theo ngày, 4 theo tuần, 12 theo tháng; nơi lưu trên máy chủ (bản sao ra ổ USB/NAS chọn ở Cài đặt › Sao lưu & cập nhật). Đổi giờ hoặc tần suất ở mục "Đổi lịch" nếu muốn.',
     doneWhen: 'Đi qua hoặc Để sau đều bật lịch mặc định',
   },
   {
@@ -89,7 +89,7 @@ export const STEP_DESCRIPTIONS: Record<number, string> = {
   8: 'Tạo trợ lý AI đầu tiên: chọn một mẫu là xong — tên và vai trò điền sẵn theo mẫu, sửa lại ở Danh tính Agent bất cứ lúc nào.',
   9: 'Mức trợ lý được tự làm đã chọn sẵn: Soạn sẵn chờ duyệt. Những giới hạn bên dưới luôn bật để bảo vệ Sếp và nhân viên — không ai tắt được.',
   10: 'Gợi ý, không bắt buộc — Sếp một mình dùng được ngay. Có người cùng làm thì mời lúc nào cũng được ở Đội ngũ › Người dùng; hệ thống chưa tự gửi email mời, mật khẩu tạm hiện ngay để Sếp tự gửi.',
-  11: 'Sao lưu đã tự bật: hằng ngày lúc 02:00, giữ 7 bản gần nhất. Đi tiếp hay bấm Để sau thì lịch này vẫn chạy — đổi giờ ở mục "Đổi lịch" nếu muốn.',
+  11: 'Sao lưu đã tự bật: hằng ngày lúc 02:00, giữ 7 bản theo ngày, 4 theo tuần, 12 theo tháng. Đi tiếp hay bấm Để sau thì lịch này vẫn chạy — đổi giờ ở mục "Đổi lịch" nếu muốn.',
   12: 'Kiểm tra lại những gì đã bật. Việc còn thiếu có liên kết để làm tiếp — làm ngay hoặc sau ở Cài đặt › Việc nên làm tiếp.',
 };
 

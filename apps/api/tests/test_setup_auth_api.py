@@ -42,7 +42,7 @@ async def test_step2_field_validation(client) -> None:  # type: ignore[no-untype
     assert r.status_code == 422
     assert set(r.json()["errors"]) == {"display_name", "email", "password", "pin"}
     r = await api.send("PUT", "/setup/steps/2", {"token": "test-setup-token", **OWNER, "pin_confirm": "000000"})
-    assert r.json()["errors"] == {"pin_confirm": "Hai lần nhập PIN không khớp"}
+    assert r.json()["errors"] == {"pin_confirm": "Hai lần nhập mã PIN không khớp"}
 
 
 async def test_full_setup_then_me_and_state_resume(client, app) -> None:  # type: ignore[no-untyped-def]

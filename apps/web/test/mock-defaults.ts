@@ -41,13 +41,13 @@ function seedRows(): Row[] {
   });
   return [
     mk('gen', 'Gen — vai trò dùng và số ngày giữ hội thoại', 'Gen', 'Gen dùng được cho chỉ Owner · giữ hội thoại 90 ngày', 'Gen dùng được cho vai trò: owner, manager · giữ hội thoại 30 ngày'),
-    mk('coach', 'Gen hướng dẫn — tuỳ chọn của Sếp', 'Gen', 'Gen hướng dẫn bật · chuông bật · 1 bài mỗi ngày · yên lặng 22h–7h', 'Gen hướng dẫn bật · chuông tắt · 2 bài mỗi ngày · yên lặng 22h–7h', { scope: 'user' }),
+    mk('coach', 'Gen hướng dẫn — tuỳ chọn của Sếp', 'Gen', 'Gen hướng dẫn bật · chuông bật · 1 bài mỗi ngày · yên lặng 21h–7h', 'Gen hướng dẫn bật · chuông tắt · 2 bài mỗi ngày · yên lặng 21h–7h', { scope: 'user' }),
     // e2e: bấm "Về mặc định" ở thẻ Lọc tin ngay từ đầu.
     mk('triage', 'Lọc tin', 'Bộ não AI', 'Lọc tin bật · ngưỡng điểm 30 · có dùng Jev', 'Lọc tin bật · ngưỡng điểm 55 · có dùng Jev', { customized: true, current_text: 'Lọc tin bật · ngưỡng điểm 55 · có dùng Jev' }),
     mk('refinery.schedule', 'Lịch sàng lọc tin', 'Bộ não AI', 'Sàng lọc mỗi 15 phút hoặc khi đủ 500 tin · mỗi lô 250 tin · độ tin cậy tối thiểu 0,6', 'Sàng lọc mỗi 5 phút hoặc khi đủ 100 tin · mỗi lô 50 tin · độ tin cậy tối thiểu 0,8'),
     mk('jev.preset', 'Jev — nguồn model', 'Bộ não AI', 'Jev dùng model typesafe/jev-1.13 qua openrouter.ai', 'Jev dùng model tự host qua jev.local', { resettable: false }),
     mk('ai_cost', 'Trần chi phí AI', 'Chi phí AI', 'Không đặt trần chi phí AI', 'Trần chi phí AI 500.000 ₫ mỗi ngày'),
-    mk('backup', 'Lịch sao lưu', 'Sao lưu', 'Sao lưu hằng ngày lúc 02:00 · giữ 7 bản · lưu trên máy chủ này', 'Sao lưu hằng tuần lúc 03:30 · giữ 3 bản · lưu trên máy chủ này'),
+    mk('backup', 'Lịch sao lưu', 'Sao lưu', 'Sao lưu hằng ngày lúc 02:00 · giữ 7 bản theo ngày, 4 theo tuần, 12 theo tháng · lưu trên máy chủ này', 'Sao lưu hằng tuần lúc 03:30 · giữ 7 bản theo ngày, 4 theo tuần, 12 theo tháng · lưu trên máy chủ này'),
     mk('autonomy', 'Mức tự trị của tổ chức', 'Gen', 'Soạn sẵn chờ duyệt (mức 4)', 'Gợi ý hành động (mức 3)'),
     // v0.1.57 (Nợ #30): Tên Kho — trạng thái thật nằm ở `mock-kho-label` (chung với `GET/PATCH /hub/link`); `view()` ghi đè dòng này.
     mk('kho_label', 'Tên Kho nối qua Gen-hub', 'Kết nối', khoText(KHO_DEFAULT), khoText('Sổ tay Công ty')),

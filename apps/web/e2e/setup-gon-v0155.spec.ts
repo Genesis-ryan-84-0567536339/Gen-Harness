@@ -65,7 +65,7 @@ test('Thiết lập gọn: bước 10 mở từ Hướng dẫn hiện thẳng fo
 
   await page.goto('/guide/11');
   await expect(page.getByRole('heading', { name: 'Sao lưu' })).toBeVisible();
-  await expect(page.getByTestId('step11-default')).toContainText('Hằng ngày lúc 02:00, giữ 7 bản gần nhất');
+  await expect(page.getByTestId('step11-default')).toContainText('Hằng ngày lúc 02:00, giữ 7 bản theo ngày, 4 theo tuần, 12 theo tháng');
   const advanced = page.locator('details', { has: page.getByText('Đổi lịch (không bắt buộc)') });
   await expect(advanced).not.toHaveAttribute('open', /.*/);
   await page.getByText('Đổi lịch (không bắt buộc)').click();

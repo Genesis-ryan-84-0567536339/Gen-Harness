@@ -38,10 +38,10 @@ JEV_NAME = "Jev (System One)"
 def key_missing() -> ApiError:
     """409 JEV_KEY_MISSING — `title` là chuỗi thân thiện (web hiện thẳng); lý do kỹ thuật nằm ở `reasons` (chuỗi) để web
     đặt vào "Chi tiết kỹ thuật" (cùng khuôn MODEL_UNAVAILABLE), `detail` để trống."""
-    return ApiError(409, "JEV_KEY_MISSING", "Chưa có khóa OpenRouter cho Jev", None,
-                    reasons=["Không có nguồn model kind=system_one đang bật kèm khóa (agent.providers / "
-                             "agent.provider_keys). Bật Jev bằng POST /api/v1/jev/enable (dùng khóa OpenRouter đang "
-                             "có hoặc dán khóa)."])
+    return ApiError(409, "JEV_KEY_MISSING", "Chưa có khoá OpenRouter cho Jev", None,
+                    reasons=["Không có nguồn model kind=system_one đang bật kèm khoá (agent.providers / "
+                             "agent.provider_keys). Bật Jev bằng POST /api/v1/jev/enable (dùng khoá OpenRouter đang "
+                             "có hoặc dán khoá)."])
 
 
 def _transport(request: Request) -> Any:
@@ -60,7 +60,7 @@ def _is_openrouter(endpoint: str | None) -> bool:
 
 
 async def _openrouter_secret(db: AsyncSession, org_id: uuid.UUID) -> bytes | None:
-    """Khóa (đã mã hóa, nguyên văn) của nguồn OpenRouter đang có — CHỈ phía máy chủ."""
+    """Khoá (đã mã hóa, nguyên văn) của nguồn OpenRouter đang có — CHỈ phía máy chủ."""
     rows = (await db.execute(text("""
         SELECT p.endpoint, k.secret_enc FROM agent.providers p
         JOIN agent.provider_keys k ON k.provider_id = p.id AND k.is_enabled
@@ -71,7 +71,7 @@ async def _openrouter_secret(db: AsyncSession, org_id: uuid.UUID) -> bytes | Non
 
 async def _has_key(db: AsyncSession, provider_id: uuid.UUID, *, enc: bytes | None = None,
                    plain: str | None = None) -> bool:
-    """Nguồn này đã có đúng khóa đó chưa (bấm nút hai lần không sinh khóa trùng)."""
+    """Nguồn này đã có đúng khoá đó chưa (bấm nút hai lần không sinh khoá trùng)."""
     rows = (await db.execute(text("SELECT secret_enc FROM agent.provider_keys WHERE provider_id = :p"),
                              {"p": provider_id})).all()
     for r in rows:
@@ -82,7 +82,7 @@ async def _has_key(db: AsyncSession, provider_id: uuid.UUID, *, enc: bytes | Non
             try:
                 if crypto.decrypt(cur, KEY_AAD).decode() == plain:
                     return True
-            except Exception:  # noqa: BLE001 — khóa master đổi: coi như khác
+            except Exception:  # noqa: BLE001 — khoá master đổi: coi như khác
                 continue
     return False
 
@@ -98,12 +98,12 @@ async def _add_key(db: AsyncSession, provider_id: uuid.UUID, enc: bytes, last4: 
 @router.post("/enable")
 async def enable_jev(body: EnableIn, user: service.CurrentUser = Depends(require_owner),
                      _pin: Any = Depends(require_pin("ai.route_change")), db: AsyncSession = DB) -> dict[str, Any]:
-    """Tạo/bật nguồn Jev theo `jev.PRESET`. Idempotent: gọi lại chỉ bật lại + bổ sung khóa còn thiếu."""
+    """Tạo/bật nguồn Jev theo `jev.PRESET`. Idempotent: gọi lại chỉ bật lại + bổ sung khoá còn thiếu."""
     pasted = (body.key or "").strip()
     if body.use_existing_openrouter and pasted:
-        raise field_errors({"key": "Chọn một: dùng khóa OpenRouter đang có hoặc dán khóa mới, không cả hai"})
+        raise field_errors({"key": "Chọn một: dùng khoá OpenRouter đang có hoặc dán khoá mới, không cả hai"})
     if pasted and len(pasted) < 8:
-        raise field_errors({"key": "Khóa quá ngắn — dán đủ khóa OpenRouter (bắt đầu bằng sk-or-…)"})
+        raise field_errors({"key": "Khoá quá ngắn — dán đủ khoá OpenRouter (bắt đầu bằng sk-or-…)"})
     existing = (await db.execute(text("""
         SELECT id FROM agent.providers WHERE org_id = :o AND kind = 'system_one'
         ORDER BY failover_rank NULLS LAST, created_at LIMIT 1"""), {"o": user.org_id})).one_or_none()

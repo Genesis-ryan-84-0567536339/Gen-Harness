@@ -56,7 +56,7 @@ export function HubLinkCard() {
   const link = useHubLink();
   return (
     <Panel
-      title="Gen-hub — Gen đọc và ghi Kho tri thức"
+      title={`Gen-hub — Gen đọc và ghi ${link.data?.kho_label?.trim() || KHO_LABEL}`}
       kicker={
         link.data ? (
           <>
@@ -288,7 +288,7 @@ function HubLinkBody({ link, isOwner }: { link: HubLink; isOwner: boolean }) {
             <li>Mở Gen-hub, vào mục tạo trợ lý mới, đặt tên có tên công ty (ví dụ gen-harness-congty).</li>
             <li>
               Chọn thời hạn thẻ truy cập 90 ngày. Bật quyền ĐỌC Kho (tóm tắt, tìm, xem một mục) và (tuỳ chọn) quyền đọc lịch, đọc mail, đọc việc, tìm Drive —
-              KHÔNG bật quyền ghi lịch, mail hay Drive. Muốn Gen ghi được Kho (Phiên, Việc), tick thêm kho_create, kho_update — không bắt buộc.
+              KHÔNG bật quyền ghi lịch, mail hay Drive. Muốn Gen ghi được Kho (Phiên, Việc), tick thêm quyền ghi Kho (tạo và sửa bản ghi — tên trong Gen-hub: kho_create, kho_update) — không bắt buộc.
             </li>
             <li>Chép thẻ truy cập (token) vừa tạo, dán vào ô trên rồi bấm Kiểm tra.</li>
           </ol>
@@ -364,7 +364,7 @@ function WriteScopes({ link, result }: { link: HubLink; result: HubLinkTestResul
         {rows.map((r) => (
           <li key={r.key} className="hub-scopes__row" data-has={r.state === 'unknown' ? undefined : r.state}>
             <span className="hub-scopes__name">
-              <span className="mono">{r.key}</span> — {r.label}
+              {r.label} (<span className="mono">{r.key}</span>)
             </span>
             <span className="hub-scopes__val">{r.text}</span>
           </li>

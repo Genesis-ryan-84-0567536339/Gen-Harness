@@ -3,6 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   ApiError,
   SCREEN_BY_KEY,
+  eventTypeLabel,
   type CleanItem,
   type CleanQuery,
   type NotebookSection,
@@ -132,7 +133,7 @@ export function CleanScreen() {
                             <td className="td-id">{r.person?.code ?? '—'}</td>
                             <td>
                               <span className="ev-chip" style={{ color: tone, borderColor: tone === N4 ? N8 : tone }}>
-                                {r.event_type}
+                                {eventTypeLabel(r.event_type)}
                               </span>
                             </td>
                             <td className="td-text min280">
@@ -150,7 +151,7 @@ export function CleanScreen() {
                                   e.stopPropagation();
                                   setEvidenceFor(r);
                                 }}
-                                aria-label={`Xem bản ghi thô của kết luận ${r.event_type} ${r.person?.code ?? ''}`}
+                                aria-label={`Xem bản ghi thô của kết luận ${eventTypeLabel(r.event_type)} ${r.person?.code ?? ''}`}
                               >
                                 Xem thô
                               </Button>
@@ -482,7 +483,7 @@ function EvidenceDialog({ item, onClose, tz }: { item: CleanItem | null; onClose
       onClose={onClose}
       width={520}
       title="Bản ghi thô làm chứng cứ"
-      kicker={item ? `${item.event_type} · ${[item.group?.code, item.person?.code].filter(Boolean).join(' · ')}` : undefined}
+      kicker={item ? `${eventTypeLabel(item.event_type)} · ${[item.group?.code, item.person?.code].filter(Boolean).join(' · ')}` : undefined}
     >
       {item ? <p className="dlg-item__text" style={{ marginTop: 0, marginBottom: 12 }}>{item.conclusion}</p> : null}
       {q.isPending ? (

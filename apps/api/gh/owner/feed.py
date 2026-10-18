@@ -59,11 +59,8 @@ HANDLED_DRAFT_STATUSES = ("approved", "edited", "sent")
 
 IMPORTANCE_LABELS = ("Khẩn", "Quan trọng", "Thường")
 #: Nhãn việc (tiêu đề dòng tin) theo event_type — tiếng Việt đời thường, không lộ tên kỹ thuật.
-EVENT_TITLES: dict[str, str] = {
-    **qsvc.EVENT_LABELS,
-    "AskedStatus": "Hỏi tình trạng", "RequestedSample": "Xin hàng mẫu", "DealWon": "Chốt đơn",
-    "SentDocument": "Gửi tài liệu", "JobSignal": "Tin tuyển dụng",
-}
+# v0.1.69 (F062): KHÔNG giữ nhãn riêng — cùng bảng với Hộp thư (một loại sự kiện, một cách gọi trên mọi màn).
+EVENT_TITLES: dict[str, str] = dict(qsvc.EVENT_LABELS)
 OTHER_TITLE = "Tin khác"
 
 _KIND_TEXT = {"image": "(Hình ảnh)", "file": "(Tệp đính kèm)", "sticker": "(Nhãn dán)", "reaction": "(Biểu cảm)"}

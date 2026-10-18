@@ -3,7 +3,7 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
-import type { GenStepEvent } from '@gen-harness/contracts';
+import type { DataToolName, GenStepEvent } from '@gen-harness/contracts';
 import { GenPanel } from '../../src/gen/GenPanel';
 import { GenToggle } from '../../src/gen/GenToggle';
 import { Spotlight } from '../../src/gen/Spotlight';
@@ -24,6 +24,7 @@ const ME = {
 type Call = { method: string; url: string; body: unknown };
 const calls: Call[] = [];
 let turnReply: unknown = null;
+let hubLink: unknown = null;
 
 function stubApi() {
   vi.stubGlobal(
@@ -36,6 +37,7 @@ function stubApi() {
       if (url.endsWith('/gen/turns') && method === 'POST') return json(202, { turn_id: 't1', conversation_id: 'c1' });
       if (url.includes('/gen/turns/t1/ack')) return new Response(null, { status: 204 });
       if (url.endsWith('/gen/turns/t1')) return json(200, turnReply ?? { turn_id: 't1', conversation_id: 'c1', status: 'running', steps: [] });
+      if (url.endsWith('/hub/link') && hubLink) return json(200, hubLink);
       return json(404, { status: 404, code: 'NOT_FOUND', title: 'Không tồn tại' });
     }),
   );
@@ -49,6 +51,7 @@ beforeEach(() => {
   calls.length = 0;
   navigations.length = 0;
   turnReply = null;
+  hubLink = null;
   useGenStore.setState({ openByUser: {}, conversationId: null, messages: [], busy: false, spotlight: null });
   setNavigator((to) => navigations.push(to));
   stubApi();
@@ -103,6 +106,34 @@ describe('GenPanel', () => {
     expect(JSON.parse(window.localStorage.getItem('gh-gen') ?? '{}').state.openByUser).toEqual({ u1: true });
     await userEvent.click(screen.getByRole('button', { name: 'Đóng Gen' }));
     expect(useGenStore.getState().openByUser.u1).toBe(false);
+  });
+
+  const seedToolMessage = (name: DataToolName) =>
+    useGenStore.setState({
+      messages: [{ id: 'a1', role: 'assistant', status: 'done', steps: [{ kind: 'tool', name, args: {} }] }],
+    });
+
+  it('chip "Đã tra …" lấy tên Kho thật từ máy chủ ngay cả khi cache thẻ Gen-hub còn trống (mở lại hội thoại, không có câu chào)', async () => {
+    hubLink = { configured: true, enabled: true, kho_label: 'Kho Heo' };
+    queryClient.setQueryData(qk.me, { ...ME, permissions: { 'system.read': 'all' } });
+    seedToolMessage('hub.kho_search');
+    wrap(<GenPanel userId="u1" />);
+    await waitFor(() => expect(screen.getByText(/Đã tra Kho Heo \(Gen-hub\)/)).toBeInTheDocument());
+    expect(calls.filter((c) => c.url.endsWith('/hub/link'))).toHaveLength(1);
+  });
+
+  it('chip tool không nhắc tên Kho (vd "Hôm nay") không gọi /hub/link; người không có system.read cũng không gọi', async () => {
+    hubLink = { configured: true, enabled: true, kho_label: 'Kho Heo' };
+    queryClient.setQueryData(qk.me, { ...ME, permissions: { 'system.read': 'all' } });
+    seedToolMessage('overview.summary');
+    wrap(<GenPanel userId="u1" />);
+    expect(await screen.findByText(/Đã tra Hôm nay/)).toBeInTheDocument();
+    cleanup();
+    queryClient.setQueryData(qk.me, { ...ME, permissions: {} });
+    seedToolMessage('hub.kho_search');
+    wrap(<GenPanel userId="u1" />);
+    expect(await screen.findByText(/Đã tra Kho dữ liệu \(Gen-hub\)/)).toBeInTheDocument();
+    expect(calls.some((c) => c.url.endsWith('/hub/link'))).toBe(false);
   });
 
   it('hides the toggle when Gen is off for this user', () => {

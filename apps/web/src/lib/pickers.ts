@@ -25,8 +25,8 @@ export const EMPTY_USERS_TEXT = 'Chưa có người dùng nào khác — mời t
 export const EMPTY_USERS_TEXT_ASK = 'Chưa có người dùng nào khác — nhờ Owner mời thêm người dùng';
 /** Danh sách người bị cắt ở trần của API (`truncated: true`) — báo rõ thay vì im lặng thiếu người. */
 export const TRUNCATED_USERS_TEXT = 'Chỉ hiện 500 người đầu theo tên — người cần tìm có thể nằm ngoài danh sách này';
-export const EMPTY_AGENTS_TEXT = 'Chưa có trợ lý nào đang bật — tạo ở Agent & Model › Danh tính Agent';
-export const EMPTY_AGENTS_TEXT_ASK = 'Chưa có trợ lý nào đang bật — nhờ Owner tạo ở Agent & Model › Danh tính Agent';
+export const EMPTY_AGENTS_TEXT = 'Chưa có trợ lý nào đang bật — tạo ở màn Danh tính Agent';
+export const EMPTY_AGENTS_TEXT_ASK = 'Chưa có trợ lý nào đang bật — nhờ Owner tạo ở màn Danh tính Agent';
 
 /** Câu gợi ý khi không có người nào khác: mời người dùng cần `roles.manage` (apps/api/gh/auth/users.py). */
 export function useEmptyUsersText(): string {

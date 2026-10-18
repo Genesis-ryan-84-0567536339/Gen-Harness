@@ -9,14 +9,14 @@ import { qk } from '../lib/queries';
 import { AI_SOURCE_PATH } from '../setup/steps';
 
 /** Mô tả chung: thao tác nhà cung cấp AI nào cần phiên PIN `ai.route_change` (v0.1.35, F-20). */
-export const PIN_ROUTE_CHANGE_TITLE = 'cần mã PIN 6 số (bật/tắt, thêm/sửa/xoá nhà cung cấp AI, khoá API, chuỗi chuyển hướng)';
+export const PIN_ROUTE_CHANGE_TITLE = 'cần mã PIN 6 số (bật/tắt, thêm/sửa/xoá nhà cung cấp AI, model, khoá API, chuỗi chuyển hướng)';
 
-/** v0.1.35 (F-20): thêm / sửa / bật-tắt nhà cung cấp AI, khoá API, chuỗi chuyển hướng cần phiên PIN `ai.route_change`
+/** v0.1.35 (F-20): thêm / sửa / bật-tắt nhà cung cấp AI (v0.1.70: cả model của nguồn), khoá API, chuỗi chuyển hướng cần phiên PIN `ai.route_change`
  * — hộp PIN tự mở khi máy chủ trả 423 (lib/api.ts + PinDialogHost); ở đây chỉ báo trước. Dùng chung cho Agent & Model
  * thẻ Jev (Điều khiển hệ thống) và Hướng dẫn bước 4 — một nguồn chữ duy nhất. */
 export function PinHint({
   text = 'Cần mã PIN 6 số',
-  title = 'Thêm / sửa / xoá nhà cung cấp AI, khoá API, chuỗi chuyển hướng cần mã PIN',
+  title = 'Thêm / sửa / xoá nhà cung cấp AI, model, khoá API, chuỗi chuyển hướng cần mã PIN',
 }: {
   /** v0.1.45: chữ hiển thị cho thao tác khác (agent, tài khoản CLI, Hướng dẫn sau Hoàn tất). */
   text?: string;

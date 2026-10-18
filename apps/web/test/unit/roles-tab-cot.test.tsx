@@ -34,7 +34,7 @@ function page(over: { manager?: Record<string, PermScope>; auditor?: Record<stri
     columns: COLUMNS,
     roles: [
       { code: 'owner', name: 'Owner — Sếp', meta: 'thấy toàn cảnh', permissions: fill('all') },
-      { code: 'manager', name: 'Quản lý', meta: 'thấy team mình', permissions: fill('team', over.manager) },
+      { code: 'manager', name: 'Quản lý', meta: 'thấy việc được giao', permissions: fill('team', over.manager) },
       { code: 'auditor', name: 'Kiểm soát', meta: 'xem, không hành động', permissions: fill('none', { 'queue.read': 'all', 'audit.read': 'all', ...over.auditor }) },
     ],
   } as PermissionsPage;
@@ -105,10 +105,12 @@ describe('Quyền hạn › ô ma trận là của cả cột (trừ Soạn nhá
     const draft = (await screen.findByLabelText('Quản lý · Hành động · Soạn nháp')) as HTMLSelectElement;
     expect(draft.value).toBe('assigned');
     expect((screen.getByLabelText('Quản lý · Hành động · Duyệt & gửi ra ngoài') as HTMLSelectElement).value).toBe('none');
-    await user.selectOptions(draft, 'team');
+    // v0.1.69 (F096): mức "Việc được giao" (team) không còn mời chọn mới khi chưa có tính năng Nhóm ⇒ đổi sang "Tất cả".
+    expect(within(draft).queryByRole('option', { name: 'Việc được giao' })).toBeNull();
+    await user.selectOptions(draft, 'all');
     await waitFor(() => expect(patches(calls)).toHaveLength(1));
-    expect(patches(calls)).toEqual([{ role: 'manager', permission: 'action.draft', scope: 'team' }]);   // KHÔNG có action.approve
-    await waitFor(() => expect((screen.getByLabelText('Quản lý · Hành động · Soạn nháp') as HTMLSelectElement).value).toBe('team'));
+    expect(patches(calls)).toEqual([{ role: 'manager', permission: 'action.draft', scope: 'all' }]);   // KHÔNG có action.approve
+    await waitFor(() => expect((screen.getByLabelText('Quản lý · Hành động · Soạn nháp') as HTMLSelectElement).value).toBe('all'));
     expect((screen.getByLabelText('Quản lý · Hành động · Duyệt & gửi ra ngoài') as HTMLSelectElement).value).toBe('none');
   });
 
@@ -142,7 +144,7 @@ describe('Quyền hạn › ô ma trận là của cả cột (trừ Soạn nhá
     const warn = screen.getByTestId('roles-mixed');
     expect(warn).toHaveAttribute('title', expect.stringContaining('đang khác mức'));
     expect(warn).toHaveTextContent('sửa không');
-    expect(warn).toHaveTextContent('xem theo team');
+    expect(warn).toHaveTextContent('xem việc được giao');
     await user.selectOptions(select, 'none');
     await waitFor(() => expect(patches(calls)).toHaveLength(2)); // people_review.write đã none
     expect(patches(calls).map((p) => p?.permission)).toEqual(['people_review.read', 'care.read']);

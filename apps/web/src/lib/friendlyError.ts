@@ -32,7 +32,7 @@ const RULES: Array<[RegExp, string]> = [
 /** Dấu hiệu chuỗi là lỗi kỹ thuật (tiếng Anh / mã lỗi) chứ không phải câu đã viết cho người dùng. */
 const TECHNICAL = /[[\]{}]|errno|exception|traceback|error:|http\s?\d{3}|\b[a-z]+error\b|failed|refused|not found|https?:\/\//i;
 
-export const MODEL_UNAVAILABLE_TEXT = 'Chưa có model AI hoạt động — chọn hoặc sửa model ở Agent & Model (Hướng dẫn bước 4).';
+export const MODEL_UNAVAILABLE_TEXT = 'Chưa có model AI hoạt động — chọn hoặc sửa model ở API & Model (Hướng dẫn bước 4).';
 
 /** v0.1.67 (F011): ĐÃ có model nhưng lượt gọi lỗi (hết hạn mức, mạng) — không bảo Sếp chọn lại model. */
 export const MODEL_DOWN_TEXT = 'Nguồn AI đang lỗi hoặc hết hạn mức — thử lại sau ít phút (không cần chọn lại model).';

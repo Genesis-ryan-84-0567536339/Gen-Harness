@@ -154,13 +154,13 @@ export function hubWriteLine(has: boolean): string {
 /** Chưa có quyền ghi Kho ⇒ hướng dẫn tick (không bắt buộc: không tick Gen vẫn đọc Kho bình thường); đã có ⇒ null. */
 export function hubWriteHint(has: boolean): string | null {
   if (has) return null;
-  return 'Muốn Gen ghi được Kho: vào Gen-hub tick quyền kho_create, kho_update cho token của Gen-Harness rồi bấm Kiểm tra lại. Không tick cũng được — Gen vẫn đọc Kho bình thường.';
+  return 'Muốn Gen ghi được Kho: vào Gen-hub tick quyền ghi Kho (tạo và sửa bản ghi — tên trong Gen-hub: kho_create, kho_update) cho token của Gen-Harness rồi bấm Kiểm tra lại. Không tick cũng được — Gen vẫn đọc Kho bình thường.';
 }
 
 /** Dòng 9 "Gen ghi Kho" (không bắt buộc, không có nút kiểm): 2 bước để máy chủ ghi 'pass' sau lần ghi Kho thật đầu tiên. */
 export const KHO_WRITE_STEPS: readonly string[] = [
-  'Trong Gen-hub, tick quyền kho_create, kho_update cho token của Gen-Harness rồi bấm Kiểm tra ở dòng 1 (hoặc Kết nối › Gen-hub)',
-  'Duyệt đề xuất PHIEN đầu tiên của Gen (Gen đề xuất ghi Phiên mỗi bản phát hành): bấm Xác nhận và ghi Kho, nhập mã PIN, đợi “Đã ghi vào Kho: PHIEN-…”',
+  'Trong Gen-hub, tick quyền ghi Kho (tạo và sửa bản ghi — tên trong Gen-hub: kho_create, kho_update) cho token của Gen-Harness rồi bấm Kiểm tra ở dòng 1 (hoặc Kết nối › Gen-hub)',
+  'Duyệt đề xuất ghi Phiên đầu tiên của Gen (Gen đề xuất ghi Phiên mỗi bản phát hành): bấm Xác nhận và ghi Kho, nhập mã PIN, đợi câu “Đã ghi vào Kho” kèm mã của Phiên vừa tạo',
 ];
 
 /** Dòng 8 (không bắt buộc): các bước thử gửi một câu trả lời bình luận thật bằng Gen. */

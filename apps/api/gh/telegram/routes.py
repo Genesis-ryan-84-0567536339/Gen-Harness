@@ -97,7 +97,7 @@ async def delete_telegram(request: Request, _m: service.CurrentUser = Depends(MA
                           _p: service.CurrentUser = Depends(require_pin("notify.change")),
                           db: AsyncSession = DB) -> dict[str, Any]:
     row = await tsvc.get_config(db, user.org_id)
-    await tsvc.delete_config(db, user.org_id)
+    await tsvc.delete_config(db, user.org_id, redis=request.app.state.redis)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="notify.telegram.delete", target_type="notify_channel", target_id="telegram",
                            target_label=row.bot_username if row else None,
@@ -188,7 +188,8 @@ async def find_chat(request: Request, body: FindChatIn | None = None, _m: servic
 
 async def run_test(request: Request, db: AsyncSession, user: service.CurrentUser) -> dict[str, Any]:
     """Dùng chung cho POST /notify/telegram/test và POST /boss-checks/telegram/run."""
-    rec, detail = await tsvc.run_test(db, user.org_id, user.id, client=client(request))
+    rec, detail = await tsvc.run_test(db, user.org_id, user.id, client=client(request),
+                                      redis=request.app.state.redis)
     host_requested = tsvc.request_host_test() if rec.get("error_code") != tsvc.NOT_CONFIGURED else False
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="notify.telegram.test", target_type="notify_channel", target_id="telegram",

@@ -15,6 +15,7 @@ import { GenCoachCard } from './GenCoachCard';
 import { AiBudgetCard } from './AiBudgetCard';
 import { useCan } from '../../lib/permissions';
 import { StandardModeStrip } from '../../defaults/StandardModeStrip';
+import { AI_SOURCE_PATH } from '../../setup/steps';
 
 /**
  * Bộ não AI — góc nhìn vận hành hệ thống (PLAN 4.5): hạn mức theo model, chuỗi chuyển hướng, tài khoản CLI
@@ -40,6 +41,7 @@ export function BrainTab() {
 
 export function BrainTabBody() {
   const providers = useProviders();
+  const canManage = useCan('system.manage');
   const qc = useQueryClient();
   const hash = useLocation().hash;
   const jevHash = hash === '#jev';
@@ -109,7 +111,21 @@ export function BrainTabBody() {
         ) : providers.isError ? (
           <CardError error={providers.error} onRetry={() => void providers.refetch()} retrying={providers.isFetching} />
         ) : models.length === 0 ? (
-          <EmptyState icon="ph ph-brain" title="Chưa có model nào" description="Thêm nhà cung cấp và model ở màn API & Model." />
+          // v0.1.70 (F029): MỘT đường tới "thêm nguồn AI" (cùng `readiness.FIX_AI` của máy chủ) — màn Thiết lập nguồn AI;
+          // "Mở API & Model" ở đầu thẻ là đích khi nguồn có nhưng đang tắt (`readiness.FIX_API`).
+          <EmptyState
+            icon="ph ph-brain"
+            title="Chưa có model nào"
+            description="Thêm nguồn AI (dán khoá API hoặc đăng nhập Google / Claude) ở màn Thiết lập nguồn AI."
+            action={
+              canManage ? (
+                <Link to={AI_SOURCE_PATH} className="gh-btn gh-btn--secondary btn-27" data-testid="brain-add-source">
+                  <Icon name="ph ph-plus-circle" size={13} />
+                  Thêm / kiểm tra nguồn AI
+                </Link>
+              ) : undefined
+            }
+          />
         ) : (
           <table className="brain-quota">
             <thead>

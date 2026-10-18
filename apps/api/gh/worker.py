@@ -145,7 +145,7 @@ async def _job_timeout_alert(ctx: dict[str, Any], name: str, *, open_: bool) -> 
                     body="Hệ thống vẫn chạy; việc này sẽ thử lại ở lượt sau. Nếu còn lặp lại, mở Sức khoẻ hệ thống.",
                     link=health.HEALTH_LINK, fingerprint=str(TIMEOUT_ALERT_AFTER), redis=ctx.get("redis"))
             else:
-                await health.clear(db, org, key)
+                await health.clear(db, org, key, redis=ctx.get("redis"))
         await db.commit()
 
 
@@ -276,7 +276,13 @@ async def verify_action_log(ctx: dict[str, Any]) -> dict[str, Any]:
             await actionlog.record(db, org_id=org, actor_type="system", actor_id="system:worker",
                                    action="audit.chain_verified", result="ok" if report.ok else "failed",
                                    detail={"checked": report.checked, "broken_at": report.broken_at})
-            if not report.ok:
+            # v0.1.69 (F104): chuỗi đã đứt thì đêm nào cũng đứt ở cùng một dòng — chỉ báo khi chưa có cảnh báo MỞ
+            # (open/acknowledged) cho đúng dòng đứt đó; Owner xử lý xong (resolved/dismissed) mà vẫn đứt thì báo lại.
+            if not report.ok and not (await db.execute(text("""
+                    SELECT EXISTS (SELECT 1 FROM biz.alerts
+                    WHERE org_id = :o AND alert_type = 'data_conflict' AND subject_type = 'action_log'
+                      AND status IN ('open', 'acknowledged') AND evidence -> 0 ->> 'id' = CAST(:b AS text))"""),
+                                                {"o": org, "b": report.broken_at})).scalar_one():
                 code = (await db.execute(text("SELECT core.next_code('ALR')"))).scalar_one()
                 await db.execute(text("""
                     INSERT INTO biz.alerts (org_id, code, alert_type, priority, recipient_user_id, subject_type,

@@ -295,8 +295,8 @@ export function createMock(opts: P3Options) {
   let jevKey = !opts.fresh;
   const skipped = opts.fresh ? [] : seedSkipped();
   const keyMissing = (problem: P2Ctx['problem']) =>
-    problem(409, 'JEV_KEY_MISSING', 'Chưa có khóa OpenRouter cho Jev', {
-      reasons: ['Không có nguồn model kind=system_one đang bật kèm khóa (agent.providers / agent.provider_keys).'],
+    problem(409, 'JEV_KEY_MISSING', 'Chưa có khoá OpenRouter cho Jev', {
+      reasons: ['Không có nguồn model kind=system_one đang bật kèm khoá (agent.providers / agent.provider_keys).'],
     });
   const isJunk = (r: InboxRow) => !!r.triage && (r.triage.spam || !!r.triage.duplicate_of || r.triage.score < triage.min_score);
 
@@ -378,7 +378,7 @@ export function createMock(opts: P3Options) {
       if (ctx.needPin()) return problem(423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN');
       const b = body as { use_existing_openrouter?: boolean; key?: string };
       const pasted = typeof b.key === 'string' ? b.key.trim() : '';
-      if (b.use_existing_openrouter && pasted) return problem(422, 'VALIDATION', 'Dữ liệu chưa hợp lệ', { errors: { key: 'Chọn một: dùng khóa OpenRouter đang có hoặc dán khóa mới, không cả hai' } });
+      if (b.use_existing_openrouter && pasted) return problem(422, 'VALIDATION', 'Dữ liệu chưa hợp lệ', { errors: { key: 'Chọn một: dùng khoá OpenRouter đang có hoặc dán khoá mới, không cả hai' } });
       if (!b.use_existing_openrouter && pasted.length < 8 && !jevKey) return keyMissing(problem);
       const created = !jevKey;
       jevKey = true;
