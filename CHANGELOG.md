@@ -7,6 +7,11 @@ Ngày = ngày Release trên GitHub theo giờ Việt Nam; tiêu đề trong `doc
 (v0.1.32–v0.1.34, v0.1.40, v0.1.46) hoặc vài ngày (v0.1.47, v0.1.48: làm 03/10, phát hành 09/10).
 Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) ghi ở [ROADMAP › Bản phản ứng](docs/ROADMAP.md).
 
+## v0.1.72 — Bot quản trị 1-1: tài khoản riêng của bot, kênh quản trị, Sếp gọi bot ở nhóm, Chế độ hỗ trợ (18/10/2026)
+- **Bản tính năng trên v0.1.71, migration `0042`.** Ngoại lệ hẹp của luật cứng (Sếp duyệt 18/10): khi kênh Zalo/WhatsApp chạy bằng **tài khoản riêng của bot**, bot được tự gửi, không qua PIN, trong ĐÚNG ba trường hợp qua một cửa `send_auto`: trả lời/báo Sếp ở kênh quản trị 1-1 (ghép bằng mã 6 số), trả lời tại chỗ khi chính Sếp tag bot ở nhóm, trả lời thành viên nhóm đã bật Chế độ hỗ trợ (sau bộ lọc an toàn, model chạy trong hộp agy).
+- Bot chỉ nhắn Sếp khi có sự kiện đặc biệt (không báo cáo định kỳ). Có sổ `ops.auto_sends` (không lưu nội dung tin), thẻ «Kênh quản trị», công tắc hỗ trợ + cột «Ai thêm bot» trên Console; test AST chứng minh không có đường gửi thứ tư.
+- **Việc Boss làm** (tất cả tuỳ chọn, mặc định bot không tự gửi gì): nối tài khoản riêng cho bot, đánh dấu «Tài khoản riêng của bot», ghép kênh quản trị. Chi tiết: [docs/releases/v0.1.72.md](docs/releases/v0.1.72.md).
+
 ## v0.1.71 — Sửa lỗi tìm thấy khi giả lập toàn luồng (18/10/2026)
 - **Bản vá nằm trên v0.1.70**, từ báo cáo giả lập toàn luồng: 3 lỗi P2 + 12 lỗi P3, mỗi lỗi kiểm lại trên mã trước khi sửa (cả 15 đều đúng), mỗi lỗi một commit có test đỏ trước xanh sau. Không migration (head vẫn `0041`), không thêm tính năng gửi tin tự động.
 - **THAY ĐỔI QUYỀN**: «Quyền xem» của nhóm (Chỉ Sếp / Sếp + quản lý / Mọi thành viên) nay **thật sự ẩn** nội dung nhóm với vai khác ở Hộp thư, Kho thô / sạch, Nhật ký lắng nghe, hồ sơ, tìm kiếm, việc, cơ hội, tài liệu, WebSocket và Gen nhân viên — nhóm «Chỉ Sếp» (mặc định) cần Sếp mở cho nhân viên nếu họ cần xem. Cảnh báo P1 nay rung chuông Owner.
