@@ -308,16 +308,29 @@ async def record_reject(
         )
 
 
+#: Cửa sổ TRƯỢT 60 giây: giữ mốc thời gian (ms) của các lệnh đã được nhận trong zset; kiểm + thêm trong MỘT lệnh Lua
+#: (nguyên tử, không lệch giữa hai tiến trình). Lệnh bị từ chối KHÔNG được ghi ⇒ bị chặn không kéo dài thời gian khoá.
+_RATE_LUA = """
+local key, now, window, limit = KEYS[1], tonumber(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3])
+redis.call('ZREMRANGEBYSCORE', key, '-inf', now - window)
+if redis.call('ZCARD', key) >= limit then return 0 end
+redis.call('ZADD', key, now, ARGV[4])
+redis.call('PEXPIRE', key, window * 2)
+return 1
+"""
+RATE_WINDOW_MS = 60_000
+
+
 async def rate_ok(redis: Any, org_id: uuid.UUID, now: datetime | None = None) -> bool:
-    """Tối đa `RATE_PER_MIN` lệnh/phút/tổ chức."""
+    """Tối đa `RATE_PER_MIN` lệnh trong BẤT KỲ 60 giây liền kề/tổ chức (cửa sổ trượt, không theo phút đồng hồ — cửa sổ
+    cố định cho lọt 2×20 lệnh quanh ranh giới phút). Lệnh ở đúng mốc `now - 60s` đã ra khỏi cửa sổ."""
     if redis is None:
         return True
-    minute = int((now or datetime.now(UTC)).timestamp() // 60)
-    key = f"gh:tg:rate:{org_id}:{minute}"
-    n = int(await redis.incr(key))
-    if n == 1:
-        await redis.expire(key, 120)
-    return n <= RATE_PER_MIN
+    now_ms = int((now or datetime.now(UTC)).timestamp() * 1000)
+    ok = await redis.eval(
+        _RATE_LUA, 1, f"gh:tg:rate:{org_id}", now_ms, RATE_WINDOW_MS, RATE_PER_MIN, f"{now_ms}:{uuid.uuid4().hex[:12]}"
+    )
+    return int(ok) == 1
 
 
 # ─── ghép tài khoản ──────────────────────────────────────────────────────────
