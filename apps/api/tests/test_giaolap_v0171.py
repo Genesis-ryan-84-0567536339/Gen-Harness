@@ -185,6 +185,14 @@ async def test_care_ignores_staff_messages(app, db) -> None:  # type: ignore[no-
     assert {w["lan1"], w["lan2"], w["binh"]} <= ids
 
 
+# ─── P3-7 — thẻ «Khách chưa ai trả lời» đếm KHÁCH, không đếm tin ──────────────────────────────────────────────────────
+
+async def test_care_unattended_counts_customers_not_messages(app, db, owner_api) -> None:  # type: ignore[no-untyped-def]
+    await _care_world(db)
+    body = (await owner_api.get("/care/response-times")).json()
+    assert body["unattended"] == 2                    # 2 KHÁCH (Lan 2 tin, Bình 1 tin), không phải 3 tin
+
+
 # ─── P3-4 — chưa có bộ ghi lời hứa: không nói «không có lời hứa bị vỡ» ────────────────
 
 def test_care_scenario_note_does_not_claim_no_broken_promises_while_untracked() -> None:
