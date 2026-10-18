@@ -79,6 +79,23 @@ def person_or_group_scope_sql(sc: Scope, person_col: str, group_col: str) -> tup
 _DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})")
 
 
+def supply_line(item: str, quantity: Any, unit: Any, value_vnd: Any, location: Any) -> str:
+    """Một dòng mô tả nguồn cung cho bản nháp «Giới thiệu nguồn cung»: tên hàng + số lượng + giá + khu vực CÓ trong tín
+    hiệu (thiếu thì bỏ, không bịa). Ví dụ «Thép cuộn — 4 container, 1.100.000.000 đồng, tại Hà Nội»."""
+    parts: list[str] = []
+    q = num_or_none(quantity)
+    if q is not None and q > 0:
+        qty = f"{int(q)}" if q == int(q) else f"{q:g}".replace(".", ",")
+        parts.append(f"{qty} {str(unit).strip()}".strip() if unit else qty)
+    v = num_or_none(value_vnd)
+    if v is not None and v > 0:
+        parts.append(f"{int(v):,}".replace(",", ".") + " đồng")
+    loc = str(location).strip() if location else ""
+    if loc:
+        parts.append(f"tại {loc}")
+    return f"{item} — {', '.join(parts)}" if parts else str(item)
+
+
 def parse_needed_by(value: Any) -> date | None:
     """`entities.deadline` là văn bản tự do (LLM trích) — chỉ nhận khi đã ở dạng `YYYY-MM-DD…`; văn bản khác
     (vd "cuối tháng sau") không tự suy diễn ngày, để trống còn hơn đoán sai (quyết định tự đưa ra)."""

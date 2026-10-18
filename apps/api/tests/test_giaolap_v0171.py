@@ -217,6 +217,21 @@ async def test_own_channel_account_is_not_a_stranger(app, db) -> None:  # type: 
     assert got == "direct"
 
 
+# ─── P3-13 — nháp «Giới thiệu nguồn cung» nêu số lượng / giá / khu vực có trong tín hiệu ─────────────────────────────
+
+async def test_introduce_draft_names_quantity_price_and_area(world, owner_api, db) -> None:  # type: ignore[no-untyped-def]
+    from gh.biz.market.jobs import recompute_matches_org
+
+    await recompute_matches_org(db, world["org"])
+    await db.commit()
+    match_id = (await owner_api.get("/matches")).json()["items"][0]["id"]
+    body = (await owner_api.send("POST", f"/matches/{match_id}/introduce", {})).json()
+    d = (await owner_api.get(f"/drafts/{body['draft']['id']}")).json()
+    text_body = d["body"]["text"] if "body" in d else d["text"]
+    assert "Thép cuộn" in text_body
+    assert "4 container" in text_body and "1.100.000.000 đồng" in text_body and "Hà Nội" in text_body, text_body
+
+
 # ─── P3-6 — «Chăm sóc khách»: tin của nhân viên không phải «tin cần trả lời» ──────────────────────────────────────────
 
 async def _care_world(db: Any) -> dict[str, Any]:

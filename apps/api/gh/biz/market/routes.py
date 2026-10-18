@@ -371,6 +371,7 @@ SELECT m.id, m.score, m.reasons, m.status, m.opportunity_id, m.created_at, m.upd
        dp.id AS dp_id, dp.code AS dp_code, dp.display_name AS dp_name,
        dg.id AS dg_id, dg.code AS dg_code, dg.name AS dg_name,
        s.id AS s_id, s.item AS s_item, s.person_id AS s_person_id, s.group_id AS s_group_id,
+       s.quantity AS s_quantity, s.unit AS s_unit, s.value_vnd AS s_value_vnd, s.location AS s_location,
        sp.id AS sp_id, sp.code AS sp_code, sp.display_name AS sp_name,
        sg.id AS sg_id, sg.code AS sg_code, sg.name AS sg_name
 FROM biz.matches m
@@ -493,7 +494,8 @@ async def introduce_match(match_id: uuid.UUID, user: service.CurrentUser = Depen
                                  {"p": person_id})).one_or_none()
         if chan is not None:
             target = Target(channel=chan.channel, thread_type="user", person_id=person_id)
-    text_body = (f"Chào anh/chị, bên em có nguồn cung phù hợp với nhu cầu \"{r.d_item}\":\n\n{r.s_item}\n\n"
+    offer = msvc.supply_line(r.s_item, r.s_quantity, r.s_unit, r.s_value_vnd, r.s_location)
+    text_body = (f"Chào anh/chị, bên em có nguồn cung phù hợp với nhu cầu \"{r.d_item}\":\n\n{offer}\n\n"
                 f"Anh/chị có muốn em gửi thêm chi tiết không ạ?")
     sources = [{"label": f"Tín hiệu cầu · {r.d_item}", "ref": {"type": "opportunity", "id": str(opp_id)}}]
     result = await create_draft(db, org_id=user.org_id, kind="message" if target else "report",
