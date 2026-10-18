@@ -112,6 +112,27 @@ def unit_ids_of(refs: list[dict[str, Any]] | None) -> list[uuid.UUID]:
     return out
 
 
+async def evidence_unit_ids(db: AsyncSession, org_id: uuid.UUID, refs: list[dict[str, Any]] | None) -> list[uuid.UUID]:
+    """Như `unit_ids_of` nhưng hiểu cả chứng cứ loại `raw` (v0.1.71): cảnh báo «Phản hồi chậm» gắn thẳng tin bị bỏ quên
+    (`{"type": "raw", "id": …}`) ⇒ đổi sang các đơn vị ý nghĩa trích dẫn tin đó để lộ ra câu chữ và trích dẫn."""
+    ids = unit_ids_of(refs)
+    raws: list[uuid.UUID] = []
+    for ref in refs or []:
+        if isinstance(ref, dict) and ref.get("type") == "raw":
+            try:
+                raws.append(uuid.UUID(str(ref["id"])))
+            except (KeyError, ValueError):
+                continue
+    if raws:
+        rows = (await db.execute(text("""
+            SELECT DISTINCT ev.meaning_unit_id FROM clean.evidence ev
+            JOIN clean.meaning_units u ON u.id = ev.meaning_unit_id AND u.observed_at = ev.meaning_observed_at
+            WHERE ev.raw_event_id = ANY(:r) AND u.org_id = :o AND u.superseded_by IS NULL"""),
+            {"r": raws, "o": org_id})).scalars().all()
+        ids.extend(rows)
+    return list(dict.fromkeys(ids))
+
+
 async def _group_view_ok(db: AsyncSession, sc: Scope, group_id: Any) -> bool:
     """«Quyền xem» của nhóm (v0.1.71) có cho vai của `sc` đọc nội dung nhóm này không."""
     if group_id is None or sc.role == rbac.OWNER:
@@ -250,7 +271,8 @@ async def _alert(db: AsyncSession, user: service.CurrentUser, sc: Scope, id: str
         raise not_found("Cảnh báo")
     owner = user.role_code == rbac.OWNER
     return payload("alert", id, f"{r.code} · {mask_text(r.title, owner)}", f"Ưu tiên {r.priority}",
-                   method="rule", units=await units_payload(db, unit_ids_of(r.evidence), viewer=user))
+                   method="rule", units=await units_payload(db, await evidence_unit_ids(db, user.org_id, r.evidence),
+                                             viewer=user))
 
 
 async def _draft(db: AsyncSession, user: service.CurrentUser, sc: Scope, id: str) -> dict[str, Any]:
@@ -273,7 +295,8 @@ async def _draft(db: AsyncSession, user: service.CurrentUser, sc: Scope, id: str
                                  {"d": did})).scalar_one_or_none()
     refs = [s.get("ref") for s in (r.sources or []) if isinstance(s, dict)] + list(decision or [])
     return payload("draft", id, f"{r.code} · {r.title or ''}", "Dữ liệu agent đã dùng", method="agent",
-                   units=await units_payload(db, unit_ids_of([x for x in refs if x]), viewer=user))
+                   units=await units_payload(db, await evidence_unit_ids(db, user.org_id, [x for x in refs if x]),
+                                             viewer=user))
 
 
 async def raw_evidence(db: AsyncSession, user: service.CurrentUser, raw_id: uuid.UUID) -> dict[str, Any]:

@@ -223,7 +223,8 @@ async def get_inbox_item(item_id: uuid.UUID, user: service.CurrentUser = Depends
         payload["units"] = await explain.units_payload(db, [item_id], viewer=user)
     elif r.item_type == "alert":
         ev = (await db.execute(text("SELECT evidence FROM biz.alerts WHERE id = :i"), {"i": item_id})).scalar_one()
-        payload["units"] = await explain.units_payload(db, explain.unit_ids_of(ev), viewer=user)
+        payload["units"] = await explain.units_payload(
+            db, await explain.evidence_unit_ids(db, user.org_id, ev), viewer=user)
         payload["status"] = r.alert_status
     elif r.item_type == "draft":
         payload["status"] = r.draft_status
