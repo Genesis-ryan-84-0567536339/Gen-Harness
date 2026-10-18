@@ -128,7 +128,7 @@ async def handle_owner_ping(db: AsyncSession, org_id: uuid.UUID, p: dict[str, An
     await reports.enqueue(
         db, org_id, ch, kind="ask", severity="important", dedupe_key=f"owner_ping:{g.id}:{hour}",
         text_=(f"Sếp gọi em ở nhóm «{str(g.name)[:80]}» nhưng nhóm đang không nghe nên em chưa đọc được. "
-               f"Gõ /nghe {q.short_code} để bật nghe im lặng, /bo {q.short_code} để giữ không nghe."))
+               f"Gõ /nghe {q.short_code} (bật Lắng nghe im lặng), /bo {q.short_code} để giữ không nghe."))
     return True
 
 
