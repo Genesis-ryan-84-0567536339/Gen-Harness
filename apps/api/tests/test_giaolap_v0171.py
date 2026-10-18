@@ -195,6 +195,28 @@ async def test_p2_alert_does_not_ring_the_bell(app, db, redis, owner_api) -> Non
     assert (await db.execute(text("SELECT count(*) FROM core.notifications WHERE kind = 'alert.p1'"))).scalar_one() == 0
 
 
+# ─── P3-12 — tài khoản kênh của chính Sếp không thành «Người lạ có tín hiệu» ──────────────────────────────────────────
+
+async def test_own_channel_account_is_not_a_stranger(app, db) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    await listen(db, org, "g1")
+    await put(sessionmaker(), org, msg("Dạ em gửi báo giá", sender="own-zalo", name="Sếp") | {"direction": "outbound"},
+              msg("Giá thép bao nhiêu", sender="khach1", name="Chị Lan"))
+    rel = dict((await db.execute(text("""SELECT pi.external_id, p.relation_to_owner FROM core.persons p
+                                         JOIN core.person_identities pi ON pi.person_id = p.id"""))).all())
+    assert rel == {"own-zalo": "staff", "khach1": "stranger"}
+    # Sếp đã tự chọn «Liên quan Sếp» thì tin đi sau đó không ghi đè
+    await db.execute(text("""UPDATE core.persons SET relation_to_owner = 'direct'
+                             WHERE id IN (SELECT person_id FROM core.person_identities
+                                          WHERE external_id = 'own-zalo')"""))
+    await db.commit()
+    await put(sessionmaker(), org, msg("Dạ", sender="own-zalo", name="Sếp") | {"direction": "outbound"})
+    got = (await db.execute(text("""SELECT p.relation_to_owner FROM core.persons p
+                                    JOIN core.person_identities pi ON pi.person_id = p.id
+                                    WHERE pi.external_id = 'own-zalo'"""))).scalar_one()
+    assert got == "direct"
+
+
 # ─── P3-6 — «Chăm sóc khách»: tin của nhân viên không phải «tin cần trả lời» ──────────────────────────────────────────
 
 async def _care_world(db: Any) -> dict[str, Any]:

@@ -275,6 +275,12 @@ async def ingest_message(db: AsyncSession, org_id: uuid.UUID, p: dict[str, Any])
         text("SELECT 1 FROM core.person_identities WHERE channel_id = :c AND external_id = :x"),
         {"c": channel.id, "x": sender})).first() is None)
     identity = await upsert_identity(db, org_id, channel, sender, p.get("sender_name"), p.get("sender_phone"))
+    if p.get("direction") == "outbound":
+        # v0.1.71 (P3-12): người gửi TIN ĐI là chính tài khoản kênh của Sếp / bot — không phải «Người lạ có tín hiệu».
+        # Chỉ đổi khi vẫn là giá trị mặc định do hệ thống tự tạo (Sếp đã tự chọn «Liên quan Sếp» thì giữ nguyên).
+        await db.execute(text("""UPDATE core.persons SET relation_to_owner = 'staff', updated_at = now()
+                                 WHERE id = :p AND relation_to_owner = 'stranger' AND attrs->>'auto' = 'true'"""),
+                         {"p": identity.person_id})
     if group is not None:
         await _member(db, group.id, identity.person_id)
 
