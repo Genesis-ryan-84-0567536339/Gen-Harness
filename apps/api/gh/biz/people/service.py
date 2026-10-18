@@ -69,6 +69,8 @@ WITH inbound AS (
   LEFT JOIN core.persons cp ON cp.id = cpi.person_id AND cp.deleted_at IS NULL AND cp.merged_into_id IS NULL
   WHERE ch.org_id = :o AND e.direction = 'inbound' AND e.occurred_at >= :df AND e.occurred_at <= :dt
     AND e.kind <> ALL(ARRAY{list(NO_REPLY_KINDS)!r}::text[])
+    -- v0.1.71 (P3-6): tin của NHÂN VIÊN trong nhóm không phải «tin cần trả lời» (như `_scan_slow_response`)
+    AND COALESCE(cp.person_type, '') <> 'staff'
 ),
 paired AS (
   SELECT i.id, i.occurred_at AS asked_at, i.customer_id, o.occurred_at AS replied_at, o.staff_id

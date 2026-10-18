@@ -156,6 +156,35 @@ async def test_outbound_messages_do_not_create_market_signals_or_opportunities(a
     assert sig == ["Chị Lan"] and opp == ["Chị Lan"], (sig, opp)      # chỉ khách thật, không có «Sếp»
 
 
+# ─── P3-6 — «Chăm sóc khách»: tin của nhân viên không phải «tin cần trả lời» ──────────────────────────────────────────
+
+async def _care_world(db: Any) -> dict[str, Any]:
+    org = await org_id(db)
+    await listen(db, org, "g1")
+    sm = sessionmaker()
+    lan1, lan2, binh, nv = await put(
+        sm, org,
+        {**msg("Giá thép cuộn?", sender="khach-lan", name="Chị Lan"), "occurred_at": ts(5)},
+        {**msg("Có hàng không em?", sender="khach-lan", name="Chị Lan"), "occurred_at": ts(4)},
+        {**msg("Báo giá giúp anh", sender="khach-binh", name="Anh Bình"), "occurred_at": ts(4)},
+        {**msg("Anh sẽ gọi lại khách", sender="nhan-vien", name="Em Nam"), "occurred_at": ts(3)})
+    await db.execute(text("UPDATE core.persons SET person_type = 'staff' WHERE id = :p"),
+                     {"p": await _person_of(db, nv)})
+    await db.commit()
+    return {"org": org, "lan1": lan1, "lan2": lan2, "binh": binh, "nv": nv}
+
+
+async def test_care_ignores_staff_messages(app, db) -> None:  # type: ignore[no-untyped-def]
+    from gh.biz.people.service import PAIR_CTE
+
+    w = await _care_world(db)
+    df, dt_ = NOW - dt.timedelta(days=1), NOW + dt.timedelta(hours=1)
+    rows = (await db.execute(text(PAIR_CTE + "SELECT id FROM paired"), {"o": w["org"], "df": df, "dt": dt_})).all()
+    ids = {r.id for r in rows}
+    assert w["nv"] not in ids                                         # tin của nhân viên không phải «tin cần trả lời»
+    assert {w["lan1"], w["lan2"], w["binh"]} <= ids
+
+
 # ─── P3-4 — chưa có bộ ghi lời hứa: không nói «không có lời hứa bị vỡ» ────────────────
 
 def test_care_scenario_note_does_not_claim_no_broken_promises_while_untracked() -> None:
