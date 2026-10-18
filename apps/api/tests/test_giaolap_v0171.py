@@ -259,6 +259,29 @@ async def test_new_silent_counter_drops_when_boss_changes_a_group_mode(app, db, 
     assert await count() == 0                                   # không bao giờ âm
 
 
+# ─── P3-15 — «lượt/24h» của quy tắc gồm cả khớp do model xác nhận ────────────────────────────────────────────────────
+
+async def test_rule_hits_24h_counts_model_confirmed_matches(app, db, redis, owner_api) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    await install_presets(db, org)
+    await listen(db, org, "g1")
+
+    def reply(messages: list[Message]) -> dict[str, Any]:
+        from tests.phase2 import texts_in
+
+        refs = list(texts_in(messages))
+        # tin thường (không từ khoá bất mãn) nhưng model thấy đúng quy tắc R-03 với độ tin cao hơn ngưỡng
+        return {"units": [{"evidence": [refs[0]], "event_type": "Complained", "side": None,
+                           "conclusion": "Khách tỏ ý không hài lòng", "entities": {}, "confidence": 0.9,
+                           "rules": {"R-03": 0.95}, "signals": {}}], "noise": refs[1:]}
+
+    sm = sessionmaker()
+    await put(sm, org, msg("Hàng về hơi khác mẫu em gửi hôm trước", sender="u9", name="Chị Lan"))
+    await Refinery(sm, redis, FakeRouter(reply)).run(org, "manual")  # type: ignore[arg-type]
+    rules = {r["code"]: r["hits_24h"] for r in (await owner_api.get("/rules")).json()}
+    assert rules["R-03"] == 1, rules
+
+
 # ─── P3-6 — «Chăm sóc khách»: tin của nhân viên không phải «tin cần trả lời» ──────────────────────────────────────────
 
 async def _care_world(db: Any) -> dict[str, Any]:
