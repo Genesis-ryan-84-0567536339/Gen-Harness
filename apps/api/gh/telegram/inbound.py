@@ -31,6 +31,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gh import crypto, notifications
 from gh.chassis import actionlog
 from gh.errors import ApiError
+from gh.owner_cmd import core as owner_core
+from gh.owner_cmd import parse as owner_parse
+from gh.owner_cmd.core import rate_ok as owner_rate_ok
 
 log = logging.getLogger("gh.telegram.inbound")
 
@@ -40,7 +43,7 @@ PAIR_MAX_ATTEMPTS = 5
 REJECT_BELL_AFTER = 5
 REJECT_WINDOW_S = 3600
 REJECT_LOG_PER_REASON = 20  # tối đa dòng Action Log `telegram.rejected` mỗi lý do mỗi giờ (chống phình nhật ký)
-RATE_PER_MIN = 20
+RATE_PER_MIN = owner_core.RATE_PER_MIN
 TEXT_MAX = 4000
 ACTION_REJECTED = "telegram.rejected"
 ACTION_PAIRED = "telegram.paired"
@@ -82,7 +85,6 @@ _FORWARD_KEYS = (
     "forward_signature",
     "is_automatic_forward",
 )
-_CMD_RE = re.compile(r"^/([A-Za-z][A-Za-z0-9_]{0,31})(?:@[A-Za-z0-9_]{3,64})?(?:\s+(.*))?$", re.S)
 _PAIR_RE = re.compile(r"^/start(?:@[A-Za-z0-9_]{3,64})?\s+(\d{6})\s*$")
 
 
@@ -120,12 +122,8 @@ def update_id_of(update: Any) -> int:
 
 
 def parse_text(raw: str) -> tuple[str, str]:
-    """'/nhap  gọi A' → ('nhap', 'gọi A'); chữ thường → ('hoi', cả câu)."""
-    raw = raw.strip()[:TEXT_MAX]
-    m = _CMD_RE.match(raw)
-    if m is None:
-        return "hoi", raw
-    return m.group(1).lower(), (m.group(2) or "").strip()
+    """'/nhap  gọi A' → ('nhap', 'gọi A'); chữ thường → ('hoi', cả câu). Dùng bộ tách chung `gh.owner_cmd.parse`."""
+    return owner_parse.parse_text(raw, TEXT_MAX)
 
 
 def evaluate(update: Any, cfg: InboundConfig, *, now: datetime | None = None) -> TelegramCommand | str:
@@ -308,29 +306,10 @@ async def record_reject(
         )
 
 
-#: Cửa sổ TRƯỢT 60 giây: giữ mốc thời gian (ms) của các lệnh đã được nhận trong zset; kiểm + thêm trong MỘT lệnh Lua
-#: (nguyên tử, không lệch giữa hai tiến trình). Lệnh bị từ chối KHÔNG được ghi ⇒ bị chặn không kéo dài thời gian khoá.
-_RATE_LUA = """
-local key, now, window, limit = KEYS[1], tonumber(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3])
-redis.call('ZREMRANGEBYSCORE', key, '-inf', now - window)
-if redis.call('ZCARD', key) >= limit then return 0 end
-redis.call('ZADD', key, now, ARGV[4])
-redis.call('PEXPIRE', key, window * 2)
-return 1
-"""
-RATE_WINDOW_MS = 60_000
-
-
 async def rate_ok(redis: Any, org_id: uuid.UUID, now: datetime | None = None) -> bool:
-    """Tối đa `RATE_PER_MIN` lệnh trong BẤT KỲ 60 giây liền kề/tổ chức (cửa sổ trượt, không theo phút đồng hồ — cửa sổ
-    cố định cho lọt 2×20 lệnh quanh ranh giới phút). Lệnh ở đúng mốc `now - 60s` đã ra khỏi cửa sổ."""
-    if redis is None:
-        return True
-    now_ms = int((now or datetime.now(UTC)).timestamp() * 1000)
-    ok = await redis.eval(
-        _RATE_LUA, 1, f"gh:tg:rate:{org_id}", now_ms, RATE_WINDOW_MS, RATE_PER_MIN, f"{now_ms}:{uuid.uuid4().hex[:12]}"
-    )
-    return int(ok) == 1
+    """Tối đa `RATE_PER_MIN` lệnh trong BẤT KỲ 60 giây liền kề/tổ chức (cửa sổ trượt, v0.1.68). Cài đặt ở bộ đếm chung
+    `gh.owner_cmd.core.rate_ok` (zset + Lua, khoá Redis cũ `gh:tg:rate:<org>`) để kênh quản trị Zalo/WhatsApp dùng lại."""
+    return await owner_rate_ok(redis, org_id, "telegram", now, RATE_PER_MIN)
 
 
 # ─── ghép tài khoản ──────────────────────────────────────────────────────────
