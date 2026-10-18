@@ -99,20 +99,53 @@ async def test_pairing_success_records_owner_ids_bell_log_and_replies_through_se
     assert await redis.get("gh:bridge:pairing:whatsapp") is None
 
 
-async def test_pairing_rejections_are_silent_and_count_attempts(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+async def test_pairing_rejections_are_silent_and_lock_only_the_wrong_sender(app, db, redis) -> None:  # type: ignore[no-untyped-def]
     org = await org_id(db)
     sid = await make_session(db, org, "zalo")
     code = await _start_in_tx(redis, org, "zalo", commit=True)
     bus = FakeBus()
     wrong = "000000" if code != "000000" else "111111"
     for _ in range(4):
-        assert await pairing.handle_pair_event(SM(), redis, bus, org, pair_payload(sid, wrong)) == "rejected:wrong_code"
+        assert await pairing.handle_pair_event(SM(), redis, bus, org, pair_payload(sid, wrong, sender_external_id="999")) == "rejected:wrong_code"
     assert not bus.events                                                            # sai mã: KHÔNG trả lời
     assert (await db.execute(text("SELECT pair_attempts FROM ops.owner_channels"))).scalar() == 4
-    assert await pairing.handle_pair_event(SM(), redis, bus, org, pair_payload(sid, wrong)) == "rejected:locked"
-    assert (await db.execute(text("SELECT pair_code_hash FROM ops.owner_channels"))).scalar() is None
-    assert await pairing.handle_pair_event(SM(), redis, bus, org, pair_payload(sid, code)) == "rejected:no_code"   # đã khoá: đúng mã cũng vô ích
+    assert await pairing.handle_pair_event(SM(), redis, bus, org, pair_payload(sid, wrong, sender_external_id="999")) == "rejected:sender_locked"
+    assert (await db.execute(text("SELECT pair_code_hash FROM ops.owner_channels"))).scalar() is not None   # mã của Sếp còn nguyên
+    assert await pairing.handle_pair_event(SM(), redis, bus, org, pair_payload(sid, code, sender_external_id="999")) == "rejected:sender_locked"
     assert not bus.events and not (await owner_ids(db, org, "zalo")).paired
+    assert await pairing.handle_pair_event(SM(), redis, bus, org, pair_payload(sid, code)) == "paired"   # Sếp vẫn ghép được
+
+
+async def test_pairing_total_wrong_cap_cancels_code(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    sid = await make_session(db, org, "zalo")
+    code = await _start_in_tx(redis, org, "zalo", commit=True)
+    bus = FakeBus()
+    wrong = "000000" if code != "000000" else "111111"
+    res = []
+    for i in range(pairing.PAIR_MAX_TOTAL):
+        res.append(await pairing.handle_pair_event(SM(), redis, bus, org, pair_payload(sid, wrong, sender_external_id=f"s{i // 4}")))
+    assert res[-1] == "rejected:locked"
+    assert (await db.execute(text("SELECT pair_code_hash FROM ops.owner_channels"))).scalar() is None
+    assert await pairing.handle_pair_event(SM(), redis, bus, org, pair_payload(sid, code)) == "rejected:no_code"
+    assert not bus.events and not (await owner_ids(db, org, "zalo")).paired
+
+
+async def test_bridge_shaped_pair_event_gets_confirmation_via_send_auto(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """Đúng payload `owner.pair` bridge phát (kèm external_msg_id) ⇒ ghép xong, tin xác nhận đi cửa send_auto."""
+    org = await org_id(db)
+    sid = await make_session(db, org, "zalo")
+    code = await _start_in_tx(redis, org, "zalo", commit=True)
+    async with SM()() as s:
+        assert await oin.handle_owner_pair(s, org, pair_payload(sid, code, external_msg_id="52"))
+        await s.commit()
+        [(_, stashed)] = oin.take_pending(s)
+    assert stashed["external_msg_id"] == "52"
+    bus = FakeBus()
+    assert await pairing.handle_pair_event(SM(), redis, bus, org, stashed) == "paired"
+    assert await out_texts(bus) == [pairing.PAIRED_TEXT]
+    p_no_id = {k: v for k, v in stashed.items() if k != "external_msg_id"}
+    assert await pairing.reply_paired(SM(), redis, bus, org, p_no_id) is False       # thiếu id ⇒ (lỗi cũ) không gửi được
 
 
 @pytest.mark.parametrize("case", ["expired", "stale", "wrong_session", "not_bot", "future"])

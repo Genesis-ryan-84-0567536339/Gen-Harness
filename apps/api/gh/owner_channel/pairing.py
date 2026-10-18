@@ -3,7 +3,7 @@
 1. Console (PIN) `start_pairing`: cần tài khoản `bot` đang chạy; sinh mã 6 số, chỉ lưu BĂM có khoá, sống 10 phút.
 2. Sếp nhắn mã cho bot từ tài khoản của mình ⇒ bridge phát `owner.pair` ⇒ `try_pair` kiểm lại ở lõi (tin 1-1, ≤
 5 phút, không
-   chuyển tiếp, đúng phiên bot, mã còn hạn, so sánh hằng thời gian, sai 5 lần ⇒ huỷ mã). Sai mã: KHÔNG trả lời.
+   chuyển tiếp, đúng phiên bot, mã còn hạn, so sánh hằng thời gian, mỗi người gửi sai 5 lần ⇒ khoá người đó; tổng sai 20 lần ⇒ huỷ mã). Sai mã: KHÔNG trả lời.
 3. Đúng: ghi ID Owner (Zalo `uid`; WhatsApp JID và LID), bật kênh, Nhật ký + chuông + Nhật ký lắng nghe; lời
 đáp đi qua cửa
    `send_auto(owner_dm)`.
@@ -34,7 +34,8 @@ from gh.owner_channel.identity import CHANNELS, active_session, bare, sync_owner
 log = logging.getLogger("gh.owner_channel.pairing")
 
 PAIR_TTL = timedelta(minutes=10)
-PAIR_MAX_ATTEMPTS = 5
+PAIR_MAX_ATTEMPTS = 5          # mỗi người gửi: sai 5 lần ⇒ khoá RIÊNG người đó (không huỷ mã của Sếp)
+PAIR_MAX_TOTAL = 20            # trần tổng hợp mọi người gửi: sai tới đây mới huỷ mã
 MAX_AGE_S = 300
 ACTION_PAIR_START = "owner_channel.pair_start"
 ACTION_PAIRED = "owner_channel.paired"
@@ -115,16 +116,23 @@ async def try_pair(db: AsyncSession, redis: Redis, org_id: uuid.UUID, p: dict[st
     age = (now - _parse(p.get("occurred_at"), now)).total_seconds()
     if age > MAX_AGE_S or age < -60:
         return False, "stale"
+    fail_key = f"gh:owner:pairfail:{org_id}:{ch}:{int(row.pair_expires_at.timestamp())}:{ext}"
+    if int(await redis.get(fail_key) or 0) >= PAIR_MAX_ATTEMPTS:
+        return False, "sender_locked"
     if not hmac.compare_digest(bytes(row.pair_code_hash), _hash(org_id, ch, code)):
+        mine = int(await redis.incr(fail_key))
+        await redis.expire(fail_key, int(PAIR_TTL.total_seconds()) + 60)
         attempts = int(row.pair_attempts or 0) + 1
-        if attempts >= PAIR_MAX_ATTEMPTS:
+        if attempts >= PAIR_MAX_TOTAL:
             await _clear_code(db, org_id, ch)
             await sync_owner_sets(db, redis, org_id)
         else:
             await db.execute(text("""UPDATE ops.owner_channels SET pair_attempts = :a
                                      WHERE org_id = :o AND channel_type = :c"""), {"a": attempts, "o": org_id, "c": ch})
         await db.commit()
-        return False, "locked" if attempts >= PAIR_MAX_ATTEMPTS else "wrong_code"
+        if attempts >= PAIR_MAX_TOTAL:
+            return False, "locked"
+        return False, "sender_locked" if mine >= PAIR_MAX_ATTEMPTS else "wrong_code"
     alt = bare(str(p.get("sender_alt_id") or "")) or None
     await db.execute(text("""
         UPDATE ops.owner_channels SET owner_external_id = :x, owner_external_alt = :a, owner_thread_id = :t,
