@@ -14,6 +14,8 @@ import { toast } from '../../lib/toast';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { useUrlState } from '../../lib/uiStore';
 import { AutonomySelect } from '../AutonomySelect';
+import { addedByLabel, isOwnerChannel } from '../connections/ownerChannelModel';
+import { GroupSupportDialog } from './GroupSupportDialog';
 import { DataEmptyState } from '../DataEmptyState';
 import {
   CHANNEL_LABEL,
@@ -119,6 +121,9 @@ function GroupsPane() {
   const [qRaw, setQRaw] = useUrlState<string>('gq', '');
   const q = useDebouncedValue(qRaw.trim(), 300);
   const [botFor, setBotFor] = useState<DirGroup | null>(null);
+  const [supportFor, setSupportFor] = useState<DirGroup | null>(null);
+  // v0.1.72: Chế độ hỗ trợ chỉ Owner (API require_owner), chỉ nhóm Zalo/WhatsApp.
+  const isOwner = useIsOwnerRole();
   // Gán BOT cần profile.write — vai trò chỉ đọc (Auditor) không thấy nút "Đổi" (mở ra chỉ gặp 403).
   const canWrite = useCan('profile.write');
 
@@ -138,15 +143,36 @@ function GroupsPane() {
         />
       </div>
       {channels.data.map((ch) => (
-        <ChannelGroupsCard key={ch.id} ch={ch} q={q} canWrite={canWrite} onPickBot={setBotFor} />
+        <ChannelGroupsCard
+          key={ch.id}
+          ch={ch}
+          q={q}
+          canWrite={canWrite}
+          onPickBot={setBotFor}
+          onSupport={isOwner && isOwnerChannel(ch.type) ? setSupportFor : undefined}
+        />
       ))}
       {botFor ? <GroupBotDialog group={botFor} onClose={() => setBotFor(null)} /> : null}
+      {supportFor ? <GroupSupportDialog groupId={supportFor.id} groupName={supportFor.name} onClose={() => setSupportFor(null)} /> : null}
     </div>
   );
 }
 
 /** Nhóm của MỘT kênh: máy chủ lọc theo kênh + tên, trả từng trang; "Xem thêm" lấy trang kế (không giới hạn ở 50 nhóm đầu). */
-function ChannelGroupsCard({ ch, q, canWrite, onPickBot }: { ch: DirChannel; q: string; canWrite: boolean; onPickBot: (g: DirGroup) => void }) {
+function ChannelGroupsCard({
+  ch,
+  q,
+  canWrite,
+  onPickBot,
+  onSupport,
+}: {
+  ch: DirChannel;
+  q: string;
+  canWrite: boolean;
+  onPickBot: (g: DirGroup) => void;
+  /** v0.1.72: có ⇒ thêm cột «Chế độ hỗ trợ» (Owner, Zalo/WhatsApp). */
+  onSupport?: (g: DirGroup) => void;
+}) {
   const groups = useDirGroupsPaged({ channel_id: ch.id, q: q || undefined });
   const rows = groups.data?.pages.flatMap((pg) => pg.items) ?? [];
   const total = groups.data?.pages[0]?.total ?? 0;
@@ -192,6 +218,8 @@ function ChannelGroupsCard({ ch, q, canWrite, onPickBot }: { ch: DirChannel; q: 
                   <th style={{ width: 110 }}>Độ nhiệt</th>
                   <th style={{ width: 150 }}>Chế độ nghe</th>
                   <th style={{ width: 170 }}>Agent trực</th>
+                  <th style={{ width: 100 }}>Ai thêm bot</th>
+                  {onSupport ? <th style={{ width: 120 }}>Chế độ hỗ trợ</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -223,6 +251,16 @@ function ChannelGroupsCard({ ch, q, canWrite, onPickBot }: { ch: DirChannel; q: 
                         ) : null}
                       </div>
                     </td>
+                    <td data-testid="dir-added-by" title={g.added_by_kind ? undefined : 'Máy chủ chưa gửi thông tin ai thêm bot'}>
+                      {addedByLabel(g.added_by_kind)}
+                    </td>
+                    {onSupport ? (
+                      <td>
+                        <Button variant="ghost" size="sm" icon="ph ph-lifebuoy" aria-label={`Chế độ hỗ trợ của ${g.name}`} onClick={() => onSupport(g)}>
+                          Hỗ trợ
+                        </Button>
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>

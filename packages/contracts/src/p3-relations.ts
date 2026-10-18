@@ -25,6 +25,8 @@ export interface DirGroup {
   channel: { type: Channel; name: string };
   bot: AgentRef | null;
   created_at: string;
+  /** v0.1.72: ai thêm bot vào nhóm — `owner` · `other` · `unknown`; null/vắng = máy chủ chưa gửi (hiện «—»). */
+  added_by_kind?: 'owner' | 'other' | 'unknown' | string | null;
 }
 export type DirRelation = 'direct' | 'via_staff' | 'stranger' | 'staff';
 export type DirHeatBand = 'high' | 'mid' | 'cold';

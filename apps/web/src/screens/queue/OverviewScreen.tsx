@@ -1,5 +1,7 @@
 import type { CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { ApiError } from '@gen-harness/contracts';
 import type { KpiItem, QueueWidgetItem, SpotlightItem } from '@gen-harness/contracts';
 import { EmptyState, Icon, Skeleton } from '@gen-harness/ui';
 import { fmtAgo, fmtDMClock, fmtDec, fmtInt, fmtPct } from '../../lib/format';
@@ -14,6 +16,9 @@ import { useCan } from '../../lib/permissions';
 import { useSystemHealth } from '../system/queries';
 import { SetupFollowUp } from './SetupFollowUp';
 import { AiCostPanel } from './AiCostPanel';
+import { api } from '../../lib/api';
+import { useIsOwnerRole } from '../../owner/queries';
+import { autoSendTodayText, autoSendsKey } from '../connections/ownerChannelModel';
 
 const KPI_ICON: Record<string, string> = {
   channels_live: 'ph ph-broadcast',
@@ -134,6 +139,28 @@ function TechRow({ label, value, ok }: { label: string; value: string; ok: boole
       <span className="ov-health__name">{label}</span>
       <span className="ov-health__metric">{value}</span>
     </div>
+  );
+}
+
+/**
+ * v0.1.72: «Tin bot tự gửi hôm nay: N (Sếp gọi a · Hỗ trợ b · Chuyển Sếp c)» — CHỈ Owner (`GET /auto-sends`, đọc `today`).
+ * Máy chủ cũ (404) / lỗi ⇒ không hiện dòng (số phụ, không chặn trang).
+ */
+function AutoSendTodayRow() {
+  const isOwner = useIsOwnerRole();
+  const q = useQuery({
+    queryKey: autoSendsKey('24h'),
+    queryFn: ({ signal }) => api.ownerChannel.autoSends({ since: '24h', limit: 50 }, signal),
+    enabled: isOwner,
+    retry: (n, e) => !(e instanceof ApiError && (e.status === 404 || e.status === 403)) && n < 1,
+  });
+  if (!isOwner || !q.data) return null;
+  const t = q.data.today;
+  return (
+    <Link to="/listenlog" className="ov-health__row" data-testid="ov-autosend-today" title="Mở Nhật ký lắng nghe">
+      <span className="ov-health__dot" style={{ background: t && t.escalated > 0 ? WARN : OK }} aria-hidden />
+      <span className="ov-health__name">{autoSendTodayText(t)}</span>
+    </Link>
   );
 }
 
@@ -263,6 +290,7 @@ export function OverviewScreen() {
                 <span className="ov-health__metric">{c.active > 0 ? `${fmtInt(c.active)} đang sống` : 'chưa kết nối'}</span>
               </div>
             ))}
+            <AutoSendTodayRow />
             <div className="ov-health__row">
               <span className="ov-health__dot" style={{ background: d.health.backlog_pending > 0 ? WARN : OK }} aria-hidden />
               <span className="ov-health__name">Tin chờ sàng lọc</span>

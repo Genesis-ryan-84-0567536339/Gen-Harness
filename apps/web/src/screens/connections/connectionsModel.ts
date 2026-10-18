@@ -169,3 +169,12 @@ export function orderChannels<T extends Pick<Channel, 'type'>>(channels: T[]): T
     .sort((a, b) => rank(a.c.type) - rank(b.c.type) || a.i - b.i)
     .map((x) => x.c);
 }
+
+/**
+ * v0.1.72: kênh có thẻ «Kênh quản trị» — Zalo, WhatsApp đã cài trong bản đang chạy (theo thứ tự Zalo · WhatsApp). Thẻ tự
+ * nói rõ khi kênh chạy bằng tài khoản cá nhân (chưa dùng được).
+ */
+export function ownerChannelTypes(channels: Array<Pick<Channel, 'type' | 'installed'>> | undefined): Array<'zalo' | 'whatsapp'> {
+  const ok = new Set((channels ?? []).filter((c) => c.installed).map((c) => c.type as string));
+  return (['zalo', 'whatsapp'] as const).filter((t) => ok.has(t));
+}

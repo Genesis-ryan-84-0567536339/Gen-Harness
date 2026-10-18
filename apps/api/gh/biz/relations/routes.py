@@ -97,7 +97,7 @@ def _like_pattern(q: str) -> str:
 
 
 _GROUP_SELECT = """
-SELECT g.id, g.code, g.name, g.kind, g.listen_mode, g.member_count, g.created_at,
+SELECT g.id, g.code, g.name, g.kind, g.listen_mode, g.member_count, g.created_at, g.added_by_kind,
        c.type AS channel_type, c.name AS channel_name, ag.id AS agent_id, ag.name AS agent_name,
        (SELECT count(*) FROM raw.events e WHERE e.group_id = g.id
         AND e.occurred_at > now() - interval '24 hours') AS events_24h,
@@ -114,7 +114,8 @@ def _group_payload(r: Any) -> dict[str, Any]:
             "member_count": r.member_count, "events_24h": r.events_24h,
             "heat": float(r.heat) if r.heat is not None else None,
             "channel": {"type": r.channel_type, "name": r.channel_name},
-            "bot": rsvc.agent_ref(r.agent_id, r.agent_name), "created_at": iso(r.created_at)}
+            "bot": rsvc.agent_ref(r.agent_id, r.agent_name), "added_by_kind": r.added_by_kind,
+            "created_at": iso(r.created_at)}
 
 
 @router.get("/directory/groups")

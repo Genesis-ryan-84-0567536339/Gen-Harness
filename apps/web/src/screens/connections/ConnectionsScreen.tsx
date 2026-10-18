@@ -16,8 +16,9 @@ import { ChannelCard } from '../system/ChannelCard';
 import { CliCard } from '../system/CliCard';
 import { SocialEntryCard } from '../system/SocialEntryCard';
 import { ConnectionStatusPill } from './ConnectionStatusPill';
+import { OwnerChannelCard } from './OwnerChannelCard';
 import { TelegramCard } from './TelegramCard';
-import { activeCliState, brainStatus, isKeySource, mcpEnabledCount, mcpStatus, orderChannels, visibleChannels } from './connectionsModel';
+import { activeCliState, brainStatus, isKeySource, mcpEnabledCount, mcpStatus, orderChannels, ownerChannelTypes, visibleChannels } from './connectionsModel';
 
 /**
  * v0.1.42 (F-7, F-61): Kết nối — một trang, mỗi thứ một thẻ, cùng một kiểu viên trạng thái (Đang chạy · Cần Sếp xử
@@ -56,6 +57,9 @@ export function ConnectionsScreen() {
       <section className="conn-section" aria-label="Kênh nhắn tin">
         <ChannelCards canManage={canManage} />
       </section>
+
+      {/* v0.1.72: Kênh quản trị Zalo/WhatsApp (bot tài khoản riêng) — chỉ Owner; neo #owner-channel. Chỉ hiện cho kênh đã cài. */}
+      {isOwner ? <OwnerChannelSection /> : null}
 
       {/* v0.1.44 (F-8c): Telegram nhận báo động sự cố (Trực canh máy chủ) + bản tin — chỉ Owner; neo #telegram. */}
       {isOwner ? (
@@ -175,6 +179,21 @@ function ChannelCards({ canManage }: { canManage: boolean }) {
         <ChannelCard key={c.type} channel={c} canManage={canManage} />
       ))}
     </div>
+  );
+}
+
+function OwnerChannelSection() {
+  const channels = useChannels();
+  const types = ownerChannelTypes(channels.data);
+  if (types.length === 0) return null;
+  return (
+    <section id="owner-channel" className="conn-section" aria-label="Kênh quản trị">
+      <div className="conn-grid">
+        {types.map((t) => (
+          <OwnerChannelCard key={t} ch={t} />
+        ))}
+      </div>
+    </section>
   );
 }
 

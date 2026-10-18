@@ -75,7 +75,16 @@ export type ListenEventType =
   | 'channel_connected'
   | 'channel_error'
   | 'channel_ended'
-  | 'direct_new';
+  | 'direct_new'
+  // v0.1.72 (bot tài khoản riêng)
+  | 'group_added_by_other'
+  | 'bot_removed'
+  | 'owner_called'
+  | 'owner_paired'
+  | 'owner_unpaired'
+  | 'support_on'
+  | 'support_off'
+  | 'support_escalated';
 
 export interface ListenLogEvent {
   kind: 'event';

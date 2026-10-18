@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
-import { ApiError, type Channel, type ChannelGroup, type DirectMode, type ListenMode, type ViewScope } from '@gen-harness/contracts';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { ApiError, type AccountKind, type Channel, type ChannelGroup, type DirectMode, type ListenMode, type ViewScope } from '@gen-harness/contracts';
 import { Button, Dialog, EmptyState, Icon, TextField } from '@gen-harness/ui';
 import { api } from '../../lib/api';
 import { qk2, useChannelGroups } from '../../lib/dataQueries';
 import { fmtInt } from '../../lib/format';
 import { useCan, useOrgTimezone } from '../../lib/permissions';
+import { useMe } from '../../lib/queries';
 import { queryClient } from '../../lib/queryClient';
 import { toast } from '../../lib/toast';
 import { useNow } from '../../lib/useNow';
@@ -15,6 +16,17 @@ import { Bar, CardError, InlineError, SkeletonLines } from '../common';
 import { ConnectionStatusPill } from '../connections/ConnectionStatusPill';
 import { useSystemHealth } from './queries';
 import { channelConnStatus } from '../connections/connectionsModel';
+import {
+  ACCOUNT_KIND_OPTIONS,
+  ACCOUNT_KIND_WARNING,
+  GROUP_SUPPORT_KEY,
+  accountKindChangeText,
+  accountKindOf,
+  asOwnerChannelView,
+  isOwnerChannel,
+  ownerChannelKey,
+  ownerErrorText,
+} from '../connections/ownerChannelModel';
 import { NewGroupModeSelect, NewGroupsBox, NewSilentGroupsNotice, RefreshGroupsButton } from './NewGroupsBox';
 import {
   BRIDGE_OFFLINE_TEXT,
@@ -260,6 +272,8 @@ export function ChannelCard({ channel, canManage, large }: { channel: Channel; c
 
       {!showQr && isQrChannel(c) && c.installed && c.state === 'active' ? <NewGroupModeSelect channel={c} canManage={canManage} /> : null}
 
+      {!showQr && canManage && isOwnerChannel(c.type) && c.installed && c.session_id ? <AccountKindRow channel={c} /> : null}
+
       {!showQr && canManage && isQrChannel(c) && c.installed && c.state === 'active' ? (
         <div className="ch-tools">
           <RefreshGroupsButton channel={c} />
@@ -343,6 +357,90 @@ export function ChannelCard({ channel, canManage, large }: { channel: Channel; c
       </Dialog>
       <GroupsDialog open={groupsOpen} onClose={() => setGroupsOpen(false)} channel={c} canManage={canManage} />
     </article>
+  );
+}
+
+/**
+ * v0.1.72: «Loại tài khoản» của phiên kênh Zalo/WhatsApp — CHỈ Owner (API require_owner). Đổi cần mã PIN và luôn qua hộp
+ * xác nhận có cảnh báo: tài khoản cá nhân thì bot không tự gửi (không bật được Kênh quản trị, Chế độ hỗ trợ); đổi khỏi
+ * «Tài khoản riêng của bot» ⇒ máy chủ huỷ ghép kênh quản trị và tắt mọi chế độ hỗ trợ của kênh.
+ */
+function AccountKindRow({ channel: c }: { channel: Channel }) {
+  const isOwner = useMe().data?.role?.code === 'owner';
+  const q = useQuery({
+    queryKey: ownerChannelKey(c.type),
+    queryFn: ({ signal }) => api.ownerChannel.get(c.type, signal),
+    enabled: isOwner,
+  });
+  const v = asOwnerChannelView(q.data);
+  const [ask, setAsk] = useState<AccountKind | null>(null);
+  const save = useMutation({
+    mutationFn: (kind: AccountKind) => api.ownerChannel.setAccountKind(c.type, v?.session?.id ?? String(c.session_id), { account_kind: kind }),
+    onSuccess: (next, kind) => {
+      queryClient.setQueryData(ownerChannelKey(c.type), next);
+      void queryClient.invalidateQueries({ queryKey: ownerChannelKey(c.type) });
+      void queryClient.invalidateQueries({ queryKey: GROUP_SUPPORT_KEY });
+      toast(kind === 'bot' ? `${c.name}: đánh dấu tài khoản riêng của bot` : `${c.name}: đánh dấu tài khoản cá nhân của Sếp`, 'neutral');
+      setAsk(null);
+    },
+  });
+  if (!isOwner || q.isPending) return null;
+  if (q.isError || !v) {
+    // Máy chủ cũ (chưa có API) hoặc không có quyền ⇒ không hiện ô; lỗi khác hiện câu thân thiện + chi tiết.
+    if (q.error instanceof ApiError && (q.error.status === 404 || q.error.status === 403)) return null;
+    return q.isError ? <InlineError detail={errorDetail(q.error)}>{ownerErrorText(q.error)}</InlineError> : null;
+  }
+  const kind = accountKindOf(v);
+  return (
+    <div className="ch-kind" data-testid={`account-kind-${c.type}`}>
+      <span className="ch-kind__label">
+        <span>Loại tài khoản</span>
+        <span className="ch-kind__hint" data-testid="account-kind-hint">
+          {ACCOUNT_KIND_WARNING} Đổi cần mã PIN.
+        </span>
+      </span>
+      <select
+        className="mini-select"
+        aria-label={`Loại tài khoản ${c.name}`}
+        value={kind}
+        disabled={save.isPending}
+        onChange={(e) => {
+          const next = e.target.value as AccountKind;
+          if (next !== kind) setAsk(next);
+        }}
+      >
+        {ACCOUNT_KIND_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      {save.isError && !ask ? <InlineError detail={errorDetail(save.error)}>{ownerErrorText(save.error)}</InlineError> : null}
+      {ask ? (
+        <Dialog
+          open
+          onClose={() => setAsk(null)}
+          width={440}
+          title={`Đổi sang «${ACCOUNT_KIND_OPTIONS.find((o) => o.value === ask)?.label}»?`}
+          kicker={`${c.name} · cần mã PIN`}
+          actions={
+            <>
+              <Button variant="secondary" onClick={() => setAsk(null)}>
+                Huỷ
+              </Button>
+              <Button variant="primary" loading={save.isPending} onClick={() => save.mutate(ask)}>
+                Đổi loại tài khoản
+              </Button>
+            </>
+          }
+        >
+          <p className="risk-box__text" data-testid="account-kind-confirm">
+            {accountKindChangeText(kind, ask, v)}
+          </p>
+          {save.isError ? <InlineError detail={errorDetail(save.error)}>{ownerErrorText(save.error)}</InlineError> : null}
+        </Dialog>
+      ) : null}
+    </div>
   );
 }
 

@@ -150,3 +150,24 @@ export const draftHref = (id: string): string => `/workbench?id=${encodeURICompo
 export function senderName(s: { name: string | null; code: string | null } | null): string {
   return s ? s.name || s.code || 'Không rõ người gửi' : 'Không rõ người gửi';
 }
+
+/**
+ * v0.1.72: nhãn ngắn cạnh dòng sự kiện (chữ chính do máy chủ viết sẵn). Sự kiện của bot tài khoản riêng có nhãn riêng để
+ * Sếp lướt nhanh; loại khác giữ «Sự kiện».
+ */
+export const EVENT_KIND_LABEL: Record<string, string> = {
+  group_added_by_other: 'Người khác thêm bot',
+  bot_removed: 'Bot bị mời ra',
+  owner_called: 'Sếp gọi',
+  owner_paired: 'Kênh quản trị',
+  owner_unpaired: 'Kênh quản trị',
+  support_on: 'Hỗ trợ',
+  support_off: 'Hỗ trợ',
+  support_escalated: 'Chuyển Sếp',
+};
+export const eventKindLabel = (t: string): string => EVENT_KIND_LABEL[t] ?? 'Sự kiện';
+
+/** Tin bot tự gửi lọc theo kênh đang chọn (sổ `/auto-sends` không lọc kênh ở máy chủ). */
+export function autoSendsForChannel<T extends { channel: string }>(items: T[], channel: string): T[] {
+  return channel ? items.filter((i) => i.channel === channel) : items;
+}

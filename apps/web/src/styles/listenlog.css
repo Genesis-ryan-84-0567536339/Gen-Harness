@@ -107,3 +107,7 @@
   .ll-step + .ll-step::before { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .ll-row--new { animation: none; } }
+
+/* v0.1.72: «Bot đã tự trả lời» — sổ tin bot tự gửi (không có nội dung), đặt trên dòng thời gian. */
+.ll-auto > .muted-note { margin: 0; padding: 0 14px 6px; }
+.ll-auto .ll-day__title { display: flex; align-items: center; gap: 6px; }
