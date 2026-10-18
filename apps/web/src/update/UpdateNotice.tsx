@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Icon } from '@gen-harness/ui';
 import { api } from '../lib/api';
+import { useCan } from '../lib/permissions';
 import { UPDATE_KEY, updatePollMs, updateView } from './updateModel';
 
 /**
@@ -10,9 +11,13 @@ import { UPDATE_KEY, updatePollMs, updateView } from './updateModel';
  * không nhắc lại ở đây.
  */
 export function UpdateNotice({ hideFailed = false }: { hideFailed?: boolean }) {
+  // v0.1.71 (P3-9): `GET /system/update` cần `system.manage` — vai khác (Vận hành, Kiểm soát…) mở Hôm nay không được gọi
+  // (trước đây nhận 403 mỗi lần mở trang). Chỉ hỏi khi có quyền.
+  const canManage = useCan('system.manage');
   const q = useQuery({
     queryKey: UPDATE_KEY,
     queryFn: ({ signal }) => api.systemUpdate.get(signal),
+    enabled: canManage,
     retry: false,
     refetchInterval: (query) => updatePollMs(query.state.data?.state),
   });

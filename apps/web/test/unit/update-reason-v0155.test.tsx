@@ -6,7 +6,9 @@ import type { SystemUpdate, SystemUpdateBlockReason } from '@gen-harness/contrac
 import { UpdateCard } from '../../src/update/UpdateCard';
 import { UpdateNotice } from '../../src/update/UpdateNotice';
 import { UPDATE_COMMAND, WATCHER_COMMAND, blockOf, blockReasonCopy, canClickUpdate, updateView } from '../../src/update/updateModel';
+import { qk } from '../../src/lib/queries';
 import { queryClient } from '../../src/lib/queryClient';
+import { permissionsOf } from '../mock-api';
 
 /**
  * v0.1.55 (G2) — thẻ Cập nhật nói rõ vì sao KHÔNG có nút "Cập nhật ngay" (api `request_block_reason`): lý do + việc cần làm; lệnh
@@ -130,6 +132,12 @@ describe('updateView + request_block_reason', () => {
 });
 
 function renderCard(data: SystemUpdate, ui: 'card' | 'always' | 'notice' = 'card') {
+  // Dòng báo ở Hôm nay chỉ hỏi `GET /system/update` khi người xem có `system.manage` (v0.1.71, P3-9).
+  queryClient.setQueryData(qk.me, {
+    id: 'u', email: 'owner@genesis.local', display_name: 'Chủ', role: { code: 'owner', name: 'Owner' },
+    org: { id: 'o', name: 'x', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
+    addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null, permissions: permissionsOf('owner'),
+  });
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } })));
   return render(
     <QueryClientProvider client={queryClient}>
