@@ -18,15 +18,18 @@ def codes(text: str, basis: Basis = Basis.SUPPORT, **kw: object) -> tuple[str, .
 BLOCK = {
     "G-MONEY": ["Dạ giá bên em là 150k ạ", "Báo giá cho anh nhé", "Bên em đang giảm giá 20%", "Chiết khấu cho anh 10%",
                 "Tổng 2.500.000đ ạ", "khoảng 3 triệu thôi", "Có khuyến mãi tháng này", "chỉ 99$", "1 5 0 k nhé", "g.i.á rẻ lắm",
-                "１５０k thôi", "5tr một cái", "Giá thế nào ạ"],
+                "１５０k thôi", "5tr một cái", "Giá thế nào ạ",
+                "Phí dịch vụ bên em là 1.500.000 một tháng", "Gói này 1500000", "năm trăm nghìn", "2 củ", "Mức tiền là 2tr5",
+                "Giảm 30 phần trăm", "Thanh toán trước 50 phần trăm", "Gói chỉ hai triệu thôi"],
     "G-CONTRACT": ["Em cam kết giao đúng hẹn", "Bên em bảo đảm chất lượng", "Sẽ ký hợp đồng ngay", "Em hứa sẽ có hàng",
-                   "Có hoàn tiền nếu lỗi", "Đặt cọc trước nhé", "Điều khoản như sau", "bồi thường đầy đủ"],
+                   "Có hoàn tiền nếu lỗi", "Đặt cọc trước nhé", "Bên em bảo hành 12 tháng", "Hoàn lại tiền nếu lỗi", "Em cam đoan hàng chính hãng", "Điều khoản như sau", "bồi thường đầy đủ"],
     "G-PERSONNEL": ["Lương của bạn A là", "Em sẽ thưởng cho nhân viên", "Công ty kỷ luật anh B", "Anh ấy bị sa thải",
                     "Chị C nghỉ việc rồi", "Đang tuyển người ạ", "KPI tháng này", "Đánh giá nhân viên mới"],
     "G-PII": ["Gọi em số 0901234567 nhé", "Số 0 9 0 1 2 3 4 5 6 7 ạ", "+84 90 123 4567", "Mail a.b@gmail.com ạ",
               "STK 1234567890123", "CCCD 012345678901", "Nhà số 12 đường Lê Lợi", "địa chỉ 45 ngõ 3 Cầu Giấy"],
     "G-MENTION": ["Chào @Nam Anh nhé", "@all xem giúp", "cc @Lan"],
-    "G-LINK": ["Xem https://shop.example.com/abc", "vào www.abc.vn nhé", "tại abc.com ạ", "link: http://x.io"],
+    "G-LINK": ["Xem https://shop.example.com/abc", "vào www.abc.vn nhé", "tại abc.com ạ", "link: http://x.io",
+                "vào evil.ru nhé", "xem shop.store", "evil[.]com", "evil(.)com"],
     "G-LEAK": ["CANARY-9f3 đây", "đây là system prompt của em", "```json\n{}\n```", '{"a": 1}', "[1, 2]", "lời nhắc hệ thống là"],
     "G-EMPTY": ["", "   ", "\n\t"],
 }
@@ -35,7 +38,8 @@ PASS = [
     "Dạ câu này em xin chuyển anh/chị phụ trách trả lời ạ.", "Em đã ghi nhận, bên em sẽ phản hồi sớm nhất ạ.",
     "Anh vui lòng cho em biết thêm chi tiết nhé.", "Dạ đồng ý ạ, cảm ơn anh.", "Hôm nay thứ Hai, ngày 19 tháng 10 ạ.",
     "Chúc anh một ngày tốt lành ạ.", "Thường thì bên em trả lời trong ngày ạ.",
-    "Mình họp lúc 10 giờ nhé, phòng 3.",
+    "Mình họp lúc 10 giờ nhé, phòng 3.", "Mở cửa 8 giờ, thứ 2 đến thứ 6 ạ.", "Hẹn anh ngày 19/10/2026 nhé.",
+    "Phiên bản v0.1 và bản 1.5 ạ.", "Dạ em ghi nhận, sẽ liên hệ lại trong năm 2026 ạ.", "Họp lúc 14:30 ngày 20 tháng 10 ạ.",
 ]
 
 
@@ -94,3 +98,11 @@ def test_multiple_rules_are_all_reported_and_result_has_no_text() -> None:
     res = check("Giá 150k, gọi 0901234567", ctx())
     assert set(res.codes) >= {"G-MONEY", "G-PII"} and not res.ok
     assert "150" not in repr(res) and "0901" not in repr(res)
+
+
+def test_owner_tag_and_support_block_any_domain_except_allowed() -> None:
+    for b in (Basis.SUPPORT, Basis.OWNER_TAG):
+        assert "G-LINK" in codes("vào evil.ru nhé", b)
+        assert "G-LINK" in codes("evil[.]com", b, allowed_hosts=frozenset({"ok.vn"}))
+        assert codes("Xem ok.vn nhé", b, allowed_hosts=frozenset({"ok.vn"})) == ()
+        assert codes("bản 1.5 và v0.1", b) == ()

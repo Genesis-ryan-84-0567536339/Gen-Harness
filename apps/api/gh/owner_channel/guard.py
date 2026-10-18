@@ -74,8 +74,14 @@ _MONEY = _c(
     r"\bgia\b", r"\bbao gia\b", r"\bchiet khau\b", r"\bgiam gia\b", r"\bkhuyen mai\b", r"\bvnd\b", r"\busd\b",
     r"\beur\b", r"[$€£]", r"₫", r"\d\s*%",
     r"\d[\d.,]*\s*(?:k|tr|trieu|nghin|ngan|ty|d|dong|vnd|usd)\b",
+    # v0.1.72 (review bảo mật): từ khoá tiền, «2tr5», «2 củ», số lớn, số viết bằng chữ.
+    r"\bphi\b", r"\btien\b", r"\bthanh toan\b", r"\bphan tram\b", r"\d\s*(?:cu|tr)\d*\b",
+    r"\b(?:tram|nghin|ngan|trieu|ty)\b",
 )
-_CONTRACT = _c(r"\bhop dong\b", r"\bcam ket\b", r"\bbao dam\b", r"\bdam bao\b", r"\bboi thuong\b", r"\bhoan tien\b",
+#: chỉ chạy trên bản đã bỏ ngày tháng / «năm 2026» (số 4 chữ số thường là năm trong FAQ).
+_MONEY_NUM = _c(r"(?<![\d.,])\d{4,}(?![\d])", r"(?<![\d.,])\d{1,3}(?:[.,]\d{3})+(?![\d])")
+_DATE = re.compile(r"\b\d{1,2}\s*[/.\-]\s*\d{1,2}\s*[/.\-]\s*\d{2,4}\b|\bnam\s+\d{4}\b|\b\d{1,2}\s*[/.\-]\s*\d{4}\b")
+_CONTRACT = _c(r"\bhop dong\b", r"\bcam ket\b", r"\bbao dam\b", r"\bdam bao\b", r"\bboi thuong\b", r"\bhoan tien\b", r"\bbao hanh\b", r"\bhoan lai\b", r"\bcam doan\b",
                r"\bdat coc\b", r"\bdieu khoan\b", r"\bhua\b")
 _PERSONNEL = _c(r"\bluong\b", r"\bky luat\b", r"\bsa thai\b", r"\bnghi viec\b", r"\bkpi\b", r"\bnhan su\b",
                 r"\bung vien\b", r"\bdanh gia nhan vien\b")
@@ -87,6 +93,9 @@ _PII = _c(r"[\w.+-]+@[\w-]+\.[\w.-]+", r"\b(?:so|sn)\s*\d+[a-z]?\s*(?:duong|pho|
           r"\b\d+[a-z]?\s*(?:ngo|ngach|hem|duong|pho)\b")
 _MENTION = re.compile(r"@([^\s@]+)")
 _URL = re.compile(r"(?:https?://|www\.)([^\s/]+)|\b((?:[a-z0-9-]+\.)+(?:com|vn|net|org|io|me|app|co|info|xyz|link|ly))\b")
+#: tên miền bất kỳ (đuôi chữ ≥ 2 ký tự — «1.5», «v0.1» không khớp) sau khi gỡ che giấu «[.]», «(.)», «{.}».
+_DOMAIN = re.compile(r"(?<![\w@.-])((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})(?![\w-])")
+_DEFANG = re.compile(r"\s*[\[(\{]\s*\.\s*[\])\}]\s*")
 _LEAK = _c(r"system prompt", r"loi nhac he thong", r"```", r"^\s*[\[{]", r"\"\w+\"\s*:")
 
 
@@ -115,7 +124,8 @@ def check(text: str, ctx: GuardCtx) -> GuardResult:
         hit.append("G-LEAK")
     if basis == Basis.OWNER_DM:                      # nói với chính Sếp: chỉ rỗng / dài / lộ lời nhắc
         return GuardResult(not hit, tuple(hit))
-    if _any(_MONEY, forms + [raw.lower()]):
+    nodate = [_DATE.sub(" ", f) for f in forms]
+    if _any(_MONEY, forms + [raw.lower()]) or _any(_MONEY_NUM, nodate):
         hit.append("G-MONEY")
     if _any(_CONTRACT, forms):
         hit.append("G-CONTRACT")
@@ -131,6 +141,8 @@ def check(text: str, ctx: GuardCtx) -> GuardResult:
     if any(_norm(m.group(1)).strip(".,!?:;") not in ctx.allowed_mentions for m in _MENTION.finditer(raw)):
         hit.append("G-MENTION")
     hosts = {(m.group(1) or m.group(2) or "").lower() for m in _URL.finditer(raw)} - {""}
+    for f in {_DEFANG.sub(".", forms[0]), _DEFANG.sub(".", raw.lower())}:
+        hosts |= {m.group(1).removeprefix("www.") for m in _DOMAIN.finditer(f)}
     if any(h not in ctx.allowed_hosts for h in hosts):
         hit.append("G-LINK")
     return GuardResult(not hit, tuple(dict.fromkeys(hit)))
