@@ -266,6 +266,7 @@ async def put_support(gid: uuid.UUID, body: SupportIn, request: Request, _m: ser
         if set(limits) - set(base) or any(v < 0 for v in limits.values()):
             raise field_errors({"limits": "Giới hạn không hợp lệ (khoá lạ hoặc số âm)"})
         until = datetime.now(UTC) + timedelta(hours=body.until_hours) if body.until_hours else None
+        await oin.expire_stale_support(db, g.id)
         await db.execute(text("""
             INSERT INTO ops.group_support (org_id, group_id, enabled_by, enabled_via, until_at, limits)
             VALUES (:o, :g, :u, 'console', :t, CAST(:l AS jsonb))"""),

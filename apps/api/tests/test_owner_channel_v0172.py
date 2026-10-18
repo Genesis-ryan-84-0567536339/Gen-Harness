@@ -614,6 +614,39 @@ async def test_support_route_conditions_and_toggle(owner_api: Api, db, redis) ->
     assert hist and hist[0]["reason"] == "owner"
 
 
+async def test_expired_support_can_be_enabled_again_via_route(owner_api: Api, db, redis) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    await bot_world(db, org)
+    gid = await listen(db, org, "g1")
+    await verify_pin(owner_api)
+    await db.execute(text("UPDATE core.groups SET added_by_kind = 'owner'"))
+    await db.commit()
+    assert (await owner_api.send("PUT", f"/groups/{gid}/support", {"enabled": True, "until_hours": 1})).status_code == 200
+    await db.execute(text("UPDATE ops.group_support SET until_at = now() - interval '1 minute'"))
+    await db.commit()
+    assert (await owner_api.get(f"/groups/{gid}/support")).json()["enabled"] is False        # hết hạn = tắt
+    r = await owner_api.send("PUT", f"/groups/{gid}/support", {"enabled": True, "until_hours": 2})
+    assert r.status_code == 200 and r.json()["enabled"] is True
+    rows = (await db.execute(text("SELECT disabled_at, disabled_reason FROM ops.group_support ORDER BY enabled_at"))).all()
+    assert len(rows) == 2 and rows[0].disabled_reason == "expired" and rows[0].disabled_at is not None and rows[1].disabled_at is None
+
+
+async def test_expired_support_can_be_enabled_again_via_chat_command(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    await bot_world(db, org)
+    gid = await listen(db, org, "g1")
+    code_g = (await db.execute(text("SELECT code FROM core.groups WHERE id = :g"), {"g": gid})).scalar_one()
+    await db.execute(text("UPDATE core.groups SET added_by_kind = 'owner'"))
+    await db.commit()
+    await enable_support(db, gid)
+    await db.execute(text("UPDATE ops.group_support SET until_at = now() - interval '1 minute'"))
+    await db.commit()
+    done = await cmd(redis, org, "xac_nhan", await _fresh_confirm(redis, org, code_g))
+    assert "Đã bật" in done and "từ trước" not in done
+    assert (await db.execute(text("SELECT count(*) FROM ops.group_support WHERE disabled_at IS NULL"))).scalar() == 1
+    assert (await db.execute(text("SELECT disabled_reason FROM ops.group_support WHERE disabled_at IS NOT NULL"))).scalar() == "expired"
+
+
 async def test_auto_sends_list_has_no_message_text(owner_api: Api, db, redis) -> None:  # type: ignore[no-untyped-def]
     from gh.owner_channel.autosend import send_auto
     from gh.owner_channel.basis import Basis, Trigger

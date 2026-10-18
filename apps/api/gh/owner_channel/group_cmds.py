@@ -181,6 +181,7 @@ async def _xac_nhan(db: AsyncSession, redis: Redis, org_id: uuid.UUID, channel: 
         return "Nhóm đó không còn đủ điều kiện bật hỗ trợ."
     hours = (q.payload or {}).get("hours")
     until = datetime.now(UTC) + timedelta(hours=int(hours)) if hours else None
+    await oin.expire_stale_support(db, g.id)
     try:
         async with db.begin_nested():
             await db.execute(text("""INSERT INTO ops.group_support (org_id, group_id, enabled_via, until_at)

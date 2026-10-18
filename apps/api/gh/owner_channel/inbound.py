@@ -171,6 +171,15 @@ async def cancel_pairing(db: AsyncSession, org_id: uuid.UUID, channel: str, *, r
                      detail={"reason": reason})
 
 
+async def expire_stale_support(db: AsyncSession, group_id: uuid.UUID) -> int:
+    """Đóng các lượt hỗ trợ ĐÃ HẾT HẠN nhưng còn `disabled_at` NULL (chỉ mục `group_support_one_active_uq` vẫn coi là
+    đang bật ⇒ vướng lượt bật mới). Gọi trong cùng giao dịch, TRƯỚC khi chèn lượt mới."""
+    res = await db.execute(text("""
+        UPDATE ops.group_support SET disabled_at = now(), disabled_reason = 'expired'
+        WHERE group_id = :g AND disabled_at IS NULL AND until_at IS NOT NULL AND until_at <= now()"""), {"g": group_id})
+    return int(res.rowcount or 0)  # type: ignore[attr-defined]
+
+
 async def disable_support(db: AsyncSession, org_id: uuid.UUID, channel: str, *, reason: str,
                           group_id: uuid.UUID | None = None) -> list[uuid.UUID]:
     """Tắt lượt hỗ trợ đang bật (của một nhóm hoặc cả kênh) và ghi Nhật ký lắng nghe `support_off`."""
