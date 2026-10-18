@@ -9,6 +9,8 @@ from typing import Any
 from sqlalchemy import text
 
 from gh.auth import rbac, service
+from gh.biz.hooks import HookCtx
+from gh.biz.market.jobs import market_signal_capture
 from gh.biz.queue import jobs as queue_jobs
 from gh.chassis.masking import mask_for_prompt
 from gh.db import sessionmaker
@@ -129,6 +131,29 @@ async def test_gen_tool_results_to_model_are_masked_but_ids_survive(app, db, red
     res = await run.run("queue.list", {"tab": "all"})
     assert res.ok and str(unit) in res.text and str(unit) in run.seen_ids       # id còn nguyên cho validator
     _no_secret(res.text)
+
+
+# ─── P3-5 — tin ĐI của nhân viên / tài khoản Sếp không tạo tín hiệu cầu, cơ hội ──────────────────────────────────────
+
+async def test_outbound_messages_do_not_create_market_signals_or_opportunities(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    await install_presets(db, org)
+    await listen(db, org, "g1")
+    sm = sessionmaker()
+    await put(sm, org, {**msg("Anh cần 3 container thép cuộn giá bao nhiêu em", sender="own-zalo", name="Sếp"),
+                        "direction": "outbound"},
+              msg("Cần 3 container thép cuộn, giá bao nhiêu vậy em?", sender="khach1", name="Chị Lan"))
+    await Refinery(sm, redis, by_text()).run(org, "manual")  # type: ignore[arg-type]
+    units = (await db.execute(text("SELECT count(*) FROM clean.meaning_units WHERE side = 'demand'"))).scalar_one()
+    assert units == 2                                                  # cả hai tin đều thành đơn vị (lưu đủ)
+    ids = list((await db.execute(text("SELECT id FROM clean.meaning_units"))).scalars().all())
+    await market_signal_capture(HookCtx(org_id=org, unit_ids=ids, run_id=None, sm=sm, redis=redis, bus=None,
+                                        router=None))
+    sig = (await db.execute(text("""SELECT p.display_name FROM biz.market_signals s
+                                    JOIN core.persons p ON p.id = s.person_id"""))).scalars().all()
+    opp = (await db.execute(text("""SELECT p.display_name FROM biz.opportunities o
+                                    JOIN core.persons p ON p.id = o.person_id"""))).scalars().all()
+    assert sig == ["Chị Lan"] and opp == ["Chị Lan"], (sig, opp)      # chỉ khách thật, không có «Sếp»
 
 
 # ─── P3-4 — chưa có bộ ghi lời hứa: không nói «không có lời hứa bị vỡ» ────────────────
