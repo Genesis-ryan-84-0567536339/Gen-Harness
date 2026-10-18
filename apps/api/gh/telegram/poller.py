@@ -81,6 +81,11 @@ async def _reply(
         log.warning("Telegram: gửi trả lời lỗi (%s)", e.code)
 
 
+def _now() -> datetime:
+    """Đồng hồ của vòng nhận tin — một chỗ để test tiêm thời gian (mô phỏng ranh giới phút)."""
+    return datetime.now(UTC)
+
+
 async def _process(
     sm: Any,
     redis: Any,
@@ -126,8 +131,8 @@ async def _process(
             await inbound.record_reject(db, redis, org_id, inbound.R_RATE, update)
             await db.commit()
         # Chỉ báo MỘT lần ở tin đầu tiên vượt hạn mức (tin sau im lặng — tránh Telegram tự giới hạn bot).
-        if int(await redis.incr(f"gh:tg:ratemsg:{org_id}:{int(now.timestamp() // 60)}")) == 1:
-            await redis.expire(f"gh:tg:ratemsg:{org_id}:{int(now.timestamp() // 60)}", 120)
+        # SET NX EX 60: một lời báo mỗi 60 giây (không theo phút đồng hồ — tránh báo hai lần quanh ranh giới phút).
+        if await redis.set(f"gh:tg:ratemsg:{org_id}", 1, nx=True, ex=60):
             await _reply(client, token, verdict.chat_id, RATE_TEXT, [])
         return f"rejected:{inbound.R_RATE}"
     ctx = commands.Context(sm=sm, redis=redis, router=router, org_id=org_id, owner_user_id=cfg.owner_user_id)
@@ -165,7 +170,7 @@ async def poll_org(
     out["updates"] = len(updates)
     for upd in sorted(updates, key=inbound.update_id_of):
         try:
-            out["results"].append(await _process(sm, redis, router, client, org_id, token, upd, datetime.now(UTC)))
+            out["results"].append(await _process(sm, redis, router, client, org_id, token, upd, _now()))
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 — một tin hỏng không được chặn các tin sau

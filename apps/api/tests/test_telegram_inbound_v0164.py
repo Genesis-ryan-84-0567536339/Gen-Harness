@@ -541,11 +541,37 @@ async def test_find_chat_with_token_in_body_also_does_not_poll_while_inbound_act
     assert body["error_code"] != "TELEGRAM_INBOUND_ACTIVE"
 
 
+T0 = datetime(2026, 10, 18, 12, 0, 50, tzinfo=UTC)  # đồng hồ đóng băng — test không phụ thuộc giờ chạy
+
+
 async def test_rate_limit_20_per_minute(redis: Any) -> None:
     org = uuid.uuid4()
-    t = datetime.now(UTC)
-    assert [await inbound.rate_ok(redis, org, t) for _ in range(21)] == [True] * 20 + [False]
-    assert await inbound.rate_ok(redis, org, t + timedelta(minutes=1)) is True
+    assert [await inbound.rate_ok(redis, org, T0) for _ in range(21)] == [True] * 20 + [False]
+    assert await inbound.rate_ok(redis, org, T0 + timedelta(minutes=1)) is True  # đúng 60 giây sau ⇒ đã ra khỏi cửa sổ
+    assert await inbound.rate_ok(redis, uuid.uuid4(), T0) is True  # tổ chức khác không bị ảnh hưởng
+
+
+async def test_rate_limit_is_sliding_not_clock_minute(redis: Any) -> None:
+    """Hồi quy v0.1.68: cửa sổ cố định theo phút đồng hồ cho lọt 40 lệnh trong ~2 giây quanh ranh giới phút."""
+    org = uuid.uuid4()
+    before = T0 + timedelta(seconds=9, milliseconds=500)  # 12:00:59.5 (phút đồng hồ cũ)
+    after = before + timedelta(seconds=1)  # 12:01:00.5 (phút đồng hồ mới, cách 1 giây)
+    assert [await inbound.rate_ok(redis, org, before) for _ in range(20)] == [True] * 20
+    assert [await inbound.rate_ok(redis, org, after) for _ in range(3)] == [False] * 3  # vẫn trong 60 giây liền kề
+    assert await inbound.rate_ok(redis, org, before + timedelta(seconds=59, milliseconds=999)) is False
+    assert await inbound.rate_ok(redis, org, before + timedelta(seconds=60)) is True  # hết 60 giây ⇒ mở lại
+
+
+async def test_rate_limit_counts_each_command_at_its_own_time(redis: Any) -> None:
+    org = uuid.uuid4()
+    for _ in range(10):  # 10 lệnh ở giây 0, 10 lệnh ở giây 30
+        assert await inbound.rate_ok(redis, org, T0)
+    for _ in range(10):
+        assert await inbound.rate_ok(redis, org, T0 + timedelta(seconds=30))
+    assert await inbound.rate_ok(redis, org, T0 + timedelta(seconds=59)) is False
+    # giây 60: 10 lệnh đầu rời cửa sổ ⇒ đúng 10 chỗ trống; lệnh bị từ chối trước đó không chiếm chỗ
+    assert [await inbound.rate_ok(redis, org, T0 + timedelta(seconds=60)) for _ in range(11)] == [True] * 10 + [False]
+    assert await redis.zcard(f"gh:tg:rate:{org}") == 20
 
 
 async def test_poll_error_is_reported_without_url_or_token(owner_api: Api, bot: FakeBot, redis: Any) -> None:
