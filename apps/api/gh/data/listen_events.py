@@ -42,9 +42,19 @@ KINDS: dict[str, tuple[str, str]] = {
     "channel_error": ("ph ph-wifi-slash", "warn"),
     "channel_ended": ("ph ph-plugs", "bad"),
     "direct_new": ("ph ph-user-circle-plus", "accent"),
+    # v0.1.72 (bot tài khoản riêng): ai thêm bot, bot bị mời ra, Sếp gọi bot, kênh quản trị, chế độ hỗ trợ.
+    "group_added_by_other": ("ph ph-user-plus", "warn"),
+    "bot_removed": ("ph ph-sign-out", "warn"),
+    "owner_called": ("ph ph-bell-ringing", "accent"),
+    "owner_paired": ("ph ph-key", "ok"),
+    "owner_unpaired": ("ph ph-link", "warn"),
+    "support_on": ("ph ph-lifebuoy", "ok"),
+    "support_off": ("ph ph-lifebuoy", "neutral"),
+    "support_escalated": ("ph ph-handshake", "accent"),
 }
 #: Sự kiện của CẢ KÊNH (không thuộc nhóm nào, không phải tin 1-1) — chỉ phạm vi ALL mới thấy.
-CHANNEL_KINDS = ("channel_connected", "channel_error", "channel_ended", "groups_synced")
+CHANNEL_KINDS = ("channel_connected", "channel_error", "channel_ended", "groups_synced", "owner_paired",
+                 "owner_unpaired")
 DIRECT_KINDS = ("direct_new",)
 GROUP_KINDS = tuple(k for k in KINDS if k not in CHANNEL_KINDS and k not in DIRECT_KINDS)
 #: Tên người/nhóm kèm theo trong câu: tối đa bao nhiêu tên.
@@ -104,6 +114,29 @@ def event_text(kind: str, detail: dict[str, Any], *, channel_type: str | None, g
     elif kind == "direct_new":
         who = person_name or "một người lạ"
         out = f"Người mới nhắn riêng lần đầu trên {ch}: {who}."
+    elif kind == "group_added_by_other":
+        who = "người khác" if detail.get("added_by_kind") == "other" else "chưa rõ ai"
+        out = f"Bot {ch} được thêm vào nhóm {g} bởi {who}: nhóm ở chế độ Chờ Sếp chọn (chưa lưu tin)."
+    elif kind == "bot_removed":
+        out = f"Bot {ch} không còn trong nhóm {g} (bị mời ra); chế độ hỗ trợ của nhóm đã tắt."
+    elif kind == "owner_called":
+        out = f"Sếp gọi bot ở nhóm {g}" + (" nhưng nhóm đang không nghe." if detail.get("not_listening")
+                                           else " (bot trả lời tại chỗ).")
+    elif kind == "owner_paired":
+        out = f"Đã ghép kênh quản trị {ch} với Sếp."
+    elif kind == "owner_unpaired":
+        out = f"Kênh quản trị {ch} đã huỷ ghép" + (" (đổi tài khoản bot)." if detail.get("reason") == "session_changed"
+                                                  else ".")
+    elif kind == "support_on":
+        out = f"Đã bật chế độ hỗ trợ cho nhóm {g}."
+    elif kind == "support_off":
+        reason = {"bot_removed": "bot bị mời ra", "owner": "Sếp tắt", "expired": "hết hạn",
+                  "abuse_guard": "bị tấn công lặp",
+                  "session_changed": "đổi tài khoản bot", "account_kind_changed": "đổi loại tài khoản",
+                  "group_left": "bot rời nhóm"}.get(str(detail.get("reason")), "đã tắt")
+        out = f"Đã tắt chế độ hỗ trợ của nhóm {g} ({reason})."
+    elif kind == "support_escalated":
+        out = f"Bot chuyển một câu hỏi khó ở nhóm {g} cho Sếp."
     else:
         out = "Có thay đổi trên kênh."
     return mask_text(out, owner) or out
