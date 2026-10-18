@@ -13,7 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.auth.service import CurrentUser
-from gh.biz.core.scope import Scope, direct_visible_sql
+from gh.biz.core.scope import Scope, direct_visible_sql, group_view_sql
 from gh.data.common import iso
 
 
@@ -45,11 +45,29 @@ ALERT_TYPE_LABELS = {
     # dòng cũ (≤ v0.1.58) vẫn hiện đúng tên.
     "model_chain_agy_only": "Chưa có nguồn AI phù hợp",
 }
+
 # Đơn vị ý nghĩa nào rơi vào tab nào của Hộp thư (mục "Chỗ tự quyết" trong docs/api/phase-3-queue.md).
 OPPORTUNITY_EVENTS = frozenset({"AskedPrice", "OfferedSupply", "RequestedPartnership"})
 REPLY_EVENTS = frozenset({"Complained", "ScheduledMeeting", "SentQuotation", "PromisedDelivery"})
 TABS = ("all", "opportunity", "alert", "approval", "reply", "candidate")
 ITEM_TYPES = ("unit", "alert", "draft")
+
+
+_UUID_RE = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+
+
+def alert_in_hidden_group_sql(role_code: str, alias: str) -> str:
+    """Cảnh báo có chứng cứ (đơn vị ý nghĩa / tin thô) thuộc một nhóm mà `role_code` không được xem. Cảnh báo gắn vào
+    NGƯỜI (đối thủ xuất hiện, phản hồi chậm…) vẫn mang kết luận / tên khách trích từ tin trong nhóm «Chỉ Sếp»."""
+    uid = f"CASE WHEN ev->>'id' ~ '{_UUID_RE}' THEN (ev->>'id')::uuid END"
+    return (
+        "EXISTS (SELECT 1 FROM biz.alerts hal CROSS JOIN LATERAL jsonb_array_elements("
+        "CASE WHEN jsonb_typeof(hal.evidence) = 'array' THEN hal.evidence ELSE '[]'::jsonb END) ev"
+        f" WHERE hal.id = {alias}.item_id AND ("
+        f"(ev->>'type' = 'meaning_unit' AND EXISTS (SELECT 1 FROM clean.meaning_units hu WHERE hu.id = {uid}"
+        f" AND hu.group_id IS NOT NULL AND NOT ({group_view_sql(role_code, 'hu.group_id')})))"
+        f" OR (ev->>'type' = 'raw' AND EXISTS (SELECT 1 FROM raw.events hr WHERE hr.id = {uid}"
+        f" AND hr.group_id IS NOT NULL AND NOT ({group_view_sql(role_code, 'hr.group_id')})))))")
 
 
 def item_scope_sql(sc: Scope, alias: str, user: CurrentUser) -> tuple[str, dict[str, Any]]:
@@ -61,6 +79,14 @@ def item_scope_sql(sc: Scope, alias: str, user: CurrentUser) -> tuple[str, dict[
     xem — kể cả phạm vi `all` của Vận hành/Kiểm soát (xem `gh.biz.core.scope.direct_visible_sql`)."""
     dm, dp = direct_visible_sql(user, f"{alias}.group_id", f"{alias}.person_id")
     dm_cond = "TRUE" if dm == "TRUE" else f"({alias}.item_type <> 'unit' OR {dm})"
+    # «Quyền xem» của nhóm (v0.1.71): MỌI loại mục gắn với một nhóm (tin, cảnh báo, bản nháp) — nhóm «Chỉ Sếp» ẩn với
+    # vai khác, kể cả khi mục được giao thẳng cho họ.
+    gv = group_view_sql(user.role_code, f"{alias}.group_id")
+    sv = group_view_sql(user.role_code, f"{alias}.subject_id")
+    if gv != "TRUE":
+        dm_cond = (f"({dm_cond} AND ({alias}.group_id IS NULL OR {gv})"
+                   f" AND ({alias}.subject_type IS DISTINCT FROM 'group' OR {sv})"
+                   f" AND ({alias}.item_type <> 'alert' OR NOT {alert_in_hidden_group_sql(user.role_code, alias)}))")
     if sc.is_all:
         return dm_cond, dp
     sw, sp = sc.subject_sql(f"{alias}.subject_type", f"{alias}.subject_id")

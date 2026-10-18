@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.auth import rbac, service
 from gh.auth.deps import require, require_pin
-from gh.biz.core.scope import direct_visible, direct_visible_sql
+from gh.biz.core.scope import direct_visible, direct_visible_sql, group_row_view_sql, group_visible
 from gh.chassis import actionlog
 from gh.data.common import (
     CHANNEL_NAME,
@@ -152,9 +152,10 @@ async def raw_by_group(since: str | None = "24h", limit: int = Query(7, ge=1, le
                        user: service.CurrentUser = Depends(READ),
                        db: AsyncSession = DB) -> list[dict[str, Any]]:
     cut = since_cutoff(since) or datetime(1970, 1, 1, tzinfo=UTC)
-    rows = (await db.execute(text("""
+    rows = (await db.execute(text(f"""
         SELECT g.id, g.code, g.name, count(*) AS n FROM raw.events e JOIN core.groups g ON g.id = e.group_id
-        WHERE e.org_id = :o AND e.received_at >= :cut GROUP BY g.id ORDER BY n DESC LIMIT :lim"""),
+        WHERE e.org_id = :o AND e.received_at >= :cut AND {group_row_view_sql(user.role_code, "g")}
+        GROUP BY g.id ORDER BY n DESC LIMIT :lim"""),  # noqa: S608 — biểu thức nội bộ
         {"o": user.org_id, "cut": cut, "lim": limit})).all()
     return [{"group": ref(r.id, r.code, r.name), "n": r.n} for r in rows]
 
@@ -723,9 +724,16 @@ NB_READ = READ
 NB_WRITE = MANAGE
 
 
+async def _ensure_group_view(db: AsyncSession, user: service.CurrentUser, type_: str, sid: uuid.UUID) -> None:
+    """Sổ tay của NHÓM theo «Quyền xem» của nhóm (v0.1.71): ngoài quyền ⇒ 404 như nhóm không tồn tại."""
+    if type_ == "group" and not await group_visible(db, user, sid):
+        raise not_found("Nhóm")
+
+
 @router.get("/notebooks/{type_}/{sid}")
 async def get_notebook(type_: Literal["person", "group"], sid: uuid.UUID, user: service.CurrentUser = Depends(NB_READ),
                        db: AsyncSession = DB) -> dict[str, Any]:
+    await _ensure_group_view(db, user, type_, sid)
     return await notebook_payload(db, user.org_id, type_, sid)
 
 
@@ -808,6 +816,7 @@ async def compact_now(type_: Literal["person", "group"], sid: uuid.UUID, user: s
 async def compactions(type_: Literal["person", "group"], sid: uuid.UUID, user: service.CurrentUser = Depends(NB_READ),
                       db: AsyncSession = DB) -> list[dict[str, Any]]:
     await _subject(db, user.org_id, type_, sid)
+    await _ensure_group_view(db, user, type_, sid)
     rows = (await db.execute(text("""
         SELECT c.compaction_no, c.at, c.tokens_before, c.tokens_after, cardinality(c.archived_entries) AS n, c.summary
         FROM memory.compactions c JOIN memory.notebooks n ON n.id = c.notebook_id

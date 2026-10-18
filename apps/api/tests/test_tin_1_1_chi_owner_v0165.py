@@ -12,7 +12,7 @@ from gh import realtime
 from gh.auth import rbac, service
 from gh.db import sessionmaker
 from gh.gen.tools import ToolRunner
-from tests.phase2 import msg, put
+from tests.phase2 import listen, msg, org_id, put
 from tests.test_p3_duty import BUY, refine, w  # noqa: F401
 from tests.test_rbac_api import login_as
 
@@ -184,9 +184,10 @@ class _Ws:
         self.sent.append(t)
 
 
-async def test_ws_raw_new_for_direct_message_goes_to_owner_only() -> None:
+async def test_ws_raw_new_for_direct_message_goes_to_owner_only(app, db) -> None:  # type: ignore[no-untyped-def]
     hub = realtime.Hub(None)  # type: ignore[arg-type]
     org = uuid.uuid4()
+    gid = await listen(db, await org_id(db), "gws")      # nhóm thật «Mọi thành viên» (v0.1.71: WS xét «Quyền xem»)
 
     def user(role: str) -> service.CurrentUser:
         return service.CurrentUser(id=uuid.uuid4(), org_id=org, email="", display_name="", role_code=role,
@@ -199,7 +200,7 @@ async def test_ws_raw_new_for_direct_message_goes_to_owner_only() -> None:
                         "data": {"id": "1", "group": None, "text": "tin riêng"}})
     assert len(ow.sent) == 1 and au.sent == []
     await hub.dispatch({"type": "raw.new", "org_id": str(org), "to_user": None,
-                        "data": {"id": "2", "group": {"id": "g"}, "text": "tin nhóm"}})
+                        "data": {"id": "2", "group": {"id": str(gid)}, "text": "tin nhóm"}})
     assert len(ow.sent) == 2 and len(au.sent) == 1
 
 

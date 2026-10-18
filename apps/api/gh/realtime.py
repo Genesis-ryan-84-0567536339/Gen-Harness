@@ -55,6 +55,42 @@ OWNER_ONLY_WHEN_DIRECT = {"raw.new"}
 # nào cũng có `group` rỗng nên không dùng được quy tắc `OWNER_ONLY_WHEN_DIRECT`).
 OWNER_ONLY_FLAGGED = {"listen.event"}
 
+# Sự kiện mang nguyên văn tin của một NHÓM: theo «Quyền xem» của nhóm (v0.1.71) — nhóm «Chỉ Sếp» chỉ gửi cho Owner, nhóm
+# «Sếp + quản lý» thêm vai Quản lý (cùng quy tắc `gh.biz.core.scope.view_scopes_for` của các API đọc).
+GROUP_VIEW_SCOPED = {"raw.new", "draft.new", "draft.updated"}
+
+
+async def _draft_group_id(draft_id: Any) -> str | None:
+    """Nhóm mà một bản nháp gắn với (nhóm đích hoặc đối tượng là nhóm); None = không thuộc nhóm nào."""
+    from sqlalchemy import text
+
+    try:
+        async with sessionmaker()() as db:
+            r = (await db.execute(text("""SELECT COALESCE(group_id,
+                                                          CASE WHEN subject_type = 'group' THEN subject_id END)
+                                          FROM biz.action_drafts WHERE id = CAST(:d AS uuid)"""),
+                                  {"d": str(draft_id)})).scalar_one_or_none()
+            await db.rollback()
+        return str(r) if r is not None else None
+    except Exception as exc:  # noqa: BLE001 — lỗi tạm thời: giữ kín nhóm không rõ thay vì lộ
+        log.warning("ws không đọc được nhóm của bản nháp: %s", type(exc).__name__)
+        return "?"
+
+
+async def _group_view_scope(group_id: Any) -> str | None:
+    """`core.groups.view_scope` của nhóm; không đọc được / không có nhóm ⇒ None (coi như «Chỉ Sếp», an toàn)."""
+    from sqlalchemy import text
+
+    try:
+        async with sessionmaker()() as db:
+            r = (await db.execute(text("SELECT view_scope FROM core.groups WHERE id = CAST(:g AS uuid)"),
+                                  {"g": str(group_id)})).scalar_one_or_none()
+            await db.rollback()
+        return str(r) if r is not None else None
+    except Exception as exc:  # noqa: BLE001 — lỗi tạm thời: giữ kín thay vì lộ
+        log.warning("ws không đọc được Quyền xem của nhóm: %s", type(exc).__name__)
+        return None
+
 
 def register_event(type: str, permission: str | None, *, masked: bool = False) -> None:
     """Các cụm màn giai đoạn 3 khai báo sự kiện WS của mình (gọi lúc import routes). Loại chưa khai báo bị bỏ."""
@@ -190,6 +226,8 @@ class Hub:
             return  # sự kiện riêng tư thiếu người nhận → bỏ, không phát cho cả tổ chức
         text = orjson.dumps(msg).decode()
         masked: str | None = None
+        group_scope: str | None = None
+        group_scope_read = False
         for ws, user in list(self.clients.items()):
             if org and str(user.org_id) != org:
                 continue
@@ -203,6 +241,17 @@ class Hub:
             if (msg["type"] in OWNER_ONLY_FLAGGED and user.role_code != rbac.OWNER
                     and (msg.get("data") or {}).get("owner_only")):
                 continue
+            if msg["type"] in GROUP_VIEW_SCOPED and user.role_code != rbac.OWNER:
+                if not group_scope_read:
+                    data = msg.get("data") or {}
+                    gid = (await _draft_group_id(data.get("id")) if msg["type"].startswith("draft.")
+                           else (data.get("group") or {}).get("id"))
+                    group_scope = (await _group_view_scope(gid) if gid else "all_members")
+                    group_scope_read = True
+                from gh.biz.core.scope import view_scopes_for
+
+                if group_scope is None or group_scope not in (view_scopes_for(user.role_code) or ()):
+                    continue
             out = text
             if msg["type"] in MASKED_EVENTS and user.role_code != rbac.OWNER:
                 if masked is None:

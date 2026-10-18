@@ -18,7 +18,15 @@ from gh import realtime
 from gh.auth import rbac, service
 from gh.auth.deps import current_user, require
 from gh.biz.core import drafts, explain
-from gh.biz.core.scope import Scope, direct_visible_sql, ensure_group, ensure_person, not_found, scope_for
+from gh.biz.core.scope import (
+    Scope,
+    direct_visible_sql,
+    ensure_group,
+    ensure_person,
+    group_view_sql,
+    not_found,
+    scope_for,
+)
 from gh.biz.queue import service as qsvc
 from gh.chassis import actionlog
 from gh.data.common import LISTENING_MODES, iso, mask_text
@@ -355,9 +363,8 @@ async def _queue_widget(db: AsyncSession, user: service.CurrentUser, sc: Scope) 
           AND (i.item_type IN ('alert', 'draft') OR (i.item_type = 'unit' AND i.title = ANY(CAST(:opp AS text[]))))
         ORDER BY CASE i.priority WHEN 'P1' THEN 0 WHEN 'P2' THEN 1 ELSE 2 END, i.created_at DESC
         LIMIT :n"""), {"o": user.org_id, "opp": OPP_EVENTS, "n": QUEUE_WIDGET_LIMIT, **params2})).all()  # noqa: S608
-    tw, tp = sc.subject_sql("t.subject_type", "t.subject_id") if not sc.is_all else ("TRUE", {})
-    uw, up = sc.user_sql("t.assignee_user_id") if not sc.is_all else ("TRUE", {})
-    tcond = "TRUE" if sc.is_all else f"({tw} OR {uw})"
+    tcond, tp = _task_scope(sc)
+    up: dict[str, Any] = {}
     trows = (await db.execute(text(f"""
         SELECT t.id, t.code, t.title, t.priority, t.due_at FROM biz.tasks t
         WHERE t.org_id = :o AND t.status NOT IN ('done', 'cancelled') AND t.due_at IS NOT NULL
@@ -524,11 +531,13 @@ async def overview(user: service.CurrentUser = Depends(require("overview.read"))
 # ─── Việc & Nhắc hẹn ────────────────────────────────────────────────────────
 
 def _task_scope(sc: Scope) -> tuple[str, dict[str, Any]]:
-    if sc.is_all:
-        return "TRUE", {}
+    if sc.is_all:       # vẫn loại việc gắn nhóm mà «Quyền xem» của nhóm không cho vai này đọc (v0.1.71)
+        return sc.subject_sql("t.subject_type", "t.subject_id")
     sw, sp = sc.subject_sql("t.subject_type", "t.subject_id")
     uw, up = sc.user_sql("t.assignee_user_id")
-    return f"({sw} OR {uw})", {**sp, **up}
+    gv = group_view_sql(sc.role, "t.subject_id")       # việc giao đích danh vẫn không đọc được nhóm bị ẩn
+    gate = "TRUE" if gv == "TRUE" else f"(t.subject_type IS DISTINCT FROM 'group' OR {gv})"
+    return f"(({sw} OR {uw}) AND {gate})", {**sp, **up}
 
 
 def _task_payload(r: Any) -> dict[str, Any]:

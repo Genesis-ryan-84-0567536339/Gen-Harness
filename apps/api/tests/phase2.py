@@ -65,9 +65,12 @@ async def org_id(db: AsyncSession) -> uuid.UUID:
 async def listen(db: AsyncSession, org: uuid.UUID, external_group_id: str, mode: str = "silent",
                  channel: str = "zalo") -> uuid.UUID:
     """Tạo nhóm (qua đường tạo nhóm của ingest, KHÔNG có tin nào) rồi đặt chế độ nghe. Từ QD 17/10 nhóm mới mặc định
-    `silent` và lưu tin ngay, nên không còn dùng tin dò."""
+    `silent` và lưu tin ngay, nên không còn dùng tin dò. Từ v0.1.71 «Quyền xem» của nhóm được áp thật (mặc định ngoài
+    đời là «Chỉ Sếp») ⇒ nhóm test mặc định `all_members` để các test vai thấp (Vận hành, Kiểm soát…) không phụ thuộc
+    nó; test về «Quyền xem» tự đặt giá trị (xem `test_quyen_xem_nhom_v0171.py`)."""
     await upsert_group(db, org, await channel_row(db, org, channel), external_group_id, f"Nhóm {external_group_id}")
-    gid = (await db.execute(text("""UPDATE core.groups SET listen_mode = :m WHERE external_id = :x RETURNING id"""),
+    gid = (await db.execute(text("""UPDATE core.groups SET listen_mode = :m, view_scope = 'all_members'
+                                    WHERE external_id = :x RETURNING id"""),
                             {"m": mode, "x": external_group_id})).scalar_one()
     await db.commit()
     return gid  # type: ignore[no-any-return]
