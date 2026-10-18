@@ -29,11 +29,12 @@ def test_box_rule_matches_placement_and_agy_policy() -> None:
     # Vai ghi trong câu đúng là vai qua hộp theo bảng placement …
     assert placement.box_required("core.reply") and placement.box_required("core.refinery")
     assert placement.box_required("core.gen", owner=False) and placement.box_required("agent:x", True)
-    for phrase in ("soạn lại", "dịch nháp", "sàng lọc tin", "agent ngoại giao", "Gen của nhân viên"):
+    assert placement.box_required("core.briefing")      # Bản tin có tên khách / tiêu đề việc ⇒ qua hộp
+    for phrase in ("soạn lại", "dịch nháp", "sàng lọc tin", "Bản tin Gen", "agent ngoại giao", "Gen của nhân viên"):
         assert phrase in text
-    # … vai chạy trong tiến trình (Gen của Sếp, Bản tin) KHÔNG nằm trong câu …
-    assert not placement.box_required("core.gen") and not placement.box_required("core.briefing")
-    assert "Bản tin Gen không cần hộp" in text
+    # … vai chạy trong tiến trình (Gen của Sếp, agent nội bộ) KHÔNG cần hộp, và câu nói đúng điều đó …
+    assert not placement.box_required("core.gen") and not placement.box_required("agent:x")
+    assert "chỉ Gen của Sếp và agent nội bộ không cần hộp" in text
     # … và hộp chưa chạy thì quyết định cuối đúng là "không dùng Antigravity", không rơi về tiến trình.
     for role in ("core.reply", "core.refinery"):
         for box in (agy_policy.BOX_DOWN, agy_policy.BOX_NOT_INSTALLED):
@@ -41,6 +42,7 @@ def test_box_rule_matches_placement_and_agy_policy() -> None:
             assert verdict.allowed is False and verdict.where == placement.BOX
         assert agy_policy.decide(role, box=agy_policy.BOX_OK).allowed is True
     assert agy_policy.decide("core.gen", box=agy_policy.BOX_DOWN).allowed is True   # vai trong tiến trình không cần hộp
+    assert agy_policy.decide("core.briefing", box=agy_policy.BOX_DOWN).allowed is False   # Bản tin qua hộp
     assert "không" in text and "tiến trình" in text
 
 

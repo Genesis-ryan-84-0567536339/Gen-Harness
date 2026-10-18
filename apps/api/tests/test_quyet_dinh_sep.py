@@ -288,17 +288,18 @@ def test_v0155_agy_row_target_does_not_promise_switching_two_accounts() -> None:
 # ─── 16/10 · Q1 agy: core/nội bộ mở, ngoại giao qua hộp riêng ─────────────────────────────────────────────────
 
 def test_q1_agy_core_in_process_outer_layer_through_the_box() -> None:
-    """16/10 Q1 — chính sách CUỐI (v0.1.63, `placement`): core.gen của Sếp, bản tin, agent nội bộ chạy agy TRONG TIẾN
-    TRÌNH; core.reply, sàng lọc tin người lạ, agent ngoại giao, Gen của nhân viên, thử agent, Soạn lại / Dịch nháp chạy
-    QUA HỘP RIÊNG (hộp không `ok` ⇒ KHÔNG dùng agy, không rơi về trong tiến trình); `rule_test` không dùng agy."""
+    """16/10 Q1 — chính sách CUỐI (v0.1.63, `placement`): core.gen của Sếp và agent nội bộ chạy agy TRONG TIẾN TRÌNH;
+    core.reply, sàng lọc tin người lạ, Bản tin (prompt có tên khách — review v0.1.63 P2-3), agent ngoại giao, Gen của
+    nhân viên, thử agent, Soạn lại / Dịch nháp chạy QUA HỘP RIÊNG (hộp không `ok` ⇒ KHÔNG dùng agy,
+    không rơi về trong tiến trình); `rule_test` không dùng agy."""
     d = agy_policy.decide
     ok, down = agy_policy.BOX_OK, agy_policy.BOX_DOWN
     internal = "agent:11111111-1111-1111-1111-111111111111"
-    for verdict in (d("core.gen", owner=True, box=down), d("core.briefing", box=down),
-                    d(internal, diplomatic=False, box=down)):
+    for verdict in (d("core.gen", owner=True, box=down), d(internal, diplomatic=False, box=down)):
         assert verdict.allowed and verdict.where == agy_policy.INPROC
     outer: list[Any] = [
-        dict(agent_key="core.reply"), dict(agent_key="core.refinery"), dict(agent_key=internal, diplomatic=True),
+        dict(agent_key="core.reply"), dict(agent_key="core.refinery"), dict(agent_key="core.briefing"),
+        dict(agent_key=internal, diplomatic=True),
         dict(agent_key="core.gen", owner=False), dict(agent_key="core.gen", purpose="setup_agent_try"),
         dict(agent_key="core.gen", purpose="draft_translate"), dict(agent_key="core.gen", purpose="draft_regenerate"),
     ]

@@ -1155,9 +1155,9 @@ FAILOVER_RULES: tuple[dict[str, str], ...] = (
     # v0.1.70 (F029 sót): hai luật việc nền — câu chữ khớp `gh.providers.placement` / `agy_policy.decide` / `router`
     # (test_failover_rules_v0170 đối chiếu từng vai và từng loại việc).
     {"key": "hộp Antigravity",
-     "value": "vai chạy Antigravity qua hộp riêng (soạn lại / dịch nháp tin khách, sàng lọc tin, agent ngoại giao, Gen "
-              "của nhân viên) mà hộp chưa chạy thì bỏ qua Antigravity và chuyển nguồn kế tiếp — không bao giờ chạy "
-              "thay trong tiến trình; Gen của Sếp và Bản tin Gen không cần hộp"},
+     "value": "vai chạy Antigravity qua hộp riêng (soạn lại / dịch nháp tin khách, sàng lọc tin, Bản tin Gen, agent "
+              "ngoại giao, Gen của nhân viên) mà hộp chưa chạy thì bỏ qua Antigravity và chuyển nguồn kế tiếp — không "
+              "bao giờ chạy thay trong tiến trình; chỉ Gen của Sếp và agent nội bộ không cần hộp"},
     {"key": "việc nền",
      "value": "việc nền (sàng lọc tin, trực việc, Bản tin Gen) bỏ qua Claude Code CLI trừ khi Sếp đã cho phép ở Bộ não "
               "AI; Antigravity không cần cho phép này. Chỉ còn Claude Code CLI chưa được phép thì hết chuỗi và báo "
