@@ -193,6 +193,22 @@ async def test_care_unattended_counts_customers_not_messages(app, db, owner_api)
     assert body["unattended"] == 2                    # 2 KHÁCH (Lan 2 tin, Bình 1 tin), không phải 3 tin
 
 
+# ─── P3-8 — số «Cơ hội» của Hộp thư và Mặt tiền là MỘT con số ─────────────────────────────────────────────────────────
+
+async def test_opportunity_count_is_the_same_in_inbox_and_owner_feed(app, db, owner_api) -> None:  # type: ignore[no-untyped-def]
+    from tests.test_owner_v0155 import _org
+    from tests.test_owner_v0159 import ago, unit
+
+    org = await _org(db)
+    for k, et in enumerate(["AskedPrice", "OfferedSupply", "RequestedPartnership", "RequestedSample", "SentQuotation",
+                            "DealWon", "AskedStatus", "Complained"]):
+        await unit(db, org, ago(hours=k + 1), et, f"Tin {et}")
+    await db.commit()
+    inbox = (await owner_api.get("/inbox")).json()["counts"]["opportunity"]
+    feed_counts = (await owner_api.get("/owner/feed?view=opportunity")).json()["counts"]["opportunity"]
+    assert inbox == feed_counts == 3, (inbox, feed_counts)
+
+
 # ─── P3-4 — chưa có bộ ghi lời hứa: không nói «không có lời hứa bị vỡ» ────────────────
 
 def test_care_scenario_note_does_not_claim_no_broken_promises_while_untracked() -> None:
