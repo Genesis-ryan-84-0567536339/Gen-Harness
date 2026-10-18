@@ -454,9 +454,10 @@ async def test_failed_ai_check_is_not_masked_by_an_older_successful_call(owner_a
     assert await ai() == (True, "pass", 1)                       # lượt gọi thật mới hơn cả lần kiểm lỗi
 
 
-async def test_switch_counter_counts_real_switches_only(owner_api: Api, db: Any) -> None:
-    """Bộ đếm `switch_passes` (còn trả cho Kết nối): không tính lượt lỗi, không tính đổi sang CHÍNH tài khoản vừa đổi
-    tới; `results.agy_switch.runs` vẫn là tổng số bản ghi (cả lỗi). v0.1.55: dòng agy KHÔNG còn phụ thuộc bộ đếm."""
+async def test_overview_has_no_switch_counter_and_runs_count_every_record(owner_api: Api, db: Any) -> None:
+    """v0.1.68 (F040): `switch_passes` đã gỡ (web không còn đọc; trước đây mỗi `overview` — Hôm nay, Việc Sếp cần làm,
+    Gen cùng gọi — chạy một truy vấn thừa chỉ để trả trường đó). `results.agy_switch.runs` vẫn là tổng số bản ghi (cả
+    lỗi); dòng agy chỉ phụ thuộc `agy_call` (v0.1.55)."""
     org = await org_id(db)
     a, b = str(uuid.uuid4()), str(uuid.uuid4())
 
@@ -468,15 +469,9 @@ async def test_switch_counter_counts_real_switches_only(owner_api: Api, db: Any)
     await boss.record(db, org, "agy_switch", "fail", error_code="AGY_ACCOUNT_MISMATCH", detail={"target_profile": b})
     await db.commit()
     got = await ov()
-    assert got["switch_passes"] == 1 and got["results"]["agy_switch"]["runs"] == 2
-    await boss.record(db, org, "agy_switch", "pass", detail={"target_profile": a})       # lại chính tài khoản a
-    await db.commit()
-    got = await ov()
-    assert got["switch_passes"] == 1 and next(r for r in got["rows"] if r["key"] == "agy")["done"] is True
-    await boss.record(db, org, "agy_switch", "pass", detail={"target_profile": b})
-    await db.commit()
-    got = await ov()
-    assert got["switch_passes"] == 2 and next(r for r in got["rows"] if r["key"] == "agy")["done"] is True
+    assert "switch_passes" not in got and got["results"]["agy_switch"]["runs"] == 2
+    assert next(r for r in got["rows"] if r["key"] == "agy")["done"] is True
+    assert not hasattr(boss, "switch_passes") and not hasattr(boss, "SWITCHES_NEEDED")
 
 
 # ─── (g) /system/health ─────────────────────────────────────────────────────

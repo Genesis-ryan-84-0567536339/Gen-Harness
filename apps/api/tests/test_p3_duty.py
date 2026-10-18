@@ -294,7 +294,7 @@ async def test_context_refs_match_draft_sources_and_are_traceable(w, db, redis) 
     body = (await api.get(f"/drafts/{dr.id}")).json()
     assert [s["ref"] for s in body["sources"]] == d.context_refs and body["agent"]["id"] == str(a)
     listed = (await api.get(f"/agents/decisions?agent_id={a}")).json()
-    assert listed["items"][0]["draft"] == {"id": str(dr.id), "code": dr.code}
+    assert listed["items"][0]["draft"] == {"id": str(dr.id), "code": dr.code, "status": "pending"}  # F076
     assert listed["items"][0]["context_refs"] == d.context_refs
     ex = (await api.get(f"/explain/draft/{dr.id}")).json()
     assert {x["id"] for x in ex["units"]} >= {str(u0), str(u1)}

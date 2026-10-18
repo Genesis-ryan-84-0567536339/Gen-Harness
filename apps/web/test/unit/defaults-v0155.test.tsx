@@ -476,7 +476,11 @@ describe('apiModel (bảng gán model)', () => {
     expect(bindingEffortText(slot({ binding: b, source: 'custom' }))).toBe('Cao');
     expect(bindingEffortText(slot({ source: 'standard', standard: STD }))).toBe('Vừa (chuẩn)');
     expect(bindingEffortText(slot())).toBe('—');
-    expect(bindingParamsText(slot({ source: 'standard', standard: STD }))).toBe('Gen — trợ lý quản trị — nhiệt độ 0,30 · ngữ cảnh 6k token · bộ quy tắc — (chuẩn)');
+    // v0.1.66 (F021): vai lõi theo hồ sơ chuẩn (cố định), không còn "bộ quy tắc"; agent trực việc mới có số do Sếp đặt.
+    expect(bindingParamsText(slot({ source: 'standard', standard: STD }))).toBe('Gen — trợ lý quản trị — nhiệt độ 0,30 · ngữ cảnh 6k token (theo hồ sơ chuẩn, cố định)');
+    expect(bindingParamsText(slot({ agent_key: 'agent:a1', label: 'Trợ lý', source: 'standard', standard: STD }))).toBe('Trợ lý — nhiệt độ 0,30 · ngữ cảnh 6k token (chuẩn)');
+    expect(bindingParamsText(slot({ agent_key: 'agent:a1', label: 'Trợ lý', binding: b, source: 'custom' }))).toBe('Trợ lý — nhiệt độ 0,20 · ngữ cảnh 8k token');
+    expect(bindingParamsText(slot({ binding: b, source: 'custom' }))).toBe('Gen — trợ lý quản trị — nhiệt độ và ngữ cảnh theo hồ sơ chuẩn (cố định)');
   });
 
   it('mức suy nghĩ model nhận: CLI theo danh sách đã kiểm; haiku/khoá API không có', () => {
@@ -543,7 +547,23 @@ describe('<ApiScreen> bảng gán model ở chế độ tiêu chuẩn', () => {
     expect(within(done).getByTestId('binding-effort-core.refinery')).toHaveTextContent('—');
   });
 
-  it('nhiệt độ / ngữ cảnh / bộ quy tắc và hạn mức model nằm trong khối "Nâng cao" (đóng sẵn), không còn cột ở bảng chính', async () => {
+  it('v0.1.67 (F016): dòng gán có inactive_reason ⇒ chip nói thẳng "đang dùng Chuẩn"; dòng bình thường không có chip', async () => {
+    const page: BindingsPage = {
+      ...BINDINGS,
+      items: BINDINGS.items.map((it) =>
+        it.agent_key === 'core.refinery' && it.binding
+          ? { ...it, binding: { ...it.binding, inactive_reason: 'Nguồn đã tắt — agent đang dùng Chuẩn' } }
+          : it,
+      ),
+    };
+    mockFetch((c) => (c.url.includes('/agents/bindings') && c.method === 'GET' ? json(200, page) : apiHandler(c)));
+    renderUi(<ApiScreen />);
+    const done = (await screen.findByText('Sàng lọc & suy luận chính', { selector: '.apm-table__agent' })).closest('tr') as HTMLElement;
+    expect(within(done).getByTestId('binding-inactive-core.refinery')).toHaveTextContent('Nguồn đã tắt — agent đang dùng Chuẩn');
+    expect(screen.queryByTestId('binding-inactive-core.gen')).toBeNull();
+  });
+
+  it('nhiệt độ / ngữ cảnh và hạn mức model nằm trong khối "Nâng cao" (đóng sẵn), không còn cột ở bảng chính', async () => {
     mockFetch((c) => apiHandler(c));
     renderUi(<ApiScreen />);
     const table = (await screen.findByText('Gen — trợ lý quản trị', { selector: '.apm-table__agent' })).closest('table') as HTMLElement;
@@ -553,8 +573,9 @@ describe('<ApiScreen> bảng gán model ở chế độ tiêu chuẩn', () => {
     const adv = screen.getByTestId('api-advanced');
     expect(adv.tagName).toBe('DETAILS');
     expect(adv).not.toHaveAttribute('open');
-    expect(within(adv).getByText(/^Nâng cao — nhiệt độ, ngữ cảnh, bộ quy tắc và hạn mức model$/)).toBeInTheDocument();
-    expect(within(adv).getByTestId('binding-params-core.refinery')).toHaveTextContent('nhiệt độ 0,20 · ngữ cảnh 64k token · bộ quy tắc R-01');
+    expect(within(adv).getByText(/^Nâng cao — nhiệt độ, ngữ cảnh và hạn mức model$/)).toBeInTheDocument();
+    expect(within(adv).getByTestId('binding-params-core.refinery')).toHaveTextContent('nhiệt độ và ngữ cảnh theo hồ sơ chuẩn (cố định)');
+    expect(within(adv).queryByText('Tham số sàng lọc')).toBeNull();                 // F018: thẻ trùng đã bỏ
     expect(within(adv).getByText('Giới hạn gọi API')).toBeInTheDocument();
   });
 
@@ -568,8 +589,9 @@ describe('<ApiScreen> bảng gán model ở chế độ tiêu chuẩn', () => {
     expect((within(dlg).getByLabelText('Model') as HTMLSelectElement).value).toBe('m-sonnet');   // chọn sẵn model Chuẩn
     const effort = await within(dlg).findByLabelText('Mức suy nghĩ');
     expect(within(effort).getAllByRole('option').map((o) => o.getAttribute('value'))).toEqual(['', 'low', 'medium', 'high', 'xhigh', 'max']);
-    // nhiệt độ / ngữ cảnh / bộ quy tắc nằm trong "Nâng cao" của hộp
-    expect(within(within(dlg).getByTestId('binding-edit-advanced')).getByLabelText('Nhiệt độ (0–2)')).toBeInTheDocument();
+    // v0.1.66 (F021): vai lõi (Gen) không có ô nhiệt độ / ngữ cảnh / bộ quy tắc — chỉ có câu "theo hồ sơ chuẩn (cố định)".
+    expect(within(dlg).queryByTestId('binding-edit-advanced')).toBeNull();
+    expect(within(dlg).getByTestId('binding-core-fixed-note')).toBeInTheDocument();
     await user.selectOptions(effort, 'high');
     await user.click(within(dlg).getByRole('button', { name: 'Lưu' }));
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toMatchObject({ model_id: 'm-sonnet', effort: 'high' }));

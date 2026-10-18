@@ -49,7 +49,7 @@ test('Thiết lập gọn: từ máy mới tới Mặt tiền chỉ qua 3 màn; 
   expect(backups.schedule).not.toBeNull();
 });
 
-test('Thiết lập gọn: bước 10 mở từ Hướng dẫn hiện thẳng form mời (danh sách rỗng vẫn lưu được); bước 11 "Đổi lịch" gập sẵn nhưng đổi được', async ({ page }) => {
+test('Thiết lập gọn: bước 10 mở từ Hướng dẫn hiện thẳng form mời (danh sách rỗng ⇒ Tiếp tục tắt, lối ra là Quay lại); bước 11 "Đổi lịch" gập sẵn nhưng đổi được', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await resetMock(page.request, 'fresh', { startAtStep: 10 });
   await loginAsOwner(page);
@@ -57,8 +57,10 @@ test('Thiết lập gọn: bước 10 mở từ Hướng dẫn hiện thẳng fo
   await expect(page.getByRole('heading', { name: 'Mời đội ngũ' })).toBeVisible();
   await expect(page.getByTestId('step10-suggestion')).toHaveCount(0); // thẻ gợi ý "Để sau" chỉ có trong trình thiết lập (bản test đơn vị giữ)
   await expect(page.getByRole('button', { name: 'Thêm người' })).toBeVisible();
-  // Danh sách rỗng vẫn lưu được (không bắt buộc mời ai).
-  await page.getByRole('button', { name: /Tiếp tục/ }).click();
+  // v0.1.68 (F038): danh sách rỗng KHÔNG phải "đã mời" ⇒ Tiếp tục tắt, lối ra là "Quay lại" (Hướng dẫn không có nút Để sau; không bắt buộc mời ai).
+  await expect(page.getByRole('button', { name: /Tiếp tục/ })).toBeDisabled();
+  await expect(page.getByText('chưa muốn mời thì bấm "Quay lại"')).toBeVisible();
+  await page.getByRole('button', { name: 'Quay lại' }).click();
   await expect(page).toHaveURL(/\/guide$/);
 
   await page.goto('/guide/11');

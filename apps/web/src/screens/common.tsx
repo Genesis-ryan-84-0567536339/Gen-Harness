@@ -2,21 +2,21 @@ import type { CSSProperties, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import type { Me } from '@gen-harness/contracts';
 import { ErrorState, Icon, Skeleton, cx } from '@gen-harness/ui';
-import { errorDetail, errorReasons, errorText, isModelUnavailable } from '../lib/errorText';
-import { MODEL_UNAVAILABLE_TEXT, friendlyError } from '../lib/friendlyError';
+import { errorDetail, errorReasons, errorText, isModelDown, isModelUnavailable } from '../lib/errorText';
+import { MODEL_DOWN_TEXT, MODEL_UNAVAILABLE_TEXT, friendlyError } from '../lib/friendlyError';
 import { queryClient } from '../lib/queryClient';
 import { qk } from '../lib/queries';
 import { AI_SOURCE_PATH } from '../setup/steps';
 
 /** Mô tả chung: thao tác nhà cung cấp AI nào cần phiên PIN `ai.route_change` (v0.1.35, F-20). */
-export const PIN_ROUTE_CHANGE_TITLE = 'cần mã PIN 6 số (bật/tắt, thêm/sửa nhà cung cấp AI, khoá API, chuỗi chuyển hướng)';
+export const PIN_ROUTE_CHANGE_TITLE = 'cần mã PIN 6 số (bật/tắt, thêm/sửa/xoá nhà cung cấp AI, khoá API, chuỗi chuyển hướng)';
 
 /** v0.1.35 (F-20): thêm / sửa / bật-tắt nhà cung cấp AI, khoá API, chuỗi chuyển hướng cần phiên PIN `ai.route_change`
  * — hộp PIN tự mở khi máy chủ trả 423 (lib/api.ts + PinDialogHost); ở đây chỉ báo trước. Dùng chung cho Agent & Model
  * thẻ Jev (Điều khiển hệ thống) và Hướng dẫn bước 4 — một nguồn chữ duy nhất. */
 export function PinHint({
   text = 'Cần mã PIN 6 số',
-  title = 'Thêm / sửa nhà cung cấp AI, khoá API, chuỗi chuyển hướng cần mã PIN',
+  title = 'Thêm / sửa / xoá nhà cung cấp AI, khoá API, chuỗi chuyển hướng cần mã PIN',
 }: {
   /** v0.1.45: chữ hiển thị cho thao tác khác (agent, tài khoản CLI, Hướng dẫn sau Hoàn tất). */
   text?: string;
@@ -157,7 +157,7 @@ export function SkeletonLines({ rows = 4, padding = '14px 16px', gap = 12 }: { r
 }
 
 export function CardError({ error, onRetry, retrying }: { error: unknown; onRetry?: () => void; retrying?: boolean }) {
-  if (isModelUnavailable(error)) return <ModelUnavailableNotice reasons={errorReasons(error)} />;
+  if (isModelUnavailable(error)) return <ModelUnavailableNotice reasons={errorReasons(error)} down={isModelDown(error)} />;
   return <ErrorState message={errorText(error)} detail={errorDetail(error)} onRetry={onRetry} retrying={retrying} />;
 }
 
@@ -172,16 +172,23 @@ function isKnownNonOwner(): boolean {
 }
 
 export const ASK_OWNER_AI_TEXT = 'Báo Sếp chọn nguồn AI';
+export const ASK_OWNER_AI_DOWN_TEXT = 'Báo Sếp xem nguồn AI';
 
 export function ModelUnavailableNotice({
   reasons,
   message,
   className,
   askOwner,
+  down,
 }: {
   reasons?: string | string[] | null;
   message?: string;
   className?: string;
+  /**
+   * v0.1.67 (F011): `true` = ĐÃ có model nhưng nguồn đang lỗi / hết hạn mức (máy chủ gửi `model_down`) — nói đúng câu đó
+   * và dẫn tới "Xem nguồn AI" (API & Model), KHÔNG bảo chọn lại model (dễ làm hỏng cấu hình đang đúng).
+   */
+  down?: boolean;
   /** Chỉ Owner chọn được nguồn AI (màn Thiết lập đẩy vai khác về "/"): vai khác thấy chữ "Báo Sếp chọn nguồn AI" thay cho nút. */
   askOwner?: boolean;
 }) {
@@ -191,7 +198,7 @@ export function ModelUnavailableNotice({
     <div className={cx('model-down', className)} role="status" data-testid="model-unavailable">
       <Icon name="ph ph-warning-circle" size={16} />
       <div className="model-down__body">
-        <div className="model-down__msg">{message || MODEL_UNAVAILABLE_TEXT}</div>
+        <div className="model-down__msg">{message || (down ? MODEL_DOWN_TEXT : MODEL_UNAVAILABLE_TEXT)}</div>
         {tech ? (
           <details className="tech-detail">
             <summary>Chi tiết kỹ thuật</summary>
@@ -201,8 +208,12 @@ export function ModelUnavailableNotice({
       </div>
       {nonOwner ? (
         <span className="model-down__cta muted-note" data-testid="model-unavailable-ask-owner">
-          <Icon name="ph ph-user-circle" size={14} /> {ASK_OWNER_AI_TEXT}
+          <Icon name="ph ph-user-circle" size={14} /> {down ? ASK_OWNER_AI_DOWN_TEXT : ASK_OWNER_AI_TEXT}
         </span>
+      ) : down ? (
+        <Link to="/api" className="gh-btn gh-btn--secondary gh-btn--sm model-down__cta">
+          <Icon name="ph ph-plugs" size={14} /> Xem nguồn AI
+        </Link>
       ) : (
         <Link to={AI_SOURCE_PATH} className="gh-btn gh-btn--secondary gh-btn--sm model-down__cta">
           <Icon name="ph ph-plugs" size={14} /> Chọn model
@@ -217,7 +228,7 @@ export function ModelUnavailableNotice({
  * kỹ thuật"; lỗi khác ⇒ dòng InlineError.
  */
 export function ActionError({ error }: { error: unknown }) {
-  if (isModelUnavailable(error)) return <ModelUnavailableNotice reasons={errorReasons(error)} />;
+  if (isModelUnavailable(error)) return <ModelUnavailableNotice reasons={errorReasons(error)} down={isModelDown(error)} />;
   return <InlineError>{errorText(error)}</InlineError>;
 }
 

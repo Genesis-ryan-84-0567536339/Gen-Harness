@@ -191,6 +191,15 @@ async def live_person(db: AsyncSession, person_id: uuid.UUID) -> uuid.UUID:
 _RE_LONGNUM = re.compile(r"(?<!\d)(\d[\d .-]{7,22}\d)(?!\d)")
 
 
+#: Dấu vết của `mask_text` trong một chuỗi (≥ 5 dấu • liền nhau, phần còn lại là 3 số cuối).
+_RE_MASKED = re.compile(r"•{4,}")
+
+
+def has_masked_number(text_: str | None) -> bool:
+    """Chuỗi có chỗ số nhạy cảm đã bị `mask_text` che — vai dưới Owner KHÔNG được gửi đi nguyên chuỗi đó."""
+    return bool(text_ and _RE_MASKED.search(text_))
+
+
 def mask_text(text_: str | None, is_owner: bool) -> str | None:
     if text_ is None or is_owner:
         return text_
@@ -200,3 +209,32 @@ def mask_text(text_: str | None, is_owner: bool) -> str | None:
         return m.group(1) if len(digits) < 8 else "•" * (len(digits) - 3) + digits[-3:]
 
     return _RE_LONGNUM.sub(sub, text_)
+
+
+# ─── ghép "tin đi" với đúng người nhận (tin 1-1) — MỘT chỗ cho Thông tin, Phân tích, cảnh báo, chăm sóc khách ─────
+
+#: Tin vào KHÔNG cần ai trả lời (v0.1.67, F050): biểu tượng cảm xúc, nhãn dán, tin hệ thống.
+NO_REPLY_KINDS = ("reaction", "sticker", "system")
+
+
+def outbound_to_sql(e: str, ids: str, ext: str) -> str:
+    """Điều kiện SQL "tin ĐI `e` (1-1) là gửi cho người có định danh `ids` (uuid[]) / mã ngoài `ext` (text[])":
+    người nhận ghi trong payload (Zalo `threadId`; WhatsApp `key.remoteJid` hoặc `key.remoteJidAlt` — cùng một người
+    có thể hiện bằng số điện thoại hay LID; hoặc `recipient`) trùng `ext`, hoặc (không ghi người nhận) tin ĐẾN 1-1
+    gần nhất trước nó trên cùng kênh là của `ids`. Tin 1-1 KHÔNG có người nhận trong cột riêng (người gửi tin đi là
+    tài khoản của Sếp) nên KHÔNG được ghép theo "cùng kênh, không nhóm" — trả lời khách A không được che khách B
+    (v0.1.67, F050). `e`: bí danh của `raw.events`; `ids`/`ext`: biểu thức SQL (mảng)."""
+    def bare(path: str) -> str:
+        return f"NULLIF(split_part({path}, '@', 1), '')"
+
+    keys = [bare(f"{e}.payload->>'threadId'"), bare(f"{e}.payload->'key'->>'remoteJid'"),
+            bare(f"{e}.payload->'key'->>'remoteJidAlt'"), bare(f"{e}.payload->>'recipient'")]
+    return f"""({e}.direction = 'outbound' AND (
+    ARRAY[{", ".join(keys)}]::text[] && {ext}
+    OR (COALESCE({", ".join(keys)}) IS NULL AND (
+      SELECT i2.sender_identity_id FROM raw.events i2
+      WHERE i2.org_id = {e}.org_id AND i2.channel_id = {e}.channel_id AND i2.group_id IS NULL
+        AND i2.direction = 'inbound' AND i2.occurred_at <= {e}.occurred_at
+        AND i2.occurred_at > {e}.occurred_at - interval '7 days'
+        AND i2.received_at > {e}.received_at - interval '37 days' AND i2.received_at <= {e}.received_at
+      ORDER BY i2.occurred_at DESC, i2.seq DESC LIMIT 1) = ANY({ids}))))"""

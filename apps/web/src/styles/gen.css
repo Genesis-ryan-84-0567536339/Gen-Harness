@@ -364,3 +364,8 @@
   border: 1px solid var(--color-divider); border-radius: var(--radius-lg); background: var(--color-surface); font-size: 12.5px;
 }
 .needs-boss-progress__text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+/* v0.1.68 (F039): dải "Cần Sếp xử lý" lúc khoẻ — một dòng gọn (vẫn là đích làm sáng của bài học N07) */
+.needs-boss-calm {
+  display: flex; align-items: center; gap: 7px; min-width: 0; padding: 6px 12px; margin-bottom: 10px;
+  font-size: 12.5px; color: var(--color-neutral-300);
+}

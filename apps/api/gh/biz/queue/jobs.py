@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh import realtime
 from gh.biz.hooks import CronJob, Hook
+from gh.data.common import NO_REPLY_KINDS, outbound_to_sql
 from gh.providers.router import raise_alert
 from gh.refinery import triage
 
@@ -28,6 +29,9 @@ log = logging.getLogger("gh.biz.queue.jobs")
 COOLING_DAYS = 14
 COOLING_MIN_UNITS = 2
 RESPONSE_SLA_MIN = 60
+#: Kết luận của tin cho thấy khách ĐANG CHỜ trả lời (v0.1.67, F050): hỏi giá, đề nghị hợp tác, phàn nàn, xin mẫu,
+#: hỏi tiến độ. Tin chào / cảm ơn / reaction (không có kết luận loại này) không bao giờ sinh cảnh báo "Chưa trả lời".
+NEEDS_REPLY_EVENTS = ("AskedPrice", "RequestedPartnership", "Complained", "RequestedSample", "AskedStatus")
 RESPONSE_WINDOW_H = 24
 UNCLAIMED_AGE_H = 24
 COMPETITOR_WINDOW_H = 2
@@ -84,22 +88,52 @@ async def _scan_customer_cooling(db: AsyncSession, org_id: uuid.UUID) -> int:
 # ─── nhân viên phản hồi chậm bất thường ───────────────────────────────────────
 
 async def _scan_slow_response(db: AsyncSession, org_id: uuid.UUID) -> int:
-    rows = (await db.execute(text("""
-        SELECT e.id AS raw_id, e.channel_id, e.group_id, p.id AS person_id, p.display_name AS person_name,
-               p.owner_user_id, u.display_name AS owner_name
-        FROM raw.events e
-        JOIN core.channels c ON c.id = e.channel_id
-        LEFT JOIN core.person_identities pi ON pi.id = e.sender_identity_id
-        LEFT JOIN core.persons p ON p.id = pi.person_id
-        LEFT JOIN core.users u ON u.id = p.owner_user_id
-        WHERE c.org_id = :o AND e.direction = 'inbound'
-          AND e.occurred_at < now() - make_interval(mins => :sla)
-          AND e.occurred_at > now() - make_interval(hours => :win)
-          AND NOT EXISTS (SELECT 1 FROM raw.events o2 WHERE o2.channel_id = e.channel_id
-                          AND o2.group_id IS NOT DISTINCT FROM e.group_id
-                          AND o2.direction = 'outbound' AND o2.occurred_at > e.occurred_at)
-        ORDER BY e.occurred_at LIMIT :lim"""),
-        {"o": org_id, "sla": RESPONSE_SLA_MIN, "win": RESPONSE_WINDOW_H, "lim": SCAN_LIMIT})).all()
+    """Tin ĐẾN cần trả lời mà quá `RESPONSE_SLA_MIN` phút chưa có tin ĐI gửi cho đúng người đó (v0.1.67, F050).
+
+    - "Cần trả lời" = có kết luận trong `NEEDS_REPLY_EVENTS`, loại reaction / nhãn dán / tin hệ thống, bỏ người gửi là
+      nhân viên.
+    - "Đã trả lời": nhóm ⇒ có tin đi sau đó trong CÙNG nhóm; tin 1-1 ⇒ có tin đi sau đó GỬI CHO ĐÚNG khách này
+      (`outbound_to_sql`) — Sếp nhắn khách A không che khách B.
+    - Một người (và một nhóm / cuộc 1-1) một cảnh báo: lấy tin chờ lâu nhất làm bằng chứng; tin sau của cùng người
+      không sinh thêm dòng cùng tiêu đề. Tin 1-1 chưa gắn được người gửi (person_id rỗng) thì KHÔNG gom: `DISTINCT ON`
+      coi mọi NULL là một ⇒ mỗi tin một khoá riêng (review v0.1.67), không để một cuộc bị bỏ quên che cuộc khác."""
+    rows = (await db.execute(text(f"""
+        SELECT DISTINCT ON (c.person_id, (CASE WHEN c.person_id IS NULL AND c.group_id IS NULL THEN c.raw_id END),
+                            c.group_id, c.channel_id)
+               c.raw_id, c.person_id, c.person_name, c.owner_user_id, u.display_name AS owner_name
+        FROM (
+          SELECT e.id AS raw_id, e.received_at, e.channel_id, e.group_id, e.occurred_at, p.id AS person_id,
+                 p.display_name AS person_name, p.owner_user_id,
+                 ARRAY(SELECT x.id FROM core.person_identities x
+                       WHERE x.person_id = pi.person_id AND x.channel_id = e.channel_id) AS ids,
+                 ARRAY(SELECT NULLIF(split_part(x.external_id, '@', 1), '') FROM core.person_identities x
+                       WHERE x.person_id = pi.person_id AND x.channel_id = e.channel_id) AS ext
+          FROM raw.events e
+          JOIN core.channels ch ON ch.id = e.channel_id
+          LEFT JOIN core.person_identities pi ON pi.id = e.sender_identity_id
+          LEFT JOIN core.persons p ON p.id = pi.person_id
+          WHERE ch.org_id = :o AND e.direction = 'inbound' AND e.kind <> ALL(CAST(:nokind AS text[]))
+            AND COALESCE(p.person_type, '') <> 'staff'
+            AND e.occurred_at < now() - make_interval(mins => :sla)
+            AND e.occurred_at > now() - make_interval(hours => :win)
+            AND EXISTS (SELECT 1 FROM clean.evidence ev
+                        JOIN clean.meaning_units mu ON mu.id = ev.meaning_unit_id
+                         AND mu.observed_at = ev.meaning_observed_at AND mu.superseded_by IS NULL
+                        WHERE ev.raw_event_id = e.id AND ev.raw_received_at = e.received_at
+                          AND mu.event_type = ANY(CAST(:need AS text[])))
+        ) c
+        LEFT JOIN core.users u ON u.id = c.owner_user_id
+        WHERE NOT EXISTS (
+          SELECT 1 FROM raw.events o2
+          WHERE o2.channel_id = c.channel_id AND o2.direction = 'outbound'
+            AND o2.received_at >= c.received_at AND o2.occurred_at > c.occurred_at
+            AND CASE WHEN c.group_id IS NOT NULL THEN o2.group_id = c.group_id
+                     ELSE o2.group_id IS NULL AND {outbound_to_sql("o2", "c.ids", "c.ext")} END)
+        ORDER BY c.person_id, (CASE WHEN c.person_id IS NULL AND c.group_id IS NULL THEN c.raw_id END),
+                 c.group_id, c.channel_id, c.occurred_at
+        LIMIT :lim"""),  # noqa: S608 — outbound_to_sql là hằng nội bộ
+        {"o": org_id, "sla": RESPONSE_SLA_MIN, "win": RESPONSE_WINDOW_H, "lim": SCAN_LIMIT,
+         "nokind": list(NO_REPLY_KINDS), "need": list(NEEDS_REPLY_EVENTS)})).all()
     n = 0
     for r in rows:
         ref = {"type": "raw", "id": str(r.raw_id)}

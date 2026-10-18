@@ -55,8 +55,9 @@ AGY_SRC = (f"agy 1.2.9 — biến thể trong tệp chạy + `agy --help` (--eff
 CLAUDE_SRC = (f"`claude --help` 2.1.285 + https://code.claude.com/docs/en/model-config (đọc {VERIFIED_ON})")
 
 # (3) Antigravity: tối thiểu, chưa xác minh — chỉ hiện khi `agy models` không đọc được (Console ghi "chưa xác minh").
-# v0.1.55 (G1): mỗi model agy mang `tier` theo nhãn mới cho hồ sơ tiêu chuẩn (`tier_of`): flash = "balanced", pro =
-# "strong". Gợi ý "nhanh, rẻ" của bộ chọn model (`describe`/`tier`) giữ nguyên như trước — hai thứ độc lập.
+# v0.1.55 (G1): mỗi model agy mang `tier` cho hồ sơ tiêu chuẩn (`tier_of`): flash = "balanced", pro = "strong".
+# v0.1.66 (F025): MỘT bảng tầng — gợi ý của ô chọn model (`describe` → `tier_of`), `tier()` và hồ sơ chuẩn nói cùng
+# một tầng cho cùng một model (test_model_chon_hop_dong.py kiểm).
 AGY_FALLBACK: tuple[dict[str, Any], ...] = (
     {"id": "gemini-3.8-flash", "tier": "balanced", "efforts": ("low", "medium", "high"), "source": AGY_SRC,
      "verified": False},
@@ -177,16 +178,6 @@ def family(kind: str, model_id: str) -> str:
     return "Khác"
 
 
-def tier(model_id: str) -> str:
-    """Theo TỪ trong tên model gốc (không theo mức suy nghĩ): "gemini" chứa "mini" → so theo từ, không chuỗi con."""
-    words = set(re.split(r"[-_.\[\]\s]+", model_id.lower()))
-    if words & {"lite", "haiku", "nano", "mini", "20b", "flash"}:
-        return "fast"
-    if words & {"pro", "opus", "fable", "ultra", "120b"}:
-        return "strong"
-    return "balanced"
-
-
 #: Tầng model của hồ sơ tiêu chuẩn (v0.1.55, G1): fast < balanced < strong. Chat gọi tầng "strong" là "deep" (Kỹ hơn).
 TIERS = ("fast", "balanced", "strong")
 _TIER_FAST_WORDS = frozenset({"lite", "mini", "haiku", "nano", "20b"})
@@ -199,6 +190,11 @@ def _tier_words(model_name: str) -> set[str]:
     # Tách theo gạch/chấm/gạch chéo/hai chấm: "google/gemini-2.5-flash-lite" → {google, gemini, 2, 5, flash, lite};
     # "gemini" KHÔNG chứa từ "mini" (so theo từ, không chuỗi con).
     return {w for w in re.split(r"[-_./:\[\]\s]+", model_name.lower()) if w}
+
+
+def tier(model_id: str) -> str:
+    """Tầng của một model theo TÊN (không theo mức suy nghĩ) — cùng bảng với `tier_of`; cho bên chỉ có mã model."""
+    return infer_tier(model_id)
 
 
 def infer_tier(model_name: str) -> str:
@@ -241,14 +237,21 @@ def tier_of(kind: str, model_name: str) -> str | None:
 
 
 def _pretty(model_id: str) -> str:
-    words = re.split(r"[-_]", model_id)
-    return " ".join(w.upper() if w in {"gpt", "oss"} else w.capitalize() for w in words if w)
+    """Nhãn đọc được từ mã model. Các mảnh số một chữ số đứng liền nhau là SỐ PHIÊN BẢN: "4-6" → "4.6"
+    ("claude-sonnet-4-6-thinking" → "Claude Sonnet 4.6 Thinking"); mã đã có dấu chấm ("3.8") giữ nguyên."""
+    words: list[str] = []
+    for w in (x for x in re.split(r"[-_]", model_id) if x):
+        if words and re.fullmatch(r"\d", w) and re.fullmatch(r"\d(?:\.\d)*", words[-1]):
+            words[-1] += "." + w
+        else:
+            words.append(w.upper() if w in {"gpt", "oss"} else w.capitalize())
+    return " ".join(words)
 
 
 def describe(kind: str, model_id: str, *, label: str | None = None, source: str = "cli",
              tier_hint: str | None = None, efforts: Any = None, verified: bool = True,
              source_ref: str | None = None, current_effort: str | None = None) -> dict[str, Any]:
-    t = tier_hint or tier(model_id)
+    t = tier_hint or tier_of(kind, model_id) or tier(model_id)
     effs = sort_efforts(efforts)
     return {"id": model_id, "label": label or _pretty(model_id), "group": family(kind, model_id), "tier": t,
             "hint": TIER_HINT[t], "source": source, "efforts": effs,

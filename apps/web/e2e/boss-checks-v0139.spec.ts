@@ -97,7 +97,7 @@ test.describe('Việc Sếp cần làm (v0.1.39)', () => {
     await expect(results).toHaveCount(2);
     await expect(agy.getByRole('button', { name: /Đổi sang/ })).toHaveCount(0);
     await expect(agy).toContainText('Không bắt buộc');
-    await expect(agy.getByRole('link', { name: /Thêm \/ đổi tài khoản ở Kết nối/ })).toHaveAttribute('href', '/connections#brain');
+    await expect(agy.getByRole('link', { name: /Thêm \/ đổi tài khoản ở Thiết lập nguồn AI/ })).toHaveAttribute('href', '/setup?buoc=nguon-ai');
 
     await agy.getByRole('button', { name: 'Gọi thử' }).click();
     await expect(results.nth(1)).toContainText('Đạt · đang dùng binh@genesis.vn');

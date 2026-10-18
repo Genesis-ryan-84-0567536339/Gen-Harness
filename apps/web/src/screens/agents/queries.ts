@@ -57,3 +57,16 @@ export const useSetAgentEnabled = () => {
     onSuccess: () => invalidateAgents(qc),
   });
 };
+
+/** v0.1.67 (F085): Lưu trữ agent (PIN `agent.manage`) — agent biến khỏi danh sách, lịch sử quyết định còn nguyên. */
+export const useArchiveAgent = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.agents.archive(id),
+    onSuccess: () => {
+      invalidateAgents(qc);
+      void qc.invalidateQueries({ queryKey: ['agents', 'decisions'] });
+      void qc.invalidateQueries({ queryKey: ['agents', 'bindings'] });
+    },
+  });
+};

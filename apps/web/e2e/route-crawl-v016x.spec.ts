@@ -2,10 +2,10 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { SCREENS } from '@gen-harness/contracts';
-import { loginAsOwner, repoRoot, resetMock } from './support';
+import { AUDITOR, loginAs, loginAsOwner, repoRoot, resetMock } from './support';
 
 /**
- * Lưới L4 (v0.1.61) — Playwright DUYỆT MỌI ROUTE bằng mock với vai Owner, ở 390 và 1440, bắt:
+ * Lưới L4 (v0.1.61) — Playwright DUYỆT MỌI ROUTE bằng mock với vai Owner (v0.1.68: thêm Operator và Auditor sau khi sửa F145), ở 390 và 1440, bắt:
  *
  *  - `console`   console.error (React cảnh báo, lỗi chưa bắt…) — không tính dòng "Failed to load resource" (đã nằm ở `http`);
  *  - `pageerror` lỗi JS chưa bắt;
@@ -13,8 +13,8 @@ import { loginAsOwner, repoRoot, resetMock } from './support';
  *  - `link`      <a href> nội bộ dẫn tới trang 404 (mở thật từng đích một lần);
  *  - `rac`       chữ hiển thị chứa «[object Object]», «undefined», «NaN», «null»;
  *  - `term:<id>` chữ hiển thị khớp một mẫu cấm `crawl` của `.github/scripts/terms.json` (Value error, failed, worker, Bridge, TUI…);
- *  - `approve`   nút «Duyệt» còn hiện cho vai KHÔNG có action.approve (vai Operator/Auditor thêm ở gói D1, sau khi sửa F145 —
- *                bảng ROLES bên dưới mới chỉ có Owner nên luật này chưa kích hoạt trên trang thật, nhưng đã có test riêng).
+ *  - `approve`   nút «Duyệt» còn hiện cho vai KHÔNG có action.approve (Operator và Auditor đã thêm vào ROLES ở v0.1.68 (gói D1,
+ *                sau khi sửa F145) nên luật này chạy trên trang thật; còn có test riêng).
  *
  * KHÔNG có danh sách bỏ qua route. Hiện trạng (nợ có sẵn lúc dựng lưới) nằm trong `crawl_baseline` của terms.json,
  * khoá `"<cỡ>|<route>|<luật>"` → số vi phạm. RATCHET như check_terms.py: vượt baseline ⇒ hỏng; baseline cao hơn thực tế ⇒ chỉ cảnh báo
@@ -103,8 +103,15 @@ function allRoutes(): string[] {
   ];
 }
 
-/** Vai được duyệt. Operator/Auditor thêm ở D1 (sau khi sửa F145) — KHÔNG dùng danh sách bỏ qua để che. */
-const ROLES = [{ key: 'owner', canApprove: true }] as const;
+/**
+ * Vai được duyệt (khoá baseline KHÔNG tách theo vai — số vi phạm của các vai cộng chung theo route/luật). Operator và Auditor
+ * không có action.approve (mock-api MATRIX). KHÔNG dùng danh sách bỏ qua để che lỗi của vai nào.
+ */
+const ROLES = [
+  { key: 'owner', email: null, canApprove: true },
+  { key: 'operator', email: 'operator@genesis.local', canApprove: false },
+  { key: 'auditor', email: AUDITOR.email, canApprove: false },
+] as const;
 
 const VIEWPORTS = [
   { width: 390, height: 844 },
@@ -307,8 +314,8 @@ function writeBaseline(width: number, mode: 'seed' | 'lower', observed: Record<s
 test.describe('route-crawl — duyệt mọi route, bắt lỗi console/HTTP/link chết/chữ kỹ thuật', () => {
   for (const vp of VIEWPORTS) {
     test(`mọi route (${vp.width}px) không thêm lỗi so với baseline`, async ({ page, context }) => {
-      // Trần 10 phút/test (CI thử lại 1 lần ⇒ tối đa 20 phút, nằm trong timeout-minutes 30 của job `crawl`); mỗi route tối đa ~20 giây.
-      test.setTimeout(600_000);
+      // Trần 15 phút/test (v0.1.68: ba vai Owner/Operator/Auditor nên gấp ~3 lần; CI chạy bình thường ~vài phút); mỗi route tối đa ~20 giây.
+      test.setTimeout(900_000);
       page.setDefaultTimeout(15_000);
       page.setDefaultNavigationTimeout(20_000);
       await page.setViewportSize(vp);
@@ -317,6 +324,11 @@ test.describe('route-crawl — duyệt mọi route, bắt lỗi console/HTTP/lin
       const rules = crawlRules(readTerms());
       const findings: Finding[] = [];
       for (const role of ROLES) {
+        if (role.email) {
+          // Đổi vai: bỏ phiên Owner rồi đăng nhập vai kia (cùng mật khẩu mock).
+          await page.context().clearCookies();
+          await loginAs(page, role.email);
+        }
         for (const route of allRoutes()) {
           const t0 = Date.now();
           findings.push(...(await crawlRoute(page, context, route, role.canApprove, rules)));

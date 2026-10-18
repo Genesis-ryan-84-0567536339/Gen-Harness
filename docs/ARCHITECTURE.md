@@ -57,7 +57,7 @@ Ràng buộc bắt buộc và nơi hiện thực:
 | CSDL | PostgreSQL 16 + pgvector + pg_partman + pg_trgm | SSOT duy nhất (spec G4). Lược đồ hiện hành: `db/sql/0001_baseline.sql` + các migration sau (`apps/api/migrations`) (`schema.sql` gốc của gói bàn giao đã bỏ ở v0.1.48, xem lịch sử git). |
 | Bus & realtime | Redis 7: **Streams** cho event bus (consumer group, ack, phát lại), **pub/sub** cho đẩy realtime tới WebSocket, khoá phân tán, rate-limit, bộ đếm hạn mức | Streams bền: consumer chết không mất sự kiện (ưu tiên 2). |
 | Bridge | Node 20 + TypeScript; Zalo `zca-js`, WhatsApp `@whiskeysockets/baileys`; mỗi kênh một adapter | Theo gợi ý; hai thư viện đã chạy ở dự án cũ. Viết lại gọn, không mang persona/tên cũ. |
-| Tệp | MinIO (S3-compatible) | Tài liệu, tệp đính kèm, lưu trữ lạnh Parquet, backup (handoff 03/04). |
+| Tệp | Volume Docker `gh_objects` (đĩa cục bộ, `/var/lib/gh/objects`) | Tài liệu, tệp đính kèm, ảnh bằng chứng, backup. Chưa có kho đối tượng S3: bản sao ngoài máy là ổ USB/NAS do `genh` chép (Cài đặt › Sao lưu & cập nhật). |
 | Proxy | Caddy 2 | TLS nội bộ tự ký `https://localhost:8443`, định tuyến `/` web, `/api` + `/ws` api. Chỉ proxy mở cổng ra host. |
 | MCP | SDK MCP chính thức cho Python; máy chủ stdio chạy như sidecar khi Owner bật | §10 |
 | Trình cài | Bootstrap `install.sh`/`install.ps1` + binary Go `genh` (Bubble Tea) | Handoff 05. Phát triển hằng ngày vẫn dùng `docker compose up`. |
@@ -96,7 +96,7 @@ Dịch vụ compose (mạng `internal`, healthcheck từng dịch vụ, `api` ch
 | `bridge` | phiên kênh, QR, nhận/gửi |
 | `db` | postgres:16 + pgvector + pg_partman |
 | `redis` | streams, pub/sub, khoá, bộ đếm |
-| `objects` | MinIO |
+| (volume) `gh_objects` | tệp, ảnh bằng chứng, backup — không có dịch vụ lưu trữ riêng |
 | `mcp-*` | sidecar máy chủ MCP stdio, chỉ khi Owner bật |
 
 ```
@@ -133,6 +133,8 @@ Luật cứng:
 
 ### 4.2 Ingest → Kho thô
 Consumer `ingest` (trong api) đọc `gh.bridge.inbound`, trong **một transaction**: ánh xạ nhóm/người gửi (`core.groups`, `core.person_identities`, tạo mới nếu chưa có), `INSERT raw.events` (khử trùng `(channel_id, external_msg_id)` + `content_hash`), `INSERT refinery.event_state(state='pending')`, `NOTIFY raw_ingested`; rồi `XACK`. Đẩy dòng mới tới màn Kho dữ liệu thô qua WebSocket (mục tiêu ≤ 2 giây từ lúc tin đến — handoff 07).
+
+**Nhật ký lắng nghe (v0.1.68).** Cột `raw.events.listen_mode` ghi chế độ nghe của nhóm (hoặc `silent|reply` của tin 1-1) LÚC tin vào kho. Ingest cũng ghi sự kiện nhẹ vào `ops.listen_events` (nhóm mới/rời/đổi tên/trở lại, thành viên vào-rời của nhóm đang nghe, phiên kênh nối/ngắt/đăng xuất, người lạ nhắn riêng lần đầu; lần quét danh bạ đầu tiên chỉ ghi một dòng tóm tắt) rồi phát WebSocket `listen.event` (chỉ tín hiệu). `GET /listen-log` (`gh/data_api/listen_log.py`) gộp `raw.events` + `ops.listen_events` thành một dòng thời gian, kèm sàng lọc (`refinery.event_state`), quyết định agent (`clean.evidence → agent.decisions`) và bản nháp; quyền = `data.read` + phạm vi nhóm + `direct_visible_sql` (tin 1-1), che số dài cho vai dưới Owner — không đường lách (xem `docs/api/phase-2.md`).
 
 ### 4.3 Core agent sàng lọc (refinery) — chu kỳ HOẶC ngưỡng
 - Cấu hình `refinery.schedule`: `interval_seconds` (mặc định 900), `count_threshold` (500), `batch_size` (250), `min_confidence` (0,60) — khớp `triggerConfig` của thiết kế. Chạy khi **điều kiện nào tới trước**.
@@ -345,6 +347,7 @@ Thực thể spec G1 → bảng:
 | cột `permit_hash`, `permit_expires_at` ở `biz.action_drafts` | Permit dùng một lần (§7.3). |
 | `agent.cli_profiles` | Nhiều tài khoản Antigravity CLI, một hồ sơ hoạt động (§11). |
 | `core.assignments` | Khách được phân cho Agent nhân viên, hàng đợi cho Operator (phạm vi `assigned`). |
+| `ops.listen_events` + cột `raw.events.listen_mode` (v0.1.68, migration 0040) | Sự kiện kênh và chế độ nghe lúc tin vào cho Nhật ký lắng nghe (§4.2). |
 
 ---
 
@@ -374,8 +377,8 @@ REST JSON `/api/v1`, OpenAPI tự sinh; phân trang con trỏ `?cursor=&limit=`;
 | Quy tắc | `GET /rules` · `POST /rules` · `PUT /rules/{id}` (tạo phiên bản) · `PATCH /rules/{id}/toggle` · `GET/PUT /rules/weights` · `POST /rules/test` | rules |
 | Kho sạch | `GET /clean?filters` · `GET /clean/{id}/memory` · `GET /clean/agent-params` | clean |
 | Danh tính | `GET /identity/stats` · `GET /identity/candidates` · `POST /identity/merge` 🔒 · `POST /identity/{id}/split` 🔒 · `POST /identity/candidates/{id}/reject` · `GET /identity/{id}/history` | identity |
-| Agent | `GET/POST /agents` · `PATCH /agents/{id}` · `POST /agents/{id}/clone` · `PATCH /agents/{id}/toggle` · `GET /agents/log` · `GET /agents/templates` · `POST /agents/{id}/try` | agents |
-| Provider & model | `GET/POST /providers` · `PATCH /providers/{id}` · `POST /providers/{id}/test` · `POST /providers/{id}/keys` 🔒 · `GET /providers/keys/{id}/reveal` 🔒 · `GET /models` (hạn mức) · `PUT /models/bindings` · `PUT /models/failover-chain` · `GET/PUT /models/core-params` · `GET/PUT /models/rate-limits` · `GET /cli/profiles` · `POST /cli/profiles/{id}/login` · `POST /cli/profiles/{id}/activate` 🔒 | api, system › Bộ não AI |
+| Agent | `GET/POST /agents` · `GET/PATCH /agents/{id}` · `POST /agents/{id}/clone` · `PATCH /agents/{id}/disable` · `POST /agents/{id}/archive` (Lưu trữ) · `GET /agents/decisions` (nhật ký quyết định) · `GET /agents/templates` | agents |
+| Provider & model | `GET /providers` · `POST /providers` 🔒 · `PATCH /providers/chain` 🔒 (thứ tự chuyển dự phòng) · `PATCH/DELETE /providers/{id}` 🔒 (xoá cần PIN từ v0.1.68) · `POST /providers/{id}/keys` 🔒 · `DELETE /providers/{id}/keys/{kid}` 🔒 · `POST /providers/{id}/models` · `POST /providers/{id}/test` · `POST /providers/{id}/diagnose` · `GET /providers/credentials` · `GET/PUT /providers/background` (việc nền) · `GET /agents/bindings` · `PUT/DELETE /agents/bindings/{agent_key}` (gán model riêng; mặc định là hồ sơ tiêu chuẩn theo vai) · `GET /cli/profiles` · `POST /cli/login` (+ `/cli/login/{id}/code`, `/cancel`) 🔒 · `POST /cli/profiles/{id}/activate` 🔒 · `DELETE /cli/profiles/{id}` 🔒 | api, system › Bộ não AI |
 | MCP | `GET /mcp/stats` · `GET /mcp/servers` · `POST /mcp/servers` 🔒 · `PATCH /mcp/servers/{id}` 🔒 · `PATCH /mcp/tools/{id}` (mở/đóng) 🔒 · `PUT /mcp/tools/{id}/grants` 🔒 · `GET /mcp/calls` · `GET /mcp/guards` · `GET /mcp/market` | mcp |
 | Plugin | `GET /plugins?tab=core|addon` · `GET /plugins/load-order` · `GET /plugins/events` · `POST /plugins/install` 🔒 · `PATCH /plugins/{id}/toggle` · `DELETE /plugins/{id}` 🔒 · `PUT /plugins/{id}/settings` · `POST /plugins/{id}/breaker/reset` · `GET /plugins/market` | plugins |
 | Kênh | `GET /channels` · `POST /channels/{id}/sessions` (tạo QR) · `POST /channels/sessions/{id}/logout` 🔒 · `POST /channels/sessions/{id}/rescan` | system › Kênh & đăng nhập |

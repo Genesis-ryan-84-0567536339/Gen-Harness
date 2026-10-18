@@ -57,7 +57,7 @@ function setup(opts: { kho?: BossCheck | null; hub?: BossCheck | null; withRow?:
       calls.push(`${init?.method ?? 'GET'} ${path}`);
       if (path === '/boss-checks') {
         const results = { ...EMPTY, hub: opts.hub ?? null, ...((opts.withKey ?? true) ? { kho_write: opts.kho ?? null } : {}) };
-        return json(200, { rows, results, required_done: 0, required_total: 1, switch_passes: 0 });
+        return json(200, { rows, results, required_done: 0, required_total: 1 });
       }
       if (path === '/social/accounts') return json(200, { items: [] });
       if (path === '/cli/profiles') return json(200, []);
@@ -195,7 +195,7 @@ describe('bossChecksModel — quyền ghi Kho', () => {
   });
 
   it('resultOf đọc kho_write như facebook_reply: vắng ⇒ null', () => {
-    const base = { rows: [], required_done: 0, required_total: 1, switch_passes: 0 };
+    const base = { rows: [], required_done: 0, required_total: 1 };
     expect(resultOf({ ...base, results: { ...EMPTY } } as unknown as BossOverview, 'kho_write')).toBeNull();
     expect(resultOf({ ...base, results: { ...EMPTY, kho_write: pass('kho_write') } } as unknown as BossOverview, 'kho_write')?.status).toBe('pass');
     expect(resultOf(undefined, 'kho_write')).toBeNull();

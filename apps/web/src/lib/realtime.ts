@@ -16,6 +16,7 @@ import {
 } from '@gen-harness/contracts';
 import { reportClientError } from './clientErrors';
 import { qk2 } from './dataQueries';
+import { LISTEN_LOG_SIGNALS, scheduleListenLogRefresh } from './listenLogQueries';
 import { newErrorId } from './errorId';
 import { currentPath, navigateTo } from './navigation';
 import { qk } from './queries';
@@ -278,6 +279,8 @@ export function onRealtimeEvent(type: string, fn: ExtraHandler): () => void {
 /** Apply one server frame to the cached queries. Pure w.r.t. the given client. */
 export function applyEvent(qc: QueryClient, e: RealtimeEvent): void {
   for (const fn of extraHandlers.get(e.type) ?? []) fn(qc, e.data);
+  // v0.1.68: Nhật ký lắng nghe — tín hiệu có gì mới ⇒ tải lại (gom nhịp), không vá bộ đệm tại chỗ.
+  if (LISTEN_LOG_SIGNALS.has(e.type)) scheduleListenLogRefresh(qc);
   switch (e.type) {
     case 'raw.new': {
       const item = e.data;

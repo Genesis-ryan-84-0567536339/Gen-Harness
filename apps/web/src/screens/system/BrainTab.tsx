@@ -3,8 +3,8 @@ import { Link, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { EmptyState, Icon } from '@gen-harness/ui';
 import { qk2, useProviders } from '../../lib/dataQueries';
-import { useFailoverRules, useTestProvider } from '../api/queries';
-import { fmtQuota, providerStatus } from '../api/apiModel';
+import { useTestProvider } from '../api/queries';
+import { chainModelText, fmtQuota, providerStatus } from '../api/apiModel';
 import { CardError, Panel, SkeletonLines } from '../common';
 import { N4, OK, WARN } from '../data/dataModel';
 import { JevCard } from './JevCard';
@@ -17,10 +17,9 @@ import { useCan } from '../../lib/permissions';
 import { StandardModeStrip } from '../../defaults/StandardModeStrip';
 
 /**
- * Bộ não AI — góc nhìn vận hành hệ thống (PLAN 4.5): hạn mức theo model, chuỗi chuyển hướng, quy tắc chuyển
- * hướng, tài khoản CLI. Cấu hình chi tiết provider/khoá/gán model theo agent đã có màn riêng `api`
- * (`screens/api/ApiScreen.tsx`, PLAN 4.2) — tab này CHỈ ĐỌC LẠI cùng dữ liệu (`useProviders`,
- * `useFailoverRules`), không lặp lại logic sửa/thêm/kéo-thả, và dẫn sang màn đó cho việc cấu hình đầy đủ.
+ * Bộ não AI — góc nhìn vận hành hệ thống (PLAN 4.5): hạn mức theo model, chuỗi chuyển hướng, tài khoản CLI
+ * (v0.1.66: không còn chép lại thẻ "Quy tắc chuyển hướng" — chỉ có ở API & Model). Cấu hình chi tiết provider/khoá/gán model theo agent đã có màn riêng `api`
+ * (`screens/api/ApiScreen.tsx`, PLAN 4.2) — tab này CHỈ ĐỌC LẠI cùng dữ liệu (`useProviders`), không lặp lại logic sửa/thêm/kéo-thả, và dẫn sang màn đó cho việc cấu hình đầy đủ.
  */
 export function BrainTab() {
   // v0.1.42 (F-7): Cài đặt mở cho cả `audit.read` — vai trò không có `system.read` thấy ổ khoá, KHÔNG gọi /providers.
@@ -41,7 +40,6 @@ export function BrainTab() {
 
 export function BrainTabBody() {
   const providers = useProviders();
-  const rules = useFailoverRules();
   const qc = useQueryClient();
   const hash = useLocation().hash;
   const jevHash = hash === '#jev';
@@ -156,46 +154,31 @@ export function BrainTabBody() {
         )}
       </Panel>
 
-      <div className="sys-grid2">
-        <Panel genTarget="system.brain.chain" title="Chuỗi chuyển hướng" kicker="Thứ tự dùng nguồn — sửa ở màn API & Model" label="Chuỗi chuyển hướng" bodyClass="brain-chain">
-          {providers.isPending ? (
-            <SkeletonLines rows={3} padding="10px 16px" />
-          ) : providers.isError ? (
-            <CardError error={providers.error} onRetry={() => void providers.refetch()} retrying={providers.isFetching} />
-          ) : sorted.length === 0 ? (
-            <EmptyState icon="ph ph-arrows-down-up" title="Chưa có nhà cung cấp nào" />
-          ) : (
-            <ol className="brain-chain-list">
-              {sorted.map((p, i) => (
-                <li className="brain-chain-row" key={p.id}>
-                  <span className="mono brain-chain-row__rank">{String(i + 1).padStart(2, '0')}</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="brain-chain-row__name">{p.name}</div>
-                    <div className="mono brain-chain-row__model">{p.models[0]?.model_name ?? '—'}</div>
-                  </div>
-                  <span className="brain-chain-row__state" style={{ color: providerStatus(p).tone }}>
-                    {providerStatus(p).label}
-                  </span>
-                </li>
-              ))}
-            </ol>
-          )}
-        </Panel>
-        <Panel title="Quy tắc chuyển hướng" kicker="Cố định, không cần chỉnh" label="Quy tắc chuyển hướng" bodyClass="brain-rules">
-          {rules.isPending ? (
-            <SkeletonLines rows={4} padding="8px 16px" />
-          ) : rules.isError ? (
-            <CardError error={rules.error} onRetry={() => void rules.refetch()} retrying={rules.isFetching} />
-          ) : (
-            rules.data.map((r) => (
-              <div className="brain-rule-row" key={r.key}>
-                <span className="mono brain-rule-row__key">{r.key}</span>
-                <span className="brain-rule-row__val">{r.value}</span>
-              </div>
-            ))
-          )}
-        </Panel>
-      </div>
+      {/* v0.1.66 (F137): thêm / sửa nguồn AI, chuỗi và quy tắc chuyển hướng chỉ ở màn API & Model — tab này chỉ xem lại. */}
+      <Panel genTarget="system.brain.chain" title="Chuỗi chuyển hướng" kicker="Thứ tự dùng nguồn — xem; sửa và xem quy tắc chuyển hướng ở màn API & Model" label="Chuỗi chuyển hướng" bodyClass="brain-chain">
+        {providers.isPending ? (
+          <SkeletonLines rows={3} padding="10px 16px" />
+        ) : providers.isError ? (
+          <CardError error={providers.error} onRetry={() => void providers.refetch()} retrying={providers.isFetching} />
+        ) : sorted.length === 0 ? (
+          <EmptyState icon="ph ph-arrows-down-up" title="Chưa có nhà cung cấp nào" />
+        ) : (
+          <ol className="brain-chain-list">
+            {sorted.map((p, i) => (
+              <li className="brain-chain-row" key={p.id}>
+                <span className="mono brain-chain-row__rank">{String(i + 1).padStart(2, '0')}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="brain-chain-row__name">{p.name}</div>
+                  <div className="mono brain-chain-row__model">{chainModelText(p)}</div>
+                </div>
+                <span className="brain-chain-row__state" style={{ color: providerStatus(p).tone }}>
+                  {providerStatus(p).label}
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </Panel>
 
       {/* v0.1.50 (F-81, QD-18): Gen nhớ — chỉ Owner thấy (thẻ tự ẩn với vai trò khác, không gọi /gen/memory). */}
       <GenMemoryCard />

@@ -228,10 +228,13 @@ describe('channels model', () => {
 
 describe('setup 4–7, 12 model', () => {
   it('provider readiness', () => {
-    const p = { id: 'a', kind: 'gemini', auth_state: 'unconfigured' } as Parameters<typeof providerReady>[0];
+    const p = { id: 'a', kind: 'gemini', enabled: true, auth_state: 'unconfigured' } as Parameters<typeof providerReady>[0];
     expect(providerReady(p, {}, false)).toBe(false);
     expect(providerReady(p, { a: { ok: true, latency_ms: 1, models: [], error: null } }, false)).toBe(true);
     expect(providerReady({ ...p, kind: 'antigravity_cli' }, {}, true)).toBe(true);
+    // v0.1.68 (F003): nguồn đã tắt không sẵn sàng dù vừa gọi thử xanh hoặc CLI còn phiên.
+    expect(providerReady({ ...p, enabled: false }, { a: { ok: true, latency_ms: 1, models: [], error: null } }, false)).toBe(false);
+    expect(providerReady({ ...p, kind: 'antigravity_cli', enabled: false }, {}, true)).toBe(false);
   });
 
   it('group draft overlays and "at least one listening"', () => {

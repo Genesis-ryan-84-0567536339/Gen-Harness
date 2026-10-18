@@ -16,16 +16,19 @@ from gh.providers.router import ModelUnavailable, Routed
 class FakeRouter:
     """Thay ModelRouter: `reply(messages)` trả chuỗi JSON; `down=True` → ModelUnavailable."""
 
-    def __init__(self, reply: Callable[[list[Message]], Any] | None = None, *, down: bool = False):
+    def __init__(self, reply: Callable[[list[Message]], Any] | None = None, *, down: bool = False,
+                 no_chain: bool | None = None):
         self.reply = reply or (lambda _m: {"units": [], "noise": []})
         self.down = down
+        # v0.1.67: False = có model nhưng lượt gọi lỗi (mạng/hạn mức); True/None = chưa có model.
+        self.no_chain = no_chain
         self.calls: list[list[Message]] = []
 
     async def generate(self, org_id: uuid.UUID, *, agent_key: str, purpose: str, messages: list[Message],
                        json_mode: bool = True, temperature: float = 0.2) -> Routed:
         self.calls.append(messages)
         if self.down:
-            raise ModelUnavailable(["gemini: 429", "deepseek: đang ngắt mạch"])
+            raise ModelUnavailable(["gemini: 429", "deepseek: đang ngắt mạch"], no_chain=self.no_chain)
         out = self.reply(messages)
         return Routed(out if isinstance(out, str) else orjson.dumps(out).decode(), "fake", "fake-model", 10, 10)
 

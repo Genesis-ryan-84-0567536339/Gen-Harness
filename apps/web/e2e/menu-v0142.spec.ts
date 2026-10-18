@@ -283,7 +283,6 @@ test.describe('v0.1.42 · nghiệm thu sau tích hợp', () => {
       page.getByRole('region', { name: 'Bộ não AI', exact: true }),
       page.getByRole('article', { name: 'Kênh Zalo' }),
       page.getByRole('article', { name: 'Kênh WhatsApp' }),
-      page.getByRole('article', { name: 'Kênh Telegram' }),
       page.locator('[data-gen-target="system.channels.facebook"]'),
       page.locator('[data-gen-target="mcp.hub_link"]'),
       page.getByRole('region', { name: 'MCP', exact: true }),
@@ -405,13 +404,9 @@ test.describe('v0.1.42 · nghiệm thu sau tích hợp', () => {
     const zalo = page.getByRole('article', { name: 'Kênh Zalo' });
     await expect(zalo.locator('[data-status]')).toHaveAttribute('data-status', 'needs_boss');
     await expect(zalo.locator('[data-status]')).toHaveText('Cần Sếp xử lý');
-    const tg = page.getByRole('article', { name: 'Kênh Telegram' });
-    await expect(tg.locator('[data-status]')).toHaveAttribute('data-status', 'not_connected');
-    await expect(tg.locator('a[href^="/plugins"]')).toHaveCount(0);
-    await expect(tg).not.toContainText('chợ tiện ích');
-    await expect(tg).not.toContainText('Cài plugin');
-    await expect(tg).toContainText('Kênh này chưa có trong bản đang chạy');
-    await expect(tg.locator('[data-main-action]')).toHaveText('Chưa có trong bản này');
+    // v0.1.68 (F060/F135): không còn thẻ kênh "Telegram — Chưa có trong bản này" cạnh thẻ Telegram thật.
+    await expect(page.getByRole('article', { name: 'Kênh Telegram' })).toHaveCount(0);
+    await expect(page.getByText('Chưa có trong bản này')).toHaveCount(0);
     await expect(page.locator('a[href^="/plugins"]')).toHaveCount(0);
   });
 

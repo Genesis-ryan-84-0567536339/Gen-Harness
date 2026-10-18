@@ -100,7 +100,15 @@ export function Step8Agent({ meta, description, onBack, onSaved, formRef, onSkip
           ) : agent.try_error || agent.try_error_code || agent.try_reasons?.length ? (
             <TryFailed agent={agent} />
           ) : null}
-          <p className="muted-note">Gán kênh và nhóm cho agent làm sau ở màn Danh tính Agent.</p>
+          {typeof agent.listening_channels === 'number' ? (
+            <p className="muted-note" data-testid="step8-listening">
+              {agent.listening_channels > 0
+                ? `Agent nghe sẵn ${agent.listening_channels} kênh đã nối — thu hẹp theo nhóm hoặc bỏ bớt ở màn Danh tính Agent.`
+                : 'Chưa có kênh nào được nối nên agent chưa nghe kênh nào — nối Zalo/WhatsApp rồi gán kênh cho agent ở màn Danh tính Agent.'}
+            </p>
+          ) : (
+            <p className="muted-note">Gán kênh và nhóm cho agent làm sau ở màn Danh tính Agent.</p>
+          )}
         </div>
       </StepFrame>
     );

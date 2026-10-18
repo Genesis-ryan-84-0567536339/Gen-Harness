@@ -1,5 +1,5 @@
 import { ApiError, PinCancelledError } from '@gen-harness/contracts';
-import { MODEL_UNAVAILABLE_TEXT, detailToText } from './friendlyError';
+import { MODEL_DOWN_TEXT, MODEL_UNAVAILABLE_TEXT, detailToText } from './friendlyError';
 import { DEFAULT_TZ, fmtDMClock } from './format';
 
 const INTERNAL_FALLBACK_TITLE = 'Hệ thống gặp lỗi khi xử lý yêu cầu — đã ghi nhật ký';
@@ -8,6 +8,14 @@ const PIN_LOCKED_FALLBACK_TITLE = 'Mã PIN đang bị khoá do nhập sai nhiề
 /** v0.1.30: lỗi "không model nào chạy được" (503 MODEL_UNAVAILABLE, kể cả máy chủ cũ trả `detail={reasons}`). */
 export function isModelUnavailable(e: unknown): boolean {
   return e instanceof ApiError && e.code === 'MODEL_UNAVAILABLE';
+}
+
+/**
+ * v0.1.67 (F011): 503 MODEL_UNAVAILABLE có `model_down: true` = đã có model nhưng nguồn đang lỗi / hết hạn mức — khác với
+ * "chưa có model nào". Máy chủ cũ không gửi cờ ⇒ coi như chưa có model (câu cũ).
+ */
+export function isModelDown(e: unknown): boolean {
+  return e instanceof ApiError && e.code === 'MODEL_UNAVAILABLE' && (e.problem as { model_down?: unknown }).model_down === true;
 }
 
 function titleOf(e: ApiError, fallback: string): string {
@@ -38,7 +46,7 @@ export function errorText(e: unknown, tz: string = DEFAULT_TZ): string {
   if (e instanceof ApiError) {
     if (e.status === 0) return 'Không kết nối được máy chủ. Kiểm tra máy chủ rồi thử lại.';
     if (e.status === 403) return forbiddenText(e);
-    if (isModelUnavailable(e)) return MODEL_UNAVAILABLE_TEXT;
+    if (isModelUnavailable(e)) return isModelDown(e) ? MODEL_DOWN_TEXT : MODEL_UNAVAILABLE_TEXT;
     // v0.1.35: 500 INTERNAL — câu dễ hiểu (title) KÈM mã lỗi; `detail` chỉ có mã nên không được thay chỗ title.
     // v0.1.44 (F-4b): kèm "Mã yêu cầu" (X-Request-ID) cạnh mã lỗi để người hỗ trợ đối chiếu nhật ký.
     if (e.code === 'INTERNAL') {

@@ -190,14 +190,15 @@ async def test_clone_can_skip_scope_copy(owner_api, db) -> None:  # type: ignore
     assert r.json()["channel_scopes"] == []
 
 
-async def test_disable_toggle_needs_pin(owner_api, db) -> None:  # type: ignore[no-untyped-def]
+async def test_disable_toggle_enable_needs_pin(owner_api, db) -> None:  # type: ignore[no-untyped-def]
+    """v0.1.67 (F089): TẮT không cần PIN, BẬT lại cần PIN (chi tiết ở test_agents_that_v0167)."""
     org, *_ = await _channel_group(db)
     aid = await _seed_agent(db, org)
     api: Api = owner_api
-    assert (await api.send("PATCH", f"/agents/{aid}/disable", {"enabled": False})).status_code == 423
-    await _pin(api)
     r = await api.send("PATCH", f"/agents/{aid}/disable", {"enabled": False})
     assert r.status_code == 200 and r.json()["is_enabled"] is False
+    assert (await api.send("PATCH", f"/agents/{aid}/disable", {"enabled": True})).status_code == 423
+    await _pin(api)
     r = await api.send("PATCH", f"/agents/{aid}/disable", {"enabled": True})
     assert r.status_code == 200 and r.json()["is_enabled"] is True
 

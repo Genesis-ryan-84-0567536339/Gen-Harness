@@ -65,6 +65,10 @@
       "path": "/raw",
       "title": "Kho dữ liệu thô"
     },
+    "listenlog": {
+      "path": "/listenlog",
+      "title": "Nhật ký lắng nghe"
+    },
     "rules": {
       "path": "/rules",
       "title": "Quy tắc sàng lọc"

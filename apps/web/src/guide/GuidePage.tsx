@@ -10,7 +10,7 @@ import { BOSS_CHECKS_KEY, BOSS_CHECKS_PATH } from './bossChecksModel';
 import { FOLLOW_UP_KEY, GUIDE, guideOrdinal, type GuideItem } from './guideContent';
 
 /**
- * Trang "Hướng dẫn thiết lập" (`/guide`): mọi việc tuỳ chọn 5–11 + (v0.1.39) Kết nối Facebook, Nối Gen-hub theo thứ tự, mỗi việc có vì sao cần, chuẩn bị gì,
+ * Trang "Hướng dẫn thiết lập" (`/guide`; v0.1.68: mọi việc ở đây đều KHÔNG bắt buộc, việc bắt buộc duy nhất — nguồn AI — nằm ở "Việc Sếp cần làm"): mọi việc tuỳ chọn 5–11 + (v0.1.39) Kết nối Facebook, Nối Gen-hub theo thứ tự, mỗi việc có vì sao cần, chuẩn bị gì,
  * các bước bấm theo đúng nhãn nút, và dấu hiệu đã xong. Xong hay chưa lấy từ `GET /setup/follow-up` (suy từ dữ
  * liệu thật) — làm xong ở đâu (form hướng dẫn hay màn Console) thì việc cũng tự đánh dấu xong. Số hiển thị là số thứ
  * tự trong danh sách (01…), không phải số bước. Đầu trang: thẻ "Việc Sếp cần làm" (`/guide/viec-sep`, F-74).
@@ -30,6 +30,11 @@ export function GuidePage() {
   const doneOf = new Map((q.data ?? []).map((i) => [i.n, i.done]));
   const doneCount = GUIDE.filter((g) => doneOf.get(g.n)).length;
   const firstOpen = GUIDE.find((g) => !doneOf.get(g.n))?.n;
+  // v0.1.68 (F031/F138): MỘT cách đếm — dòng bắt buộc (nguồn AI) là x/N của "Việc Sếp cần làm"; 9 việc dưới đây đều TUỲ CHỌN.
+  // Chỉ nói "sẵn sàng" khi nguồn AI cũng đạt; chưa biết kết quả (đang tải / lỗi) thì không khẳng định gì.
+  const aiKnown = typeof boss.data?.required_done === 'number' && typeof boss.data?.required_total === 'number';
+  const aiOk = aiKnown && (boss.data?.required_done ?? 0) >= (boss.data?.required_total ?? 1);
+  const allDone = doneCount === GUIDE.length;
 
   return (
     <div className="screen guide">
@@ -78,7 +83,12 @@ export function GuidePage() {
               <span style={{ width: `${(doneCount / GUIDE.length) * 100}%` }} />
             </div>
             <span className="guide-progress__text">
-              {doneCount === GUIDE.length ? 'Đã xong tất cả — hệ thống sẵn sàng làm việc.' : `Đã xong ${doneCount}/${GUIDE.length} việc`}
+              {allDone && aiOk ? 'Đã xong tất cả — hệ thống sẵn sàng làm việc.' : `Đã xong ${doneCount}/${GUIDE.length} việc`}
+            </span>
+            <span className="guide-progress__note">
+              {allDone && aiKnown && !aiOk
+                ? 'Mọi việc tuỳ chọn đã xong, nhưng nguồn AI chưa chạy thật — xem "Việc Sếp cần làm" ở trên.'
+                : 'Các việc này đều không bắt buộc.'}
             </span>
           </div>
           <ol className="guide-list">
@@ -106,6 +116,7 @@ function GuideCard({ g, done, open, afterDone }: { g: GuideItem; done: boolean; 
           ) : (
             <span className="guide-chip">Chưa làm</span>
           )}
+          <span className="guide-chip guide-chip--opt">Không bắt buộc</span>
           <Icon name="ph ph-caret-down" size={13} className="guide-card__caret" />
         </summary>
         <div className="guide-card__body">

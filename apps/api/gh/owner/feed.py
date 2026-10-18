@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.biz.core.scope import not_found
 from gh.biz.queue import service as qsvc
-from gh.data.common import RAW_SELECT, iso, raw_item
+from gh.data.common import RAW_SELECT, iso, outbound_to_sql, raw_item
 from gh.owner import service as svc
 from gh.refinery import triage
 
@@ -217,22 +217,8 @@ def _message(r: Any, center_id: uuid.UUID) -> dict[str, Any]:
 #: (trong 7 ngày, cùng kênh) là của người đó. Khách khác trên cùng kênh không bao giờ lẫn vào.
 
 
-def outbound_to_sql(e: str, ids: str, ext: str) -> str:
-    """Điều kiện SQL "tin ĐI `e` (1-1) là gửi cho người có định danh `ids` (uuid[]) / mã ngoài `ext` (text[])": người
-    nhận trong payload trùng `ext`, hoặc (không ghi người nhận) tin ĐẾN 1-1 gần nhất trước nó trên cùng kênh là của
-    `ids`. MỘT chỗ duy nhất cho Thông tin (ngữ cảnh hội thoại) và Phân tích (`insights`: trả lời nhanh / chưa trả lời),
-    để hai nơi không bao giờ ghép tin đi cho sai khách. `e`: bí danh của `raw.events`; `ids`/`ext`: biểu thức SQL."""
-    rcpt = (f"NULLIF(split_part(COALESCE({e}.payload->>'threadId', {e}.payload->'key'->>'remoteJid', "
-            f"{e}.payload->>'recipient'), '@', 1), '')")
-    return f"""({e}.direction = 'outbound' AND (
-    {rcpt} = ANY({ext})
-    OR ({rcpt} IS NULL AND (
-      SELECT i2.sender_identity_id FROM raw.events i2
-      WHERE i2.org_id = {e}.org_id AND i2.channel_id = {e}.channel_id AND i2.group_id IS NULL
-        AND i2.direction = 'inbound' AND i2.occurred_at <= {e}.occurred_at
-        AND i2.occurred_at > {e}.occurred_at - interval '7 days'
-        AND i2.received_at > {e}.received_at - interval '37 days' AND i2.received_at <= {e}.received_at
-      ORDER BY i2.occurred_at DESC, i2.seq DESC LIMIT 1) = ANY({ids}))))"""
+# `outbound_to_sql` đã chuyển sang `gh.data.common` (v0.1.67, F050) để cảnh báo / chăm sóc khách / sàng lọc dùng chung;
+# `feed.outbound_to_sql` vẫn gọi được (Phân tích `insights` dùng tên này).
 
 
 _ONE_TO_ONE_SQL = f"""AND (

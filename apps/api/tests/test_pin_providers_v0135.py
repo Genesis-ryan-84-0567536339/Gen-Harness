@@ -1,8 +1,12 @@
 """v0.1.35 (F-20): tạo / sửa nhà cung cấp AI, chuỗi ưu tiên, thêm khoá API cần phiên PIN `ai.route_change`.
 
 Mục tiêu: phiên Owner bị lấy (vd qua XSS) không thể âm thầm chuyển lưu lượng LLM ra máy chủ lạ. PIN kiểm SAU quyền:
-vai trò thiếu `system.manage` vẫn nhận 403 (không lộ là route có PIN). Ngoài phạm vi (không 423): GET, DELETE nhà cung
-cấp / khoá, /test (khoá chỉ thu hẹp hoặc kiểm đường đi, không mở đường mới).
+vai trò thiếu `system.manage` vẫn nhận 403 (không lộ là route có PIN). Ngoài phạm vi (không 423): GET, /test (kiểm
+đường đi, không mở đường mới).
+
+Review v0.1.68 (P3): XOÁ nhà cung cấp / xoá khoá API cũng đổi chuỗi nguồn AI (gỡ nguồn của Sếp, ép Gen rơi sang nguồn
+còn lại) ⇒ nay cũng cần PIN `ai.route_change` (trước đây ghi "chỉ thu hẹp" — sai: gỡ nguồn tốt để nguồn lạ đứng đầu là
+đổi đường đi). Hai dòng `delete`, `del_key` ở bảng dưới.
 """
 
 import secrets
@@ -25,19 +29,24 @@ def _fake_key() -> str:
 
 
 async def _seed_provider(db) -> uuid.UUID:  # type: ignore[no-untyped-def]
+    return (await _seed_provider_key(db))[0]
+
+
+async def _seed_provider_key(db) -> tuple[uuid.UUID, uuid.UUID]:  # type: ignore[no-untyped-def]
     org = await org_id(db)
     pid = (await db.execute(text("""INSERT INTO agent.providers (org_id, kind, name, endpoint, failover_rank)
                                     VALUES (:o, 'openai_compat', 'Nguồn có sẵn', 'https://co-san.test/v1', 1)
                                     RETURNING id"""), {"o": org})).scalar_one()
     k = _fake_key()
-    await db.execute(text("""INSERT INTO agent.provider_keys (provider_id, label, secret_enc, last4, rotation_order)
-                             VALUES (:p, 'API-KEY-01', :s, :f, 0)"""),
-                     {"p": pid, "s": crypto.encrypt(k.encode(), KEY_AAD), "f": k[-4:]})
+    kid = (await db.execute(text("""INSERT INTO agent.provider_keys
+                                    (provider_id, label, secret_enc, last4, rotation_order)
+                                    VALUES (:p, 'API-KEY-01', :s, :f, 0) RETURNING id"""),
+                            {"p": pid, "s": crypto.encrypt(k.encode(), KEY_AAD), "f": k[-4:]})).scalar_one()
     await db.commit()
-    return pid
+    return pid, kid
 
 
-def _routes(pid: uuid.UUID) -> list[tuple[str, str, dict]]:  # type: ignore[type-arg]
+def _routes(pid: uuid.UUID, kid: uuid.UUID) -> list[tuple[str, str, dict | None]]:  # type: ignore[type-arg]
     return [
         ("POST", "/providers", {"kind": "openai_compat", "name": "Máy chủ lạ", "endpoint": "https://la.test/v1",
                                 "keys": [_fake_key()], "models": ["m-la"]}),
@@ -45,23 +54,25 @@ def _routes(pid: uuid.UUID) -> list[tuple[str, str, dict]]:  # type: ignore[type
         ("PATCH", f"/providers/{pid}", {"enabled": False}),
         ("PATCH", f"/providers/{pid}", {"failover_rank": 2}),
         ("POST", f"/providers/{pid}/keys", {"secret": _fake_key()}),
+        ("DELETE", f"/providers/{pid}/keys/{kid}", None),
+        ("DELETE", f"/providers/{pid}", None),
     ]
 
 
-ROUTE_IDS = ["create", "chain", "toggle", "rank", "add_key"]
-OK_STATUS = {"create": 201, "chain": 200, "toggle": 200, "rank": 200, "add_key": 201}
+ROUTE_IDS = ["create", "chain", "toggle", "rank", "add_key", "del_key", "delete"]
+OK_STATUS = {"create": 201, "chain": 200, "toggle": 200, "rank": 200, "add_key": 201, "del_key": 204, "delete": 204}
 
 
 def test_route_change_declared() -> None:
     assert "ai.route_change" in PIN_OPERATIONS
-    assert PIN_OPERATIONS["ai.route_change"] == "Thêm / sửa nhà cung cấp AI, khoá API, chuỗi ưu tiên"
+    assert PIN_OPERATIONS["ai.route_change"] == "Thêm / sửa / xoá nhà cung cấp AI, khoá API, chuỗi ưu tiên"
 
 
 @pytest.mark.parametrize("idx", range(len(ROUTE_IDS)), ids=ROUTE_IDS)
 async def test_owner_without_pin_gets_423_then_ok(owner_api, db, idx: int) -> None:  # type: ignore[no-untyped-def]
     api: Api = owner_api
-    pid = await _seed_provider(db)
-    method, path, body = _routes(pid)[idx]
+    pid, kid = await _seed_provider_key(db)
+    method, path, body = _routes(pid, kid)[idx]
     r = await api.send(method, path, body)
     assert r.status_code == 423, r.text
     j = r.json()
@@ -81,9 +92,9 @@ async def test_owner_without_pin_gets_423_then_ok(owner_api, db, idx: int) -> No
 @pytest.mark.parametrize("idx", range(len(ROUTE_IDS)), ids=ROUTE_IDS)
 async def test_role_without_permission_gets_403_not_423(owner_api, client, db, role: str,  # type: ignore[no-untyped-def]
                                                         idx: int) -> None:
-    pid = await _seed_provider(db)
+    pid, kid = await _seed_provider_key(db)
     staff = await login_as(client, db, role)
-    method, path, body = _routes(pid)[idx]
+    method, path, body = _routes(pid, kid)[idx]
     r = await staff.send(method, path, body)
     assert r.status_code == 403, r.text
     assert r.json()["code"] == "FORBIDDEN"
@@ -99,11 +110,7 @@ async def test_out_of_scope_routes_not_pin_gated(owner_api, db) -> None:  # type
     assert (await api.get("/providers")).status_code == 200
     r = await api.send("POST", f"/providers/{pid}/test")
     assert r.status_code != 423, r.text
-    kid = (await api.get("/providers")).json()[0]["keys"][0]["id"]
-    r = await api.send("DELETE", f"/providers/{pid}/keys/{kid}")
-    assert r.status_code != 423, r.text
-    r = await api.send("DELETE", f"/providers/{pid}")
-    assert r.status_code == 204, r.text
+    # Xoá nhà cung cấp / khoá API KHÔNG còn ở ngoài phạm vi PIN từ v0.1.68 (xem docstring đầu tệp).
 
 
 async def test_action_log_still_recorded_with_pin(owner_api, db) -> None:  # type: ignore[no-untyped-def]

@@ -39,7 +39,7 @@ export interface BossCheck {
   message: string | null;
   detail: Record<string, string | number | boolean | null | string[] | Record<string, unknown>>;
   checked_at: string;
-  /** Số bản ghi đang giữ của mục này — TÍNH CẢ lượt lỗi (bộ đếm đổi qua lại dùng `BossOverview.switch_passes`). */
+  /** Số bản ghi đang giữ của mục này — TÍNH CẢ lượt lỗi. */
   runs: number;
   /** Tài khoản đang dùng (agy/claude) — Owner thấy email đầy đủ, CHỈ trong phản hồi `run` (tải lại: `detail.account_masked`). */
   account?: string | null;
@@ -74,8 +74,6 @@ export interface BossOverview {
   required_done: number;
   /** Số dòng BẮT BUỘC, lấy từ máy chủ (v0.1.55: 1 — chỉ dòng `ai`); web KHÔNG được ghi cứng số này. */
   required_total: number;
-  /** Số lần đổi tài khoản Google THẬT đã đạt (chỉ lượt 'pass', đích khác lượt trước) — dòng 3 cần ≥ 2. */
-  switch_passes: number;
 }
 
 export interface BossCheckRunBody {

@@ -672,5 +672,6 @@ async def try_chat(request_app_state: Any, org_id: uuid.UUID, agent_id: uuid.UUI
                                         json_mode=False, temperature=0.4,
                                         messages=[Message("system", system), Message("user", message)])
     except ModelUnavailable as e:
-        raise model_unavailable("Chưa có model nào chạy được để thử trò chuyện", e.reasons) from e
+        raise model_unavailable("Chưa có model nào chạy được để thử trò chuyện", e.reasons,
+                                no_chain=e.no_chain) from e
     return routed.text.strip()

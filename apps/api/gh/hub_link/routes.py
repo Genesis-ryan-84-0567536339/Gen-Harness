@@ -33,9 +33,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.auth import rbac, service
 from gh.auth.deps import require, require_owner, require_pin
+from gh.boss_checks import service as boss_checks
 from gh.chassis.mcp_client import HTTPS_REQUIRED_MSG, McpBlockedNetwork, McpError, pin_endpoint
 from gh.db import DB
 from gh.errors import field_errors
+from gh.gen.coach import cache as coach_cache
 from gh.hub_link import KHO_LABEL_MAX, clean_kho_label
 from gh.hub_link import service as hub
 
@@ -139,7 +141,12 @@ async def test_link(request: Request, _m: service.CurrentUser = Depends(MANAGE),
                     _o: service.CurrentUser = Depends(require_owner),
                     user: service.CurrentUser = Depends(require_pin("hub.link")),
                     db: AsyncSession = DB) -> dict[str, Any]:
-    return await hub.test_link(db, request.app.state.redis, _client(request), user=user)
+    out = await hub.test_link(db, request.app.state.redis, _client(request), user=user)
+    # v0.1.68 (F028): ghi cả bản kiểm "Việc Sếp cần làm › Gen-hub" (cùng hàm với /boss-checks/hub/run) rồi làm mới
+    # thẻ Gen.
+    if await boss_checks.record_hub_result(db, user.org_id, out, user.id) is not None:
+        await coach_cache.commit_and_invalidate(db, request.app.state.redis, user.org_id)
+    return out
 
 
 # ─── đọc Kho: chỉ Owner ────────────────────────────────────────────────────────

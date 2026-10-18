@@ -38,8 +38,8 @@ const PIN_TEXT = 'Sau Hoàn tất, mời thêm người (tạo tài khoản) c�
 
 /**
  * Bước 10 — Mời đội ngũ (tuỳ chọn, PLAN 4.6). v0.1.55 (Thiết lập gọn): mở ra là THẺ GỢI Ý có nút "Để sau" (nút chính) và "Mời
- * ngay" (hiện form mời); mở lại sau Hoàn tất (từ Hướng dẫn) thì hiện thẳng form. Danh sách rỗng vẫn lưu được ("Owner mời sau
- * ở Quyền hạn").
+ * ngay" (hiện form mời); mở lại sau Hoàn tất (từ Hướng dẫn) thì hiện thẳng form. v0.1.68 (F038): danh sách rỗng KHÔNG lưu
+ * được (không ghi "Đã xong: Mời người trong đội" khi chưa mời ai) — "Tiếp tục" chỉ bật khi có người đủ tên + email.
  */
 export function Step10Team({ meta, description, onBack, onSaved, formRef, onSkip, skipping, skipError }: StepProps) {
   // v0.1.45 (F-20): mở lại từ trang Hướng dẫn SAU Hoàn tất → mời người cần phiên PIN `user.manage` (hộp PIN tự mở).
@@ -58,7 +58,10 @@ export function Step10Team({ meta, description, onBack, onSaved, formRef, onSkip
   const isFilled = (r: Row) => r.display_name.trim() !== '' && r.email.trim() !== '';
   const isPartial = (r: Row) => (r.display_name.trim() !== '') !== (r.email.trim() !== '');
   const hasPartial = rows.some(isPartial);
-  const canContinue = !hasPartial;
+  // v0.1.68 (F038): danh sách rỗng KHÔNG phải "đã mời" — phải có ít nhất một dòng đủ tên + email; chưa muốn mời thì bấm "Để sau".
+  const canContinue = !hasPartial && rows.some(isFilled);
+  // Trình thiết lập có nút "Để sau"; mở từ Hướng dẫn thì không có (onSkip rỗng) — lối ra là "Quay lại".
+  const exitLabel = onSkip ? 'Để sau' : 'Quay lại';
 
   const save = async () => {
     setBusy(true);
@@ -153,6 +156,7 @@ export function Step10Team({ meta, description, onBack, onSaved, formRef, onSkip
       description={description}
       formRef={formRef}
       canContinue={canContinue}
+      blockedHint={!hasPartial && !canContinue ? `Thêm ít nhất một người để mời — chưa muốn mời thì bấm "${exitLabel}".` : null}
       busy={busy}
       onContinue={() => void save()}
       onBack={onBack}
@@ -164,7 +168,7 @@ export function Step10Team({ meta, description, onBack, onSaved, formRef, onSkip
         <div className="setup-section__title">Thành viên được mời</div>
         {finished ? <PinHint text={PIN_TEXT} title={PIN_TEXT} /> : null}
         {rows.length === 0 ? (
-          <EmptyState icon="ph ph-users-three" title="Chưa mời ai" description="Bấm Thêm người để mời. Bỏ trống cũng được — mời sau ở Hướng dẫn thiết lập." />
+          <EmptyState icon="ph ph-users-three" title="Chưa mời ai" description={`Bấm Thêm người để mời. Chưa muốn mời ai thì bấm ${exitLabel} — việc này chỉ tính xong khi có người thật.`} />
         ) : (
           <div className="invite-rows">
             {rows.map((r) => (

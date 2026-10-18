@@ -69,11 +69,12 @@ def value_bucket(vnd: int | None) -> str:
 
 
 async def _ensure_agent(db: AsyncSession, table: str, obj_id: uuid.UUID, agent_id: uuid.UUID | None) -> None:
-    """BOT phải là agent cùng org với nhóm/người (org lấy ngay từ đối tượng) — UUID lạ → 404 thay vì 500 (F-1)."""
+    """BOT phải là agent cùng org với nhóm/người (org lấy ngay từ đối tượng) và chưa Lưu trữ — UUID lạ → 404
+    thay vì 500 (F-1)."""
     if agent_id is None:
         return
     ok = (await db.execute(text(f"""SELECT 1 FROM agent.identities a JOIN {table} t ON t.org_id = a.org_id
-                                    WHERE a.id = :a AND t.id = :i"""),  # noqa: S608
+                                    WHERE a.id = :a AND t.id = :i AND a.archived_at IS NULL"""),  # noqa: S608
                            {"a": agent_id, "i": obj_id})).first()
     if ok is None:
         raise not_found("Agent")

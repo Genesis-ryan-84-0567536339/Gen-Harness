@@ -12,8 +12,9 @@ from tests.test_gen_coach_v0154 import T0, keys_of, mk_sig, today_of
 AI_SOURCE_PATH = "/setup?buoc=nguon-ai"
 
 
-def test_todo_links_table_has_only_model_missing() -> None:
-    assert sg.TODO_LINKS == {"model.missing": AI_SOURCE_PATH}
+def test_todo_links_table_has_only_the_ai_source_keys() -> None:
+    # v0.1.68 (F029): `boss.ai` cũng dẫn màn Thiết lập nguồn AI — MỘT đích duy nhất cho việc thêm / kiểm nguồn AI.
+    assert sg.TODO_LINKS == {"model.missing": AI_SOURCE_PATH, "boss.ai": AI_SOURCE_PATH}
     # một việc tĩnh chỉ có MỘT cách chỉ đường: target hoặc link, không cả hai.
     assert not set(sg.TODO_TARGETS) & set(sg.TODO_LINKS)
     # đích link là đường dẫn trong app (một dấu "/" đầu, không phải URL ngoài) — web chỉ nhận dạng này.
@@ -44,11 +45,10 @@ def test_model_missing_payload_carries_link_without_target() -> None:
 def test_other_static_todos_keep_their_target() -> None:
     sig = mk_sig(state={"boss.ai.done": False, "boss.hub.done": False})
     todos = {t.key: t for t in engine.candidate_todos(sig)}
-    assert todos["boss.ai"].target == "connections.brain" and todos["boss.ai"].link is None
+    assert todos["boss.ai"].link == AI_SOURCE_PATH and todos["boss.ai"].target is None
     assert todos["boss.hub"].target == sg.BOSS_TARGET.format(key="hub") and todos["boss.hub"].link is None
-    # mọi khoá có đích làm sáng vẫn giữ nguyên bảng cũ trừ model.missing.
-    assert "model.missing" not in sg.TODO_TARGETS
-    assert sg.TODO_TARGETS["boss.ai"] == "connections.brain"
+    # mọi khoá có đích làm sáng vẫn giữ nguyên bảng cũ trừ model.missing và boss.ai (v0.1.68 → link).
+    assert "model.missing" not in sg.TODO_TARGETS and "boss.ai" not in sg.TODO_TARGETS
     assert sg.TODO_TARGETS["backup.unset"] == "system.backup.schedule"
 
 

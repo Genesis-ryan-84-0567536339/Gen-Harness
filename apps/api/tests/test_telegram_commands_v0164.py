@@ -490,12 +490,30 @@ async def test_end_to_end_read_commands_have_no_buttons(owner_api: Api, bot: Fak
     assert all("reply_markup" not in s for s in bot.sent()) and len(bot.sent()) == 2
 
 
-async def test_end_to_end_21st_command_in_a_minute_is_dropped(owner_api: Api, bot: FakeBot, redis: Any) -> None:
+@pytest.mark.parametrize(
+    "start_s",
+    [5.0, 30.0, 55.0, 58.5, 59.85, 59.95],
+    ids=["5s", "30s", "55s", "58.5s-vat-qua-giua-chung", "59.85s-vat-qua-o-tin-2", "59.95s-tat-ca-sau-ranh-gioi"],
+)
+async def test_end_to_end_21st_command_in_a_minute_is_dropped(
+    owner_api: Api, bot: FakeBot, redis: Any, monkeypatch: pytest.MonkeyPatch, start_s: float
+) -> None:
+    """Đồng hồ vòng nhận tin được tiêm (mỗi tin cách nhau 100 ms): các ca 58.5 s–59.98 s vắt qua ranh giới phút đồng hồ
+    giữa chừng 22 tin — trước v0.1.68 (cửa sổ cố định theo phút) cả 22 lệnh đều lọt. Giờ luôn đúng 20 + 2 bị chặn."""
     await _pair(owner_api, bot, redis, update_id=1)
     bot.calls.clear()
-    now = datetime.now(UTC)
-    bot.updates = [msg(100 + i, "/tro_giup", date=now) for i in range(22)]
+    clock = {"t": datetime.now(UTC).replace(second=0, microsecond=0) + timedelta(seconds=start_s)}
+
+    def fake_now() -> datetime:
+        clock["t"] += timedelta(milliseconds=100)
+        return clock["t"]
+
+    monkeypatch.setattr(poller, "_now", fake_now)
+    base = clock["t"]
+    bot.updates = [msg(100 + i, "/tro_giup", date=base) for i in range(22)]
     out = await poller.poll_org(sessionmaker(), redis, None, await _org(), transport=httpx.MockTransport(bot.handle))
+    first, last = base + timedelta(milliseconds=100), base + timedelta(milliseconds=2200)  # giờ tin đầu / tin cuối
+    assert (int(first.timestamp() // 60) != int(last.timestamp() // 60)) == (57.8 <= start_s < 59.9)  # ca nào vắt qua
     assert out["results"].count("handled:tro_giup") == 20
     assert out["results"][20:] == ["rejected:rate_limited"] * 2
     texts = [s["text"] for s in bot.sent()]

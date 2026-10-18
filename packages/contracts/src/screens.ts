@@ -179,6 +179,13 @@ export const SCREENS: ScreenMeta[] = [
     descMaxWidth: 760, designTitleRow: true,
   },
   {
+    key: 'listenlog', domain: 'tech', parent: 'Tầng dữ liệu', icon: 'ph ph-ear', extra: true,
+    name: 'Nhật ký lắng nghe', en: 'Mọi kênh đang nghe, hệ thống đã làm gì',
+    title: 'Nhật ký lắng nghe', subtitle: 'Listening Log · tin và sự kiện của mọi kênh trên một dòng thời gian',
+    description: 'Một dòng thời gian gộp mọi tin đang nghe và mọi thay đổi trên kênh (vào hoặc rời nhóm, đổi tên, kênh nối hoặc ngắt). Mỗi tin cho thấy hệ thống đã làm gì: sàng lọc thế nào, agent trực quyết định gì, bản nháp nằm ở đâu.',
+    descMaxWidth: 760, designTitleRow: true,
+  },
+  {
     key: 'rules', domain: 'tech', parent: 'Tầng dữ liệu', icon: 'ph ph-funnel',
     name: 'Quy tắc sàng lọc', en: 'Lọc, phân loại, chấm điểm',
     title: 'Quy tắc sàng lọc', subtitle: 'Refinery Rules · Sếp định nghĩa cách core agent đánh giá',

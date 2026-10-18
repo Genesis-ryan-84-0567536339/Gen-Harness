@@ -1,7 +1,7 @@
 """v0.1.39 (F-28) — "Hướng dẫn thiết lập" có thêm 2 việc ngoài trình thiết lập: 13 Kết nối Facebook, 14 Nối Gen-hub.
 
-- `GET /setup/follow-up` luôn có n=13/14; `done` suy từ dữ liệu thật (Facebook đã từng đăng nhập; Gen-hub Kiểm tra
-  xanh ít nhất một lần).
+- `GET /setup/follow-up` luôn có n=13/14; `done` suy từ dữ liệu thật (Facebook đang đăng nhập — v0.1.68: `needs_login`
+  không tính; Gen-hub Kiểm tra xanh ít nhất một lần).
 - Không phải bước của trình thiết lập: các mục 4–11 giữ nguyên, Hoàn tất (`PUT /setup/steps/12`) không bị 13/14 chặn.
 """
 
@@ -55,12 +55,14 @@ async def test_follow_up_has_facebook_and_hub_items(owner_api, db) -> None:  # t
     assert {n: after[n] for n in range(4, 12)} == {n: before[n] for n in range(4, 12)}
 
 
-async def test_needs_login_counts_revoked_does_not(owner_api, db) -> None:  # type: ignore[no-untyped-def]
+async def test_needs_login_and_revoked_do_not_count(owner_api, db) -> None:  # type: ignore[no-untyped-def]
     api: Api = owner_api
     org = await org_id(db)
     await _social(db, org, "Đã gỡ", "revoked")
     assert (await _items(api))[13]["done"] is False
     await _social(db, org, "Cần đăng nhập lại", "needs_login")
+    assert (await _items(api))[13]["done"] is False     # v0.1.68 (F028): phiên hết, phải đăng nhập lại ⇒ chưa xong
+    await _social(db, org, "Tạm dừng", "paused")
     assert (await _items(api))[13]["done"] is True
 
 

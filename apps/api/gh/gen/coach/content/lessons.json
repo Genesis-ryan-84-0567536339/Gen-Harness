@@ -75,7 +75,7 @@
     "id": "N07",
     "order": 85,
     "title": "Dải Cần Sếp xử lý",
-    "body": "Đầu trang Hôm nay có dải “Cần Sếp xử lý”, nơi em gom mọi việc chỉ Sếp tự tay làm được. Đó có thể là kênh chat bị rớt, model hết đăng nhập, lần cập nhật bị lỗi hay sao lưu đã quá lâu. Mỗi dòng có một nút đi thẳng tới chỗ cần sửa. Không có gì cần làm thì dải này tự ẩn, nên thấy dải là Sếp nên xem ngay.",
+    "body": "Đầu trang Hôm nay có dải “Cần Sếp xử lý”, nơi em gom mọi việc chỉ Sếp tự tay làm được. Đó có thể là kênh chat bị rớt, model hết đăng nhập, lần cập nhật bị lỗi hay sao lưu đã quá lâu. Mỗi dòng có một nút đi thẳng tới chỗ cần sửa. Không có gì cần làm thì dải chỉ còn một dòng “Không có việc nào cần Sếp xử lý”, nên thấy các dòng việc hiện ra là Sếp nên xem ngay.",
     "try": {
       "label": "Làm thử",
       "target": "overview.needs_boss"

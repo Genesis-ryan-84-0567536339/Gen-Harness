@@ -113,7 +113,7 @@ describe('API & Model', () => {
 
     expect(await screen.findByText('Gemini API', { selector: '.apm-provider__name' })).toBeInTheDocument();
     expect(screen.getByText('DeepSeek API', { selector: '.apm-provider__name' })).toBeInTheDocument();
-    expect(screen.getByText(/GEM-KEY-01 ····9f2a/)).toBeInTheDocument();
+    expect(screen.getByText(/GEM-KEY-01 ····9f2a/, { selector: '.apm-field__val' })).toBeInTheDocument();
     expect(screen.getByText('Sàng lọc & suy luận chính')).toBeInTheDocument();
     expect(screen.getByText('Soạn lại / dịch nháp', { selector: '.apm-table__agent' })).toBeInTheDocument();
     expect(screen.queryByText('Trả lời nhanh trong nhóm')).toBeNull();

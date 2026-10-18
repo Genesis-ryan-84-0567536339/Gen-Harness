@@ -1,14 +1,9 @@
 import { Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
 import { Icon } from '@gen-harness/ui';
-import { FOLLOW_UP_KEY } from '../../guide/guideContent';
-import { api } from '../../lib/api';
-import { useMe } from '../../lib/queries';
-import { AI_SOURCE_PATH } from '../../setup/steps';
 
 /**
  * v0.1.29 (Boss 30/09): bước 4 "Để sau" được — khi chưa có model nào gán cho Gen/Sàng lọc thì nói thẳng hậu quả và
- * cho một nút sửa ngay. Dùng ở bước 12 của trình thiết lập và đầu Tổng quan. v0.1.59: nút "Chọn model" của MỌI nơi dẫn tới
+ * cho một nút sửa ngay. Dùng ở dải "Cần Sếp xử lý" đầu Tổng quan (v0.1.68: bỏ hàm `NoModelBanner` không còn nơi nào dùng — F040). v0.1.59: nút "Chọn model" của MỌI nơi dẫn tới
  * `/setup?buoc=nguon-ai` (màn Thiết lập nguồn AI) — `to` do nơi gọi truyền, đều lấy từ `AI_SOURCE_PATH`.
  */
 export function NoModelNotice({ to }: { to: string }) {
@@ -27,18 +22,4 @@ export function NoModelNotice({ to }: { to: string }) {
       </Link>
     </div>
   );
-}
-
-/**
- * Dải đầu Tổng quan — chỉ Owner (API `GET /setup/follow-up` chỉ trả cho Owner; vai trò khác không thấy gì).
- * v0.1.36 (F-6): Tổng quan dùng `NeedsBossStrip` (gom "Chưa có model" + sự cố sức khoẻ); giữ lại để tương thích.
- * v0.1.42 (F-26): chỉ gọi `/setup/follow-up` khi người xem là Owner — vai trò khác không gọi, không render.
- */
-export function NoModelBanner() {
-  const isOwner = useMe().data?.role?.code === 'owner';
-  const q = useQuery({ queryKey: FOLLOW_UP_KEY, queryFn: ({ signal }) => api.setup.followUp(signal), enabled: isOwner });
-  if (!isOwner) return null;
-  const item = Array.isArray(q.data) ? q.data.find((s) => s.n === 4) : undefined;
-  if (!item || item.done) return null;
-  return <NoModelNotice to={AI_SOURCE_PATH} />;
 }

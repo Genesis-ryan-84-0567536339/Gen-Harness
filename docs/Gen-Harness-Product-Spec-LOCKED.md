@@ -804,16 +804,18 @@ Tổ chức nào có lớp này sẽ bắt đầu có:
 
 ---
 
-# O. NHỮNG GÌ CẦN CHỐT TIẾP Ở MỨC SẢN PHẨM
+# O. QUYẾT ĐỊNH SẢN PHẨM — TRẠNG THÁI HIỆN HÀNH (17/10/2026)
 
-Spec này đã đủ tầm nhìn và khung đặc tả. Các quyết định sản phẩm tiếp theo:
+Năm câu hỏi chốt của bản v2.0 đã được trả lời trong quá trình làm; trạng thái thật (nguồn: mã và `docs/ROADMAP.md`):
 
-1. Đối tượng ra quyết định chính trên Console là Chủ doanh nghiệp hay Operator hàng ngày?
-2. Use-case đầu tiên để đóng đinh Phase 1: thương mại nội địa, xuất nhập khẩu, hay trợ lý cá nhân?
-3. Mức tự trị mặc định?
-4. Bộ chỉ số tối thiểu của phiên bản dùng được đầu tiên?
-5. Ranh giới dữ liệu: chỉ group công ty, hay cả group thị trường bên ngoài?
+1. **Đối tượng ra quyết định chính**: Chủ doanh nghiệp (Owner). Mỗi bản cài một tổ chức; Gen và các thao tác ghi ra ngoài (Xác nhận + mã PIN) dành cho Owner trước, vai khác (Quản lý, Vận hành, Nhân viên phụ trách, Kiểm soát) chỉ thấy phần việc được giao theo ma trận quyền.
+2. **Use-case đầu tiên**: chưa chốt riêng bằng văn bản; bản đang chạy lấy thương mại nội địa làm mẫu mặc định (mẫu agent "Trợ lý thương mại").
+3. **Mức tự trị mặc định**: 4 "Soạn sẵn chờ duyệt" (agent soạn, Sếp duyệt rồi mới gửi ra ngoài); chọn được 3 "Gợi ý hành động" hoặc 4; các ranh giới khoá cứng không tắt được.
+4. **Bộ chỉ số tối thiểu**: chưa chốt riêng bằng văn bản; hiện theo các chỉ số của màn Hôm nay (`docs/design/screens.json`).
+5. **Ranh giới dữ liệu**: thu thành viên của mọi nhóm đã nối; tin riêng 1-1 lưu im lặng, không tự trả lời; nhóm mới Sếp chọn Im lặng / Không nghe (mặc định đã chọn, xem ROADMAP › Câu hỏi mở).
+
+Câu 2 và câu 4 còn mở — Sếp chốt khi cần.
 
 ---
 
-*Gen-Harness Product Spec v2.0 — tài liệu định hướng sản phẩm. Ưu tiên cập nhật phần Console, dữ liệu và vòng lặp Listen–Structure–Score–Match–Act–Learn mỗi khi tầm nhìn được làm sắc hơn.*
+*Gen-Harness Product Spec v2.2 LOCKED — tài liệu định hướng sản phẩm. Ưu tiên cập nhật phần Console, dữ liệu và vòng lặp Listen–Structure–Score–Match–Act–Learn mỗi khi tầm nhìn được làm sắc hơn.*

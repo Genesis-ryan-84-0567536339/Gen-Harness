@@ -52,6 +52,11 @@ ONBOARDING_OK = "# 06 · Trình thiết lập Owner\n\n> Đã thay bởi v0.1.55
 RUNBOOK_OK = "# Sổ tay\n\n2. Cài đặt › Sao lưu & cập nhật: thẻ Sức khoẻ hệ thống.\n"
 ROADMAP_OK = "# Lộ trình (cập nhật 16/10/2026, sau v0.1.61)\n\n## Tiếp theo (sau v0.1.61)\n"
 
+ARCH_OK = "# Kiến trúc\n\n| Tệp | Volume Docker `gh_objects` | Tài liệu, tệp đính kèm. |\n"
+SPEC_OK = ("# GEN-HARNESS\n## Product Specification LOCKED v2.2 — Genesis Harness OS\n\n**Phiên bản:** 2.2 LOCKED\n\n"
+           "# O. QUYẾT ĐỊNH SẢN PHẨM — TRẠNG THÁI HIỆN HÀNH\n\n1. Owner.\n\n---\n\n"
+           "*Gen-Harness Product Spec v2.2 LOCKED — tài liệu định hướng sản phẩm.*\n")
+
 FILES = {
     check.BOSS_SERVICE: SERVICE,
     check.README: README_OK,
@@ -61,6 +66,8 @@ FILES = {
     check.HANDOFF: "# Hiện trạng\n" + "một dòng\n" * 50,
     check.ROADMAP: ROADMAP_OK,
     check.VERSION_FILE: "v0.1.61\n",
+    check.ARCHITECTURE: ARCH_OK,
+    check.SPEC: SPEC_OK,
 }
 
 
@@ -165,6 +172,36 @@ class FixtureTest(unittest.TestCase):
     def test_roadmap_prerelease_version_is_matched_whole(self) -> None:
         ok = self.errors({check.VERSION_FILE: "v0.1.62-rc.1\n", check.ROADMAP: "# Lộ trình (sau v0.1.62-rc.1)\n"})
         self.assertEqual(ok, [])
+
+
+    # --- F119: HANDOFF chỉ MỘT danh sách "Sếp cần làm", không còn dòng "Phát hành vX" của bản đã qua -------------------
+    def test_handoff_single_boss_list(self) -> None:
+        one = "# H\n\n### Sếp cần làm bây giờ (MỘT danh sách)\n\n1. Việc.\n"
+        self.assertEqual(self.errors({check.HANDOFF: one}), [])
+        two = one + "\n### Boss phải làm — v0.1.60 (không cần làm gì)\n\n1. Không.\n"
+        errs = self.errors({check.HANDOFF: two})
+        self.assertTrue(any("MỘT danh sách" in e and "2 khối" in e for e in errs), errs)
+        many = "# H\n" + "".join(f"### Boss phải làm — v0.1.{n}\n" for n in (50, 53, 54))
+        self.assertTrue(any("3 khối" in e for e in self.errors({check.HANDOFF: many})))
+
+    def test_handoff_stale_release_line_is_caught(self) -> None:
+        stale = "# H\n\n- **Phát hành v0.1.57**: push → PR → báo Boss.\n"
+        errs = self.errors({check.HANDOFF: stale})        # VERSION là v0.1.61 ⇒ v0.1.57 đã qua
+        self.assertTrue(any("Phát hành v0.1.57" in e and "v0.1.61" in e for e in errs), errs)
+        # Bản ĐANG chờ phát hành (đúng bằng VERSION) hoặc mới hơn thì hợp lệ.
+        self.assertEqual(self.errors({check.HANDOFF: "# H\n\n- **Phát hành v0.1.61**: chờ.\n- Phát hành v0.1.62 sau.\n"}), [])
+
+    # --- F120: ARCHITECTURE không còn MinIO; Product Spec đồng nhất phiên bản, không còn câu hỏi đã chốt ---------------
+    def test_architecture_must_not_mention_minio(self) -> None:
+        errs = self.errors({check.ARCHITECTURE: ARCH_OK + "| objects | MinIO |\n"})
+        self.assertTrue(any("MinIO" in e for e in errs), errs)
+        self.assertTrue(any("minio" in e.lower() for e in self.errors({check.ARCHITECTURE: ARCH_OK + "minio-1\n"})))
+
+    def test_spec_footer_version_must_match_header(self) -> None:
+        errs = self.errors({check.SPEC: SPEC_OK.replace("Product Spec v2.2 LOCKED", "Product Spec v2.0")})
+        self.assertTrue(any("v2.0" in e and "v2.2" in e for e in errs), errs)
+        errs = self.errors({check.SPEC: SPEC_OK.replace("# O. QUYẾT ĐỊNH SẢN PHẨM — TRẠNG THÁI HIỆN HÀNH", "# O. NHỮNG GÌ CẦN CHỐT TIẾP Ở MỨC SẢN PHẨM")})
+        self.assertTrue(any("CẦN CHỐT TIẾP" in e for e in errs), errs)
 
 
 class LiveRepoTest(unittest.TestCase):

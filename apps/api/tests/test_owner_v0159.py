@@ -26,12 +26,13 @@ import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy import text
 
+from gh import crypto
 from gh.gen import briefing
 from gh.gen import proposals as gen_proposals
 from gh.owner import brief as brief_mod
 from gh.owner import routes as owner_routes
 from gh.owner import service as svc
-from gh.providers.router import ModelRouter
+from gh.providers.router import KEY_AAD, ModelRouter
 from tests.conftest import Api
 from tests.test_owner_v0155 import _org, _owner_id, _person
 from tests.test_rbac_api import login_as
@@ -396,9 +397,10 @@ async def test_brief_ai_ready_and_channels_connected(owner: Api, db: Any) -> Non
                                     VALUES (:o, 'gemini', 'Gemini', 'ok') RETURNING id"""), {"o": org})).scalar_one()
     await db.execute(text("INSERT INTO agent.models (provider_id, model_name) VALUES (:p, 'gemini-2.5-flash')"),
                      {"p": pid})
-    # B2 (F010): "ai_ready" cần nguồn DÙNG ĐƯỢC — nguồn khoá API phải có khoá bật.
-    await db.execute(text("""INSERT INTO agent.provider_keys (provider_id, label, secret_enc, last4)
-                             VALUES (:p, 'K', :s, '1234')"""), {"p": pid, "s": b"\x00e"})
+    # v0.1.63 (B2): nguồn khoá API chỉ "dùng được" khi có khoá đang bật (không chỉ có dòng nhà cung cấp + model).
+    await db.execute(text("""INSERT INTO agent.provider_keys (provider_id, label, secret_enc, last4, is_enabled)
+                             VALUES (:p, 'K1', :s, '1234', true)"""),
+                     {"p": pid, "s": crypto.encrypt(b"sk-test-owner-brief-1234", KEY_AAD)})
     zalo = await channel(db, org, "zalo")
     tele = await channel(db, org, "telegram")
     fb = await channel(db, org, "facebook")

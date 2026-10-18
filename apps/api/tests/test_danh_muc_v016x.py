@@ -127,7 +127,7 @@ async def test_legacy_step8_agent_cannot_save_until_migrated_then_can(owner_api:
     assert dict(first) == {"Trợ lý sales": "commercial", "Trợ lý ops": "admin", "Trợ lý cs": "cs"}
     # Sau: agent đã chuyển mẫu sửa/lưu được như agent tạo mới.
     for tpl, now in (("sales", "commercial"), ("ops", "admin")):
-        r = await owner_api.send("PATCH", f"/agents/{ids[tpl]}", {"name": "Đổi tên", "template": now})
+        r = await owner_api.send("PATCH", f"/agents/{ids[tpl]}", {"name": f"Đổi tên {tpl}", "template": now})
         assert r.status_code == 200, r.text
         assert r.json()["template"] == now
 

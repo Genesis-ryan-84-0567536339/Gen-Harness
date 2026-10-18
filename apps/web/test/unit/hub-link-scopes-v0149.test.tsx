@@ -298,7 +298,7 @@ function stubBoss(hub: BossCheck | null) {
     vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(String(url), 'http://x').pathname.replace('/api/v1', '');
       const method = init?.method ?? 'GET';
-      if (path === '/boss-checks' && method === 'GET') return json(200, { rows: ROWS, results: { hub }, required_done: 1, required_total: 1, switch_passes: 0 });
+      if (path === '/boss-checks' && method === 'GET') return json(200, { rows: ROWS, results: { hub }, required_done: 1, required_total: 1 });
       if (path === '/hub/link' && method === 'GET') return json(200, SAVED);
       if (path === '/auth/me') return json(200, me('owner'));
       return json(404, { code: 'NOT_FOUND', title: 'Không tồn tại' });

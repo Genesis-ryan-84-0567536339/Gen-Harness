@@ -21,6 +21,7 @@ import { diagnosticsEndpoints } from './diagnostics';
 import { pluginsEndpoints } from './p4-plugins';
 import { systemEndpoints } from './p4-system';
 import { defaultsEndpoints } from './defaults';
+import { listenLogEndpoints } from './listenLog';
 import { ownerEndpoints } from './owner';
 import type { Step10Body, Step11Body, Step10Invited, BackupConfig, Step8Body, Step8Agent, Step9Body, Step9State, SetupFollowUpItem } from './p4-system';
 import type {
@@ -268,8 +269,11 @@ export function createEndpoints(client: ApiClient) {
       /** v0.1.31: nguồn CLI gọi thử model MỚI trước khi lưu (422 `model_name` khi CLI không nhận); `make_default` = "Dùng model này". */
       addModel: (
         id: string,
-        body: { model_name: string; daily_quota?: number; rate_limit_per_min?: number; make_default?: boolean; effort?: Effort | null },
+        // v0.1.66: hạn mức không gửi ⇒ máy chủ giữ hạn mức đã lưu; gửi `null` ⇒ bỏ hạn mức.
+        body: { model_name: string; daily_quota?: number | null; rate_limit_per_min?: number | null; make_default?: boolean; effort?: Effort | null; enabled?: boolean },
       ) => r<Provider>(`/providers/${enc(id)}/models`, { method: 'POST', body }),
+      /** v0.1.66 (F008): gỡ một model đã thêm nhầm (gỡ luôn dòng gán model trỏ vào nó). 409 `MODEL_HAS_CALLS` khi model còn lượt gọi trong 30 ngày — dùng `addModel(…, { enabled: false })` để tắt. */
+      removeModel: (id: string, mid: string) => r<void>(`/providers/${enc(id)}/models/${enc(mid)}`, { method: 'DELETE' }),
       /** v0.1.32 (chỉ Owner): chẩn đoán nguồn CLI — phiên bản, liệt kê model, một lượt gọi rất ngắn; đầu ra thô đã che. */
       diagnose: (id: string) => r<ProviderDiagnosis>(`/providers/${enc(id)}/diagnose`, { method: 'POST' }),
       credentials: (signal?: AbortSignal) => r<Credential[]>('/providers/credentials', { signal }),
@@ -324,6 +328,8 @@ export function createEndpoints(client: ApiClient) {
     diagnostics: diagnosticsEndpoints(r),
     /** v0.1.55 (G1): "Chế độ tiêu chuẩn" / "Về mặc định" — chỉ Owner. */
     defaults: defaultsEndpoints(r),
+    /** v0.1.68: Nhật ký lắng nghe — `api.listenLog.list(q) · stats()` (quyền `data.read`). */
+    listenLog: listenLogEndpoints(r),
     /**
      * v0.1.55 (G5) + v0.1.59 (G1): Mặt tiền Owner `/owner/*` — chỉ đọc, chỉ Owner, không gọi model:
      * `api.owner.today() · brief(id?) · feed(q) · feedContext(id) · relations(list) · insights(range, only?) ·

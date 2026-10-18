@@ -414,3 +414,28 @@ async def test_rule_test_endpoint_never_runs_agy(owner_api, db, clis) -> None:  
     r = await owner_api.send("POST", "/rules/test", {"text": "Khách hỏi giá sản phẩm A, cần báo giá gấp"})
     assert r.status_code == 200, r.text
     assert len(_calls(clis)) == n and r.json()["model"] is None
+
+
+async def test_agent_card_does_not_claim_agy_for_a_diplomatic_agent(owner_api, db, clis) -> None:  # type: ignore[no-untyped-def]
+    """Review v0.1.67 P3: agent ngoại giao còn dòng gán agy cũ — router đã gỡ agy ⇒ thẻ agent KHÔNG ghi "· Antigravity"
+    với ok=true mà nói thẳng lý do và đang chạy Chuẩn; agent nội bộ có dòng gán agy vẫn ghi bình thường."""
+    org, mid = await _only_agy(owner_api)
+    inner = await _seed_agent(db, org, name="Trợ lý nội bộ")
+    scoped = await _seed_agent(db, org, name="Có phạm vi nghe")
+    ch = await _channel(db, org)
+    await db.execute(text("INSERT INTO agent.channel_scopes (agent_id, channel_id, group_id) VALUES (:a, :c, NULL)"),
+                     {"a": scoped, "c": ch})
+    for a in (inner, scoped):
+        await db.execute(text("""INSERT INTO agent.bindings (org_id, agent_key, model_id, context_tokens)
+                                 VALUES (:o, :k, :m, 4000)"""), {"o": org, "k": f"agent:{a}", "m": mid})
+    await db.commit()
+    cards = {a["id"]: a for a in (await owner_api.get("/agents")).json()}
+    ok = cards[str(inner)]
+    assert ok["binding"]["inactive_reason"] is None and ok["model"]["ok"] is True
+    assert "Antigravity" in ok["model"]["label"]
+    bad = cards[str(scoped)]
+    assert bad["binding"]["inactive_reason"].startswith(REASON) and "Chuẩn" in bad["binding"]["inactive_reason"]
+    assert "· Antigravity" not in bad["model"]["label"] and REASON in bad["model"]["label"]
+    listing = {i["agent_key"]: i for i in (await owner_api.get("/agents/bindings")).json()["items"]}
+    assert listing[f"agent:{scoped}"]["binding"]["inactive_reason"].startswith(REASON)
+    assert listing[f"agent:{inner}"]["binding"]["inactive_reason"] is None

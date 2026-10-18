@@ -64,8 +64,8 @@ export const BOSS_ERROR_TEXT: Record<string, string> = {
   WORKER_TIMEOUT: 'Lượt đọc Facebook chạy quá lâu nên đã dừng — mở trang Tài khoản mạng xã hội xem rồi bấm Đọc ngay lần nữa.',
   SOCIAL_JOB_MISSING: 'Không thấy lượt đọc vừa chạy — bấm Đọc ngay lại.',
   // v0.1.55: dòng 0 "nguồn AI" (ai_source).
-  AI_NO_SOURCE: 'Chưa có nguồn AI nào — thêm khoá API hoặc đăng nhập Google / Claude Code ở Kết nối › Bộ não AI rồi bấm Kiểm tra.',
-  AI_KEY_MISSING: 'Nguồn AI đầu chuỗi chưa có khoá API — thêm khoá ở Kết nối › Bộ não AI rồi bấm Kiểm tra.',
+  AI_NO_SOURCE: 'Chưa có nguồn AI nào — thêm khoá API hoặc đăng nhập Google / Claude Code ở màn Thiết lập nguồn AI rồi bấm Kiểm tra.',
+  AI_KEY_MISSING: 'Nguồn AI đầu chuỗi chưa có khoá API — thêm khoá ở màn Thiết lập nguồn AI rồi bấm Kiểm tra.',
   AGY_NOT_LOGGED_IN: 'Chưa đăng nhập Google cho Antigravity — bấm Đăng nhập Google.',
   AGY_ACCOUNT_MISMATCH: 'Gọi thử vẫn chạy bằng tài khoản khác với tài khoản vừa chọn — bấm Đăng nhập lại và đăng nhập đúng tài khoản đó.',
   CLI_PROFILE_NO_SESSION: 'Tài khoản này chưa có phiên đăng nhập đã lưu — bấm Đăng nhập lại tài khoản đó.',
@@ -199,11 +199,6 @@ export function aiSourceOkText(c: Pick<BossCheck, 'detail' | 'checked_at'>, tz: 
 export const HUB_TOKEN_DAYS = 90;
 export function hubTokenExpiry(now: number = Date.now()): string {
   return new Date(now + HUB_TOKEN_DAYS * 86_400_000).toISOString();
-}
-
-/** Bộ đếm "Đã đổi qua lại x/2 lần" — số lần đổi ĐẠT do máy chủ tính (không phải `runs`, vốn đếm cả lượt lỗi). */
-export function switchesOf(o: BossOverview | undefined): number {
-  return Math.min(o?.switch_passes ?? 0, 2);
 }
 
 /** Câu thân thiện cho một kết quả lỗi — luôn là chuỗi. */
