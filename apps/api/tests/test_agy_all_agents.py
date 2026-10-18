@@ -281,7 +281,8 @@ async def test_bindings_have_no_api_key_reason_and_agy_assignable_to_every_key(o
     assert "cần khoá API" not in json.dumps(items, ensure_ascii=False)
     assert "chỉ dùng cho Gen" not in json.dumps(items, ensure_ascii=False)
 
-    for key in ("core.refinery", "core.briefing", "core.gen", f"agent:{aid}"):    # (e)
+    for key in ("core.refinery", "core.briefing", "core.gen", "core.owner_reply", "core.support",
+                f"agent:{aid}"):    # (e) v0.1.72: + hai khoá chạy trong hộp
         r = await api.send("PUT", f"/agents/bindings/{key}", {"model_id": str(mid)})
         assert r.status_code == 200, (key, r.text)
         b = r.json()["binding"]
