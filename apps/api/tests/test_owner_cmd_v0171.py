@@ -143,7 +143,8 @@ async def test_rate_limit_is_per_minute_per_channel(redis: Any) -> None:
     assert await core.rate_ok(redis, org, "zalo", t + timedelta(minutes=1)) is True  # đúng 60 giây sau ⇒ đã ra khỏi cửa sổ trượt
     assert await core.rate_ok(redis, uuid.uuid4(), "zalo", t) is True  # tổ chức khác
     assert await core.rate_ok(None, org, "zalo", t) is True  # không Redis ⇒ cho qua
-    assert [await core.rate_ok(redis, org, "zalo", t, per_min=3) for _ in range(2)] == [False, False]  # đã quá 3
+    org3 = uuid.uuid4()
+    assert [await core.rate_ok(redis, org3, "zalo", t, per_min=3) for _ in range(4)] == [True] * 3 + [False]  # trần tuỳ chỉnh
 
 
 async def test_telegram_rate_limit_keeps_its_redis_key_and_limit(redis: Any) -> None:
