@@ -50,9 +50,9 @@ TEXT_MAX = 280
 IMPORTANT_EVENT_TYPES = frozenset({
     "AskedPrice", "AskedStatus", "OfferedSupply", "SentQuotation", "RequestedSample", "RequestedPartnership",
     "PromisedDelivery", "MentionsCompetitor", "DealWon"})
-#: Nhóm "Cơ hội" của bộ lọc.
-OPPORTUNITY_EVENT_TYPES = frozenset({
-    "AskedPrice", "RequestedSample", "SentQuotation", "RequestedPartnership", "OfferedSupply", "DealWon"})
+#: Nhóm "Cơ hội" của bộ lọc. v0.1.71 (P3-8): MỘT bảng với tab «Cơ hội» của Hộp thư (`gh.biz.queue.service`) — trước đây
+#: Mặt tiền tính cả xin mẫu / báo giá / chốt đơn nên cùng một chữ «Cơ hội» ra hai con số khác nhau.
+OPPORTUNITY_EVENT_TYPES = frozenset(qsvc.OPPORTUNITY_EVENTS)
 URGENT_EVENT_TYPE = "Complained"
 #: Trạng thái nháp trả lời coi như tin đã được xử lý (nháp chờ duyệt / bị từ chối / lỗi thì chưa).
 HANDLED_DRAFT_STATUSES = ("approved", "edited", "sent")

@@ -7,6 +7,7 @@ Core giải thích `meaning_unit`, `score`, `alert`, `draft`, `raw`. Cụm màn 
 dựng bằng `units_payload(...)` + `payload(...)`.
 """
 
+import re
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -16,7 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.auth import rbac, service
-from gh.biz.core.scope import Scope, direct_visible, direct_visible_sql, not_found, scope_for
+from gh.biz.core.scope import Scope, direct_visible, direct_visible_sql, group_view_sql, not_found, scope_for
 from gh.data.common import RAW_SELECT, iso, mask_text, raw_code, raw_item
 
 MAX_UNITS = 20
@@ -111,7 +112,57 @@ def unit_ids_of(refs: list[dict[str, Any]] | None) -> list[uuid.UUID]:
     return out
 
 
+async def evidence_unit_ids(db: AsyncSession, org_id: uuid.UUID, refs: list[dict[str, Any]] | None) -> list[uuid.UUID]:
+    """Như `unit_ids_of` nhưng hiểu cả chứng cứ loại `raw` (v0.1.71): cảnh báo «Phản hồi chậm» gắn thẳng tin bị bỏ quên
+    (`{"type": "raw", "id": …}`) ⇒ đổi sang các đơn vị ý nghĩa trích dẫn tin đó để lộ ra câu chữ và trích dẫn."""
+    ids = unit_ids_of(refs)
+    raws: list[uuid.UUID] = []
+    for ref in refs or []:
+        if isinstance(ref, dict) and ref.get("type") == "raw":
+            try:
+                raws.append(uuid.UUID(str(ref["id"])))
+            except (KeyError, ValueError):
+                continue
+    if raws:
+        rows = (await db.execute(text("""
+            SELECT DISTINCT ev.meaning_unit_id FROM clean.evidence ev
+            JOIN clean.meaning_units u ON u.id = ev.meaning_unit_id AND u.observed_at = ev.meaning_observed_at
+            WHERE ev.raw_event_id = ANY(:r) AND u.org_id = :o AND u.superseded_by IS NULL"""),
+            {"r": raws, "o": org_id})).scalars().all()
+        ids.extend(rows)
+    return list(dict.fromkeys(ids))
+
+
+async def _group_view_ok(db: AsyncSession, sc: Scope, group_id: Any) -> bool:
+    """«Quyền xem» của nhóm (v0.1.71) có cho vai của `sc` đọc nội dung nhóm này không."""
+    if group_id is None or sc.role == rbac.OWNER:
+        return True
+    where = group_view_sql(sc.role, "CAST(:vg AS uuid)")
+    return bool((await db.execute(text(f"SELECT {where}"), {"vg": group_id})).scalar())  # noqa: S608
+
+
+async def _evidence_in_hidden_group(db: AsyncSession, sc: Scope, refs: list[dict[str, Any]] | None) -> bool:
+    """Chứng cứ (đơn vị ý nghĩa / tin thô) của cảnh báo có thuộc nhóm mà vai này không được xem (v0.1.71)."""
+    if sc.role == rbac.OWNER:
+        return False
+    units = unit_ids_of(refs)
+    raws = [uuid.UUID(str(r["id"])) for r in refs or [] if isinstance(r, dict) and r.get("type") == "raw"
+            and re.fullmatch(r"[0-9a-fA-F-]{36}", str(r.get("id")))]
+    if not units and not raws:
+        return False
+    rows = (await db.execute(text("""
+        SELECT group_id FROM clean.meaning_units WHERE id = ANY(:u) AND group_id IS NOT NULL
+        UNION SELECT group_id FROM raw.events WHERE id = ANY(:r) AND group_id IS NOT NULL"""),
+        {"u": units, "r": raws})).scalars().all()
+    for gid in set(rows):
+        if not await _group_view_ok(db, sc, gid):
+            return True
+    return False
+
+
 async def _unit_visible(db: AsyncSession, sc: Scope, person_id: Any, group_id: Any) -> bool:
+    if not await _group_view_ok(db, sc, group_id):     # nhóm «Chỉ Sếp»: ẩn dù người có trong phạm vi
+        return False
     if sc.is_all:
         return True
     if person_id is not None:
@@ -211,13 +262,17 @@ async def _alert(db: AsyncSession, user: service.CurrentUser, sc: Scope, id: str
         raise not_found("Cảnh báo")
     if r.personnel_related and user.permissions.get("people_review.read", rbac.NONE) == rbac.NONE:
         raise not_found("Cảnh báo")
-    if not sc.is_all and r.recipient_user_id not in sc.users and not await _unit_visible(
+    if (not sc.is_all and r.recipient_user_id not in sc.users and not await _unit_visible(
             db, sc, r.subject_id if r.subject_type == "person" else None,
-            r.subject_id if r.subject_type == "group" else None):
+            r.subject_id if r.subject_type == "group" else None)) \
+            or (r.subject_type == "group" and not await _group_view_ok(db, sc, r.subject_id)):
+        raise not_found("Cảnh báo")
+    if await _evidence_in_hidden_group(db, sc, r.evidence):
         raise not_found("Cảnh báo")
     owner = user.role_code == rbac.OWNER
     return payload("alert", id, f"{r.code} · {mask_text(r.title, owner)}", f"Ưu tiên {r.priority}",
-                   method="rule", units=await units_payload(db, unit_ids_of(r.evidence), viewer=user))
+                   method="rule", units=await units_payload(db, await evidence_unit_ids(db, user.org_id, r.evidence),
+                                             viewer=user))
 
 
 async def _draft(db: AsyncSession, user: service.CurrentUser, sc: Scope, id: str) -> dict[str, Any]:
@@ -225,20 +280,23 @@ async def _draft(db: AsyncSession, user: service.CurrentUser, sc: Scope, id: str
         did = uuid.UUID(id)
     except ValueError as e:
         raise not_found("Bản nháp") from e
-    r = (await db.execute(text("""SELECT id, code, title, sources, subject_type, subject_id, created_by
+    r = (await db.execute(text("""SELECT id, code, title, sources, subject_type, subject_id, created_by, group_id
                                   FROM biz.action_drafts WHERE id = :i AND org_id = :o"""),
                           {"i": did, "o": user.org_id})).one_or_none()
     if r is None:
         raise not_found("Bản nháp")
-    if not sc.is_all and r.created_by not in sc.users and not await _unit_visible(
+    if (not sc.is_all and r.created_by not in sc.users and not await _unit_visible(
             db, sc, r.subject_id if r.subject_type == "person" else None,
-            r.subject_id if r.subject_type == "group" else None):
+            r.subject_id if r.subject_type == "group" else None)) \
+            or (r.subject_type == "group" and not await _group_view_ok(db, sc, r.subject_id)) \
+            or not await _group_view_ok(db, sc, r.group_id):
         raise not_found("Bản nháp")
     decision = (await db.execute(text("SELECT context_refs FROM agent.decisions WHERE draft_id = :d LIMIT 1"),
                                  {"d": did})).scalar_one_or_none()
     refs = [s.get("ref") for s in (r.sources or []) if isinstance(s, dict)] + list(decision or [])
     return payload("draft", id, f"{r.code} · {r.title or ''}", "Dữ liệu agent đã dùng", method="agent",
-                   units=await units_payload(db, unit_ids_of([x for x in refs if x]), viewer=user))
+                   units=await units_payload(db, await evidence_unit_ids(db, user.org_id, [x for x in refs if x]),
+                                             viewer=user))
 
 
 async def raw_evidence(db: AsyncSession, user: service.CurrentUser, raw_id: uuid.UUID) -> dict[str, Any]:
@@ -254,7 +312,7 @@ async def raw_evidence(db: AsyncSession, user: service.CurrentUser, raw_id: uuid
     if not units:
         raise not_found("Bản ghi")
     for u in units:
-        if (sc.is_all or await _unit_visible(db, sc, u.person_id, u.group_id)) \
+        if await _unit_visible(db, sc, u.person_id, u.group_id) \
                 and await direct_visible(db, user, u.group_id, u.person_id):
             break
     else:

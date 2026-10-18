@@ -30,6 +30,7 @@ from gh.auth.deps import current_user, require, require_pin
 from gh.biz.core import explain
 from gh.biz.core.scope import Scope, not_found, scope_for
 from gh.biz.people import service as psvc
+from gh.biz.queue import service as qsvc
 from gh.chassis import actionlog
 from gh.data.common import iso, mask_text, parse_cursor
 from gh.db import DB
@@ -471,9 +472,10 @@ async def care_response_times(date_from: str | None = None, date_to: str | None 
                               user: service.CurrentUser = Depends(CARE_READ), db: AsyncSession = DB) -> dict[str, Any]:
     """Lưới phản hồi theo khung giờ (<15 / 15–60 / >60 phút, PLAN §3.12), theo từng nhân viên — ghép "tin đến →
     tin đi cùng luồng" của `gh.biz.people.service.PAIR_CTE` (cùng cách `queue.jobs._scan_slow_response` đã ghép
-    cho cảnh báo `slow_response`, chỉ khác là lấy hết thay vì chỉ phần chưa trả lời). `unattended` (tin chưa có
-    ai trả lời) không gắn được với một nhân viên cụ thể (không ai đã trả lời thì không biết quy cho ai) nên tách
-    thành một số riêng ở ngoài lưới, không phải một cột của từng nhân viên — quyết định tự đưa ra."""
+    cho cảnh báo `slow_response`, chỉ khác là lấy hết thay vì chỉ phần chưa trả lời). `unattended` (SỐ KHÁCH có tin
+    chưa ai trả lời — đếm người, không đếm tin, v0.1.71) không gắn được với một nhân viên cụ thể (không ai đã trả lời
+    thì không biết quy cho ai) nên tách thành một số riêng ở ngoài lưới, không phải một cột của từng nhân viên —
+    quyết định tự đưa ra."""
     sc = await scope_for(db, user, "care.read")
     df, dt = _date_range(date_from, date_to)
     params: dict[str, Any] = {"o": user.org_id, "df": df, "dt": dt}
@@ -494,7 +496,8 @@ async def care_response_times(date_from: str | None = None, date_to: str | None 
         ORDER BY count(*) DESC"""), params)).all()  # noqa: S608
 
     unattended = (await db.execute(text(psvc.PAIR_CTE + f"""
-        SELECT count(*) FROM paired WHERE replied_at IS NULL AND {scope_cond}"""),  # noqa: S608
+        SELECT count(DISTINCT COALESCE(customer_id::text, id::text)) FROM paired
+        WHERE replied_at IS NULL AND {scope_cond}"""),  # noqa: S608
         {"o": user.org_id, "df": df, "dt": dt, **scope_params})).scalar_one()
 
     owner = user.role_code == rbac.OWNER
@@ -586,8 +589,9 @@ def _scenario_note(status: str, stats: dict[str, Any] | None, broken: int) -> st
         return "Không có dữ liệu hội thoại để đối chiếu"
     fast_pct = stats.get("fast_pct")
     parts = [f"phản hồi nhanh {fast_pct:g}%" if fast_pct is not None and fast_pct >= 60 else
-             (f"phản hồi chậm ({fast_pct:g}% nhanh)" if fast_pct is not None else "không có lượt phản hồi nào"),
-             "không có lời hứa bị vỡ" if broken == 0 else f"{broken} lời hứa bị vỡ"]
+             (f"phản hồi chậm ({fast_pct:g}% nhanh)" if fast_pct is not None else "không có lượt phản hồi nào")]
+    if qsvc.PROMISES_TRACKED:     # chưa theo dõi lời hứa thì không nói «không có lời hứa bị vỡ» (v0.1.71)
+        parts.append("không có lời hứa bị vỡ" if broken == 0 else f"{broken} lời hứa bị vỡ")
     kind = "Kịch bản thắng" if status == "won" else "Kịch bản mất khách"
     return f"{kind}: {', '.join(parts)}."
 

@@ -34,10 +34,14 @@ MATCH_CANDIDATES = 500    # trần số tín hiệu mỗi phía đưa vào chấ
 
 async def _capture_one(db: AsyncSession, org_id: uuid.UUID, unit_id: uuid.UUID) -> None:
     u = (await db.execute(text("""
-        SELECT id, person_id, group_id, side, conclusion, entities, confidence, observed_at
-        FROM clean.meaning_units WHERE id = :i AND org_id = :o AND side IN ('demand', 'supply')"""),
+        SELECT mu.id, mu.person_id, mu.group_id, mu.side, mu.conclusion, mu.entities, mu.confidence, mu.observed_at,
+               -- v0.1.71 (P3-5): đơn vị CHỈ trích tin ĐI (nhân viên / tài khoản của Sếp nhắn) — không phải khách nói
+               COALESCE((SELECT bool_and(e.direction = 'outbound') FROM clean.evidence ev
+                         JOIN raw.events e ON e.id = ev.raw_event_id AND e.received_at = ev.raw_received_at
+                         WHERE ev.meaning_unit_id = mu.id), false) AS from_us
+        FROM clean.meaning_units mu WHERE mu.id = :i AND mu.org_id = :o AND mu.side IN ('demand', 'supply')"""),
         {"i": unit_id, "o": org_id})).one_or_none()
-    if u is None:
+    if u is None or u.from_us:
         return
     sig = signal_from_entities(u.entities, u.conclusion)
     signal_id: uuid.UUID | None = None

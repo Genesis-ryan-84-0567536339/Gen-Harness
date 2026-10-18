@@ -260,9 +260,9 @@ async def test_views_counts_and_offset_paging(owner: Api, db: Any) -> None:
     await draft(db, org)
     await db.commit()
     opp = await _feed(owner, view="opportunity")
-    assert {i["event_type"] for i in opp["items"]} == {"AskedPrice", "OfferedSupply", "RequestedSample",
-                                                       "SentQuotation", "RequestedPartnership", "DealWon"}
-    assert opp["counts"] == {"important": 11, "all": 12, "opportunity": 6, "alert": 1, "approval": 1, "urgent_open": 0}
+    # v0.1.71 (P3-8): cùng bảng với tab «Cơ hội» của Hộp thư (`qsvc.OPPORTUNITY_EVENTS`)
+    assert {i["event_type"] for i in opp["items"]} == {"AskedPrice", "OfferedSupply", "RequestedPartnership"}
+    assert opp["counts"] == {"important": 11, "all": 12, "opportunity": 3, "alert": 1, "approval": 1, "urgent_open": 0}
     assert len((await _feed(owner, view="important"))["items"]) == 11
     assert [i["item_type"] for i in (await _feed(owner, view="alert"))["items"]] == ["alert"]
     # phân trang offset

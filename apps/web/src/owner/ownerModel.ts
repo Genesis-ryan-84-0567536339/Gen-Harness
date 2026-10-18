@@ -5,6 +5,7 @@
  * `asText` (không bao giờ render object) và mọi link đi qua `safeLink` (chỉ đường dẫn trong Console).
 
  */
+import { PROMISES_TRACKED } from '../lib/features';
 import { fmtInt } from '../lib/format';
 import type {
   OwnerFilterValue,
@@ -206,18 +207,21 @@ export interface KpiCard {
   icon: string;
 }
 
-/** 4 số của Hôm nay, mỗi số mở đúng danh sách của nó. */
+/** 4 số của Hôm nay (3 số khi chưa theo dõi lời hứa — `PROMISES_TRACKED`), mỗi số mở đúng danh sách của nó. */
 export function kpiCards(k: OwnerKpis): KpiCard[] {
-  return [
+  const cards: KpiCard[] = [
     { key: 'hot', label: 'Khách nóng', value: countText(k.hot), sub: 'đang quan tâm mạnh', to: `${OWNER_PATHS.relations}?list=hot`,
       tone: k.hot > 0 ? 'ok' : 'neutral', icon: 'ph ph-fire' },
     { key: 'cooling', label: 'Quan hệ nguội', value: countText(k.cooling), sub: 'lâu chưa liên lạc', to: `${OWNER_PATHS.relations}?list=cooling`,
       tone: k.cooling > 0 ? 'warn' : 'neutral', icon: 'ph ph-snowflake' },
     { key: 'open_opps', label: 'Cơ hội đang mở', value: countText(k.open_opps), sub: k.open_opps > 0 ? moneyText(k.open_value_vnd) : null,
       to: '/opportunity', tone: 'neutral', icon: 'ph ph-handshake' },
-    { key: 'overdue_promises', label: 'Lời hứa quá hạn', value: countText(k.overdue_promises), sub: 'chưa giữ', to: '/tasks?ptab=overdue',
-      tone: k.overdue_promises > 0 ? 'bad' : 'neutral', icon: 'ph ph-warning-circle' },
   ];
+  if (PROMISES_TRACKED) {
+    cards.push({ key: 'overdue_promises', label: 'Lời hứa quá hạn', value: countText(k.overdue_promises), sub: 'chưa giữ', to: '/tasks?ptab=overdue',
+      tone: k.overdue_promises > 0 ? 'bad' : 'neutral', icon: 'ph ph-warning-circle' });
+  }
+  return cards;
 }
 
 export interface RelationTab {

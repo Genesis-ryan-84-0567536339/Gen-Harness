@@ -51,7 +51,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from gh import notifications
 from gh.boss_checks import service as boss_service
 from gh.chassis import actionlog
-from gh.chassis.masking import mask_for_model
+from gh.chassis.masking import mask_for_model, mask_for_prompt
 from gh.gen import memory_notes, store
 from gh.gen.engine import wrap_untrusted
 from gh.hub_link import service as hub
@@ -473,7 +473,9 @@ async def _summarize(router: ModelRouter, org: uuid.UUID, sections: list[dict[st
 
     v0.1.50 (QD-18): `notes` = ghi chú Gen nhớ của tổ chức (Sếp đã xác nhận) — thêm vào system message để bản tóm tắt
     theo sở thích của Sếp. Chỉ có mặt khi có nguồn AI (hàm này chỉ chạy khi có nguồn)."""
-    data = orjson.dumps([_for_summary(s) for s in sections]).decode()
+    # v0.1.71 (P2-3): dòng của các mục (tên khách, kết luận trích từ tin nhắn) là chữ người ngoài viết ⇒ che OTP, mật
+    # khẩu, SĐT, số tài khoản trước khi vào prompt (số tiền, ngày giờ, mã đối tượng giữ nguyên).
+    data = orjson.dumps(mask_for_prompt([_for_summary(s) for s in sections])).decode()
     system = SYSTEM_PROMPT
     block = memory_notes.prompt_block(notes or [])
     if block:

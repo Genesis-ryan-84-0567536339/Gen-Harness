@@ -1,4 +1,4 @@
-# Bàn giao Gen-Harness — hiện trạng + việc dở (cập nhật 18/10/2026, bản v0.1.70 — gộp v0.1.69 + v0.1.70, trên bản gộp v0.1.68, bản vá v0.1.66 và bản gộp v0.1.65)
+# Bàn giao Gen-Harness — hiện trạng + việc dở (cập nhật 18/10/2026, bản v0.1.71 — bản vá trên v0.1.70, gộp v0.1.69 + v0.1.70, bản gộp v0.1.68, bản vá v0.1.66 và bản gộp v0.1.65)
 
 File này nay chỉ ghi **hiện trạng + việc dở** (tên cũ `HANDOFF-v0.1.1.md` giữ nguyên vì mã nguồn có chú thích trỏ tới).
 Lịch sử từng bản nằm ở [CHANGELOG.md](../../CHANGELOG.md) (3–5 dòng/bản) và `docs/releases/vX.Y.Z.md` (chi tiết, chuyển nguyên từ HANDOFF cũ):
@@ -23,7 +23,7 @@ Còn hiệu lực từ v0.1.1 (vai trò DB, volume, gói hồ sơ); chi tiết �
 
 ## Hiện trạng (v0.1.68)
 
-Bản mới nhất **v0.1.70** (18/10/2026, `VERSION` = v0.1.70) là **bản gộp hai bản** theo quyết định Sếp (một lần `genh update`; không có bản v0.1.69 riêng), nằm TRÊN bản gộp v0.1.68: **v0.1.69** chuông có vòng đời (sự cố đóng thì chuông «Đã xử lý», chưa đặt lịch sao lưu là sự cố; migration 0041) + mặc định đúng quyết định của Sếp (Gen yên lặng 21–07, «Kho dữ liệu», lưới L6 `test_quyet_dinh_sep.py`) + vai Quản lý «Việc được giao» + một bảng nhãn sự kiện ([v0.1.69.md](../releases/v0.1.69.md)) · **v0.1.70** câu chữ sạch (`check_terms` 46 → 6), Telegram Tạm dừng + không link `localhost`, Gen gộp việc thiết lập tuỳ chọn, một đích «Thêm nguồn AI», thêm / sửa / tắt-bật / gỡ model cần PIN `ai.route_change` ([v0.1.70.md](../releases/v0.1.70.md)). Head migration = 0041. **Kế hoạch sửa sau kiểm kê 16/10 (37 gói) hoàn tất.** Chưa push — chờ mốc.
+Bản mới nhất **v0.1.71** (18/10/2026, `VERSION` = v0.1.71) là **bản vá nhỏ** sửa 15 lỗi tìm thấy khi giả lập toàn luồng trên v0.1.70, không migration (head vẫn 0041); THAY ĐỔI QUYỀN: «Quyền xem» của nhóm nay thật sự ẩn nội dung nhóm «Chỉ Sếp» với vai khác ([v0.1.71.md](../releases/v0.1.71.md)). Trước đó **v0.1.70** (18/10/2026) là **bản gộp hai bản** theo quyết định Sếp (một lần `genh update`; không có bản v0.1.69 riêng), nằm TRÊN bản gộp v0.1.68: **v0.1.69** chuông có vòng đời (sự cố đóng thì chuông «Đã xử lý», chưa đặt lịch sao lưu là sự cố; migration 0041) + mặc định đúng quyết định của Sếp (Gen yên lặng 21–07, «Kho dữ liệu», lưới L6 `test_quyet_dinh_sep.py`) + vai Quản lý «Việc được giao» + một bảng nhãn sự kiện ([v0.1.69.md](../releases/v0.1.69.md)) · **v0.1.70** câu chữ sạch (`check_terms` 46 → 6), Telegram Tạm dừng + không link `localhost`, Gen gộp việc thiết lập tuỳ chọn, một đích «Thêm nguồn AI», thêm / sửa / tắt-bật / gỡ model cần PIN `ai.route_change` ([v0.1.70.md](../releases/v0.1.70.md)). Head migration = 0041. **Kế hoạch sửa sau kiểm kê 16/10 (37 gói) hoàn tất.** Chưa push — chờ mốc.
 Trước đó **v0.1.68** (17/10/2026, bản gộp v0.1.67 + v0.1.68): model hiển thị = model chạy, agent làm và nói thật, một danh sách việc, màn **Nhật ký lắng nghe** (migration 0039, 0040; [v0.1.68.md](../releases/v0.1.68.md)). Trước đó **v0.1.66** (18/10/2026, bản vá phát hành của v0.1.65): chỉ sửa bước kiểm E2E nâng cấp F-22 lỗi thời trong `e2e-install.yml` + test, mã sản phẩm không đổi ([v0.1.66.md](../releases/v0.1.66.md)).
 Trước đó **v0.1.65** (17/10/2026, bản gộp v0.1.63 + v0.1.64 + v0.1.65): hộp riêng Antigravity `agy-box` + proxy `agy-egress`, Telegram 2 chiều + sàng lọc ghi loại người, chế độ nghe & danh bạ (nhóm mới mặc định Lắng nghe im lặng; tin 1-1 chỉ Owner/người phụ trách; migration 0037, 0038; [v0.1.65.md](../releases/v0.1.65.md)); không phát hành riêng v0.1.63/v0.1.64.
 Trước đó **v0.1.61** (16/10/2026, đã vào main): đợt A phần 1 — mã PIN cho người được giao quyền, bảng quyền/tên vai trò (migration 0036), nháp & gửi tin trung thực, gộp người đủ bảng, lưới `check_terms.py` + route-crawl ([v0.1.61.md](../releases/v0.1.61.md)).
@@ -44,6 +44,13 @@ Các bản cũ (v0.1.50 – v0.1.60: Gen nhớ + ghi Kho, tự cập nhật đê
   việc nền mặc định chỉ khoá API; chi phí ₫/ngày + trần; Jev tuỳ chọn: lọc trước tin trùng/rác (che dữ liệu bắt buộc, v0.1.55; QD-10 bỏ Jules).
 - **Kênh**: Zalo/WhatsApp qua bridge (v0.1.62 bền: mất mạng không xoá phiên, nút Nối lại bằng phiên đã lưu, Đăng xuất khi phiên lỗi; QR; WhatsApp v0.1.59: mã vẽ lớn, Baileys ghim 7.0.0-rc14, thử lại có giãn cách); Telegram hai chiều với Sếp (v0.1.64: ghép mã 6 số, lệnh chỉ đọc/đề xuất); Facebook cá nhân đọc + Trả lời bình luận/Nhắn tin có Xác nhận + PIN + ảnh chụp (đăng bài = lát 2).
 - **Dữ liệu & bảo mật**: Postgres 16 (pgvector, pg_partman), RLS chỉ là phòng thủ phụ (mỗi bản cài 1 tổ chức), hạn lưu thật, bí mật mã hoá phong bì, DNS ghim cho MCP/Gen-hub, ngắt mạch Gen-hub 60 giây.
+
+## v0.1.71 — bản vá (nhánh `local/v0171-sua`, gốc `rel/v0170`)
+
+- **Vì sao**: giả lập toàn luồng trên v0.1.70 tìm ra 15 lỗi (3 P2 + 12 P3), cả 15 đều đúng khi kiểm lại trên mã.
+- **Thay đổi**: `gh/biz/core/scope.py` («Quyền xem» của nhóm, một chỗ), `explain.py` (chứng cứ `raw`), `chassis/masking.py` (`mask_for_prompt`, `mask_context_secrets`), `realtime.py`, `providers/router.py` (chuông P1), `owner/feed.py`, `biz/people/*`, `biz/market/*`, `data/ingest.py`, `refinery/runner.py`; web `lib/features.ts` (cờ `PROMISES_TRACKED`), `UpdateNotice.tsx`. Không migration.
+- **Chưa làm**: Nợ #62 (bộ ghi lời hứa), #63 (phần còn hở của «Quyền xem»).
+- **Boss cần làm**: không bắt buộc; xem việc 5b ở «Sếp cần làm bây giờ». Chi tiết: [v0.1.71.md](../releases/v0.1.71.md).
 
 ## v0.1.70 — bản gộp (nhánh `rel/v0170`, xếp trên `rel/v0169` ← `rel/v0168`)
 
@@ -88,12 +95,13 @@ Nhánh local (CHƯA push): **`rel/v0165`** = bản gộp v0.1.65; **`rel/v0166`*
 
 ## Việc dở
 
-### Sếp cần làm bây giờ (MỘT danh sách — gộp v0.1.65–70; chỉ việc 1 là bắt buộc; chi tiết ở [v0.1.70.md](../releases/v0.1.70.md#việc-boss-phải-làm), [v0.1.68.md](../releases/v0.1.68.md#việc-boss-phải-làm) và [v0.1.65.md](../releases/v0.1.65.md#việc-boss-phải-làm))
+### Sếp cần làm bây giờ (MỘT danh sách — gộp v0.1.65–71; chỉ việc 1 là bắt buộc; chi tiết ở [v0.1.71.md](../releases/v0.1.71.md#việc-boss-phải-làm), [v0.1.70.md](../releases/v0.1.70.md#việc-boss-phải-làm), [v0.1.68.md](../releases/v0.1.68.md#việc-boss-phải-làm) và [v0.1.65.md](../releases/v0.1.65.md#việc-boss-phải-làm))
 
 1. **Bắt buộc duy nhất**: có ít nhất một nguồn AI chạy được — màn **Thiết lập nguồn AI** (`/setup?buoc=nguon-ai`) → dán khoá API hoặc đăng nhập Google / Claude Code → **Kiểm tra**. Antigravity báo hết hạn ⇒ đăng nhập lại ở đó. Chưa có khoá API cũng được: agent trực kênh, Soạn lại / Dịch nháp chạy bằng Antigravity qua hộp riêng.
 2. Sau khi bản chính thức ra: `genh update` (hoặc đợi lịch đêm) — migration 0037–0041 tự chạy (máy đang ở v0.1.62 trở xuống; máy ở v0.1.68 chỉ chạy 0041: giờ yên lặng của Gen 22 → 21 nếu chưa chỉnh, «Kho <tên cũ>» → «Kho dữ liệu» trong tin Gen); hộp `agy-box` + proxy `agy-egress` và khoá `gh_agy_key` tự lên (Sức khoẻ: «Hộp riêng Antigravity: Đang chạy»); bridge khởi động lại. Thẻ Zalo/WhatsApp «Mất liên lạc» ⇒ **Nối lại bằng phiên đã lưu**.
 3. Antigravity: đăng nhập ở **Kết nối › Bộ não AI** bằng **một tài khoản Google riêng** (token đi vào hộp mỗi lượt có người ngoài). Máy cài cũ chỉ có MỘT model Antigravity: cần tầng «Kỹ hơn» thì **tự thêm model** ở API & Model › ô chọn model.
 4. Biết trước (**THAY ĐỔI QUYỀN**): đổi hạng / xoá nguồn AI, xoá khoá API **và thêm / sửa hạn mức / tắt-bật / gỡ model** cần PIN `ai.route_change`; Quản lý = «Việc được giao» (chưa có tính năng Nhóm); Lưu trữ agent và bật agent cần PIN, tắt không cần; Quản lý chỉ thấy nháp trong phạm vi; «Sửa rồi gửi» chặn chuỗi số đã che; tin 1-1 chỉ Owner / người phụ trách; gán BOT cho người = Owner + PIN. **Nhóm mới tự vào Lắng nghe im lặng** (không trả lời kể cả khi tag, không đưa cho agent trực — sàng lọc vẫn chạy; đổi ở thẻ kênh, PIN).
+5b. **v0.1.71 — THAY ĐỔI QUYỀN (không bắt buộc, nên biết)**: ô **Quyền xem** của nhóm (Kênh › nhóm) nay có tác dụng thật; mọi nhóm đang ở «Chỉ Sếp» (mặc định) bị ẩn nội dung với Quản lý / Vận hành / Nhân viên / Kiểm soát. Nhân viên đang làm việc với dữ liệu nhóm thấy trống tới khi Sếp đổi nhóm đó sang «Sếp + quản lý» hoặc «Mọi thành viên». Chuông có thêm «Cảnh báo khẩn» (P1). «Lời hứa» tạm ẩn (Nợ #62).
 5. Chuông «Chưa đặt lịch sao lưu tự động» có thể kêu ngay máy cũ — đặt lịch ở Cài đặt › Sao lưu & cập nhật. Dùng thử màn **Nhật ký lắng nghe** (Nâng cao › Tầng dữ liệu) và Telegram ghép bot + nút **Tạm dừng** (tuỳ chọn: thẻ Telegram › Nhận tin từ Sếp › Ghép Telegram). Tuỳ chọn: «Câu hỏi mở — mặc định đã chọn» và Nợ ở [ROADMAP](../ROADMAP.md).
 
 ### Tuỳ chọn — không bắt buộc, làm khi muốn (cách làm chi tiết ở `docs/releases/vX.Y.Z.md` của từng bản)
@@ -113,8 +121,8 @@ Nhánh local (CHƯA push): **`rel/v0165`** = bản gộp v0.1.65; **`rel/v0166`*
 
 ### Claude / điều phối viên còn dở
 
-- **Phát hành v0.1.70 (bản gộp)**: `rel/v0170` đã kiểm đầy đủ → Opus review phần gộp → push → PR → CI xanh → merge squash → bản thử → E2E → promote → kiểm genh tải về khớp tag → `genh update` → báo Boss. Bản v0.1.65 (`rel/v0165`) và v0.1.68 (`rel/v0168`) đi trước theo thứ tự; v0.1.62 ở `local/v0162-rc`.
-- **Chưa làm (mang từ v0.1.58)**: bước rẻ ở `e2e-install` (`agy --help | grep -- --effort`, `missing_reason` trong container); ô chọn model vẫn ẩn khi Kiểm tra đỏ (`offeredGroups`). **Nợ #44–#55, #56–#61** (allowlist egress hộp, core vào hộp, định dạng/xoay vòng token agy, quét danh bạ theo phần thay đổi, `view_scope`, tin 1-1 còn hở); đệm ở bridge cho loạt tin dồn < 1 giây trước khi tập nghe đồng bộ · **Nợ #35** kiểm WhatsApp QR với máy chủ thật.
+- **Phát hành v0.1.71**: nhánh `local/v0171-sua` (gốc `rel/v0170` = mã v0.1.70) đã kiểm đầy đủ → Opus review → push → PR → CI xanh → merge squash → bản thử → E2E → promote → kiểm genh tải về khớp tag → `genh update` → báo Boss. v0.1.70 (`rel/v0170`, bản gộp), v0.1.65 (`rel/v0165`) và v0.1.68 (`rel/v0168`) đi trước theo thứ tự; v0.1.62 ở `local/v0162-rc`.
+- **Chưa làm (mang từ v0.1.58)**: bước rẻ ở `e2e-install` (`agy --help | grep -- --effort`, `missing_reason` trong container); ô chọn model vẫn ẩn khi Kiểm tra đỏ (`offeredGroups`). **Nợ #44–#47, #49–#55, #56–#63** (allowlist egress hộp, core vào hộp, định dạng/xoay vòng token agy, quét danh bạ theo phần thay đổi, tin 1-1 còn hở); đệm ở bridge cho loạt tin dồn < 1 giây trước khi tập nghe đồng bộ · **Nợ #35** kiểm WhatsApp QR với máy chủ thật.
 - **Bản kế tiếp (đã hẹn)**: nhận kết quả "Thử 12 câu mẫu" của Jev từ Boss rồi quyết ngưỡng lọc trước; Boss dùng thử Mặt tiền v2 rồi góp ý; chuông Gen dẫn về Mặt tiền; xoá hội thoại Gen thì xoá luôn lựa chọn model đã nhớ (Nợ #29); dọn mã chết trình thiết lập cũ (Nợ #36).
 - **H-b còn mở**: timer đêm mất lịch khi `daemon-reload`/`enable` chạy từ bên trong service đêm — không tái hiện được bằng mã lẫn `e2e-nightly-real` (systemd thật: sau lần chạy timer vẫn có lần kế tiếp); tự lành bao ca này. Máy thật còn tái diễn thì ghi vào v0.1.53.md.
 - **PR Renovate** không tự merge nằm chờ tới khi Boss nhắn "xử lý PR phụ thuộc"; chưa có lịch tự động nào gọi Claude.

@@ -20,6 +20,8 @@ const KIND_ICON: Record<string, string> = {
   'backup.done': 'ph ph-database',
   'backup.failed': 'ph ph-warning-circle',
   'task.reminder': 'ph ph-alarm',
+  // v0.1.71 (P3-11): cảnh báo P1 (phàn nàn nặng, cơ hội nóng chưa ai nhận…) rung chuông của Owner.
+  'alert.p1': 'ph ph-warning-octagon',
   'hub.token_expiring': 'ph ph-key',
   'social.read': 'ph ph-facebook-logo',
   'social.paused': 'ph ph-shield-warning',

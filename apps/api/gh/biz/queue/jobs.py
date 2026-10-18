@@ -63,7 +63,7 @@ async def _notify(redis: Any, org_id: uuid.UUID) -> None:
 
 # ─── khách đang lạnh / sắp mất ────────────────────────────────────────────────
 
-async def _scan_customer_cooling(db: AsyncSession, org_id: uuid.UUID) -> int:
+async def _scan_customer_cooling(db: AsyncSession, org_id: uuid.UUID, redis: Any = None) -> int:
     rows = (await db.execute(text("""
         SELECT p.id, p.display_name, max(mu.observed_at) AS last_at, count(*) AS n,
                (array_agg(mu.id ORDER BY mu.observed_at DESC))[1] AS last_unit
@@ -87,7 +87,7 @@ async def _scan_customer_cooling(db: AsyncSession, org_id: uuid.UUID) -> int:
 
 # ─── nhân viên phản hồi chậm bất thường ───────────────────────────────────────
 
-async def _scan_slow_response(db: AsyncSession, org_id: uuid.UUID) -> int:
+async def _scan_slow_response(db: AsyncSession, org_id: uuid.UUID, redis: Any = None) -> int:
     """Tin ĐẾN cần trả lời mà quá `RESPONSE_SLA_MIN` phút chưa có tin ĐI gửi cho đúng người đó (v0.1.67, F050).
 
     - "Cần trả lời" = có kết luận trong `NEEDS_REPLY_EVENTS`, loại reaction / nhãn dán / tin hệ thống, bỏ người gửi là
@@ -151,7 +151,7 @@ async def _scan_slow_response(db: AsyncSession, org_id: uuid.UUID) -> int:
 
 # ─── cơ hội nóng nhưng chưa ai nhận ────────────────────────────────────────────
 
-async def _scan_unclaimed_opportunity(db: AsyncSession, org_id: uuid.UUID) -> int:
+async def _scan_unclaimed_opportunity(db: AsyncSession, org_id: uuid.UUID, redis: Any = None) -> int:
     rows = (await db.execute(text("""
         SELECT id, code, need FROM biz.opportunities
         WHERE org_id = :o AND owner_user_id IS NULL AND stage NOT IN ('won', 'lost', 'dormant')
@@ -164,14 +164,14 @@ async def _scan_unclaimed_opportunity(db: AsyncSession, org_id: uuid.UUID) -> in
         await raise_alert(db, org_id, alert_type="unclaimed_opportunity", priority="P1",
                           title=f"{r.code} chưa ai nhận sau {UNCLAIMED_AGE_H} giờ", summary=r.need,
                           suggested="Gán người phụ trách", subject_type="opportunity", subject_id=r.id,
-                          evidence=[{"type": "opportunity", "id": str(r.id), "code": r.code}])
+                          evidence=[{"type": "opportunity", "id": str(r.id), "code": r.code}], redis=redis)
         n += 1
     return n
 
 
 # ─── đối thủ xuất hiện trong hội thoại ─────────────────────────────────────────
 
-async def _scan_competitor(db: AsyncSession, org_id: uuid.UUID) -> int:
+async def _scan_competitor(db: AsyncSession, org_id: uuid.UUID, redis: Any = None) -> int:
     rows = (await db.execute(text("""
         SELECT mu.id, mu.person_id, mu.group_id, mu.conclusion FROM clean.meaning_units mu
         WHERE mu.org_id = :o AND mu.event_type = 'MentionsCompetitor' AND mu.superseded_by IS NULL
@@ -192,7 +192,7 @@ async def _scan_competitor(db: AsyncSession, org_id: uuid.UUID) -> int:
 
 # ─── deadline / lời hứa bị bỏ quên ─────────────────────────────────────────────
 
-async def _scan_forgotten_deadline(db: AsyncSession, org_id: uuid.UUID) -> int:
+async def _scan_forgotten_deadline(db: AsyncSession, org_id: uuid.UUID, redis: Any = None) -> int:
     rows = (await db.execute(text("""
         SELECT id, promiser_person_id, text, meaning_unit_id FROM biz.promises
         WHERE org_id = :o AND kept_at IS NULL AND due_at < now() AND broken IS NOT TRUE
@@ -204,7 +204,7 @@ async def _scan_forgotten_deadline(db: AsyncSession, org_id: uuid.UUID) -> int:
         await raise_alert(db, org_id, alert_type="forgotten_deadline", priority="P1",
                           title="Một lời hứa đã quá hạn mà chưa thực hiện", summary=r.text,
                           suggested="Liên hệ lại và cập nhật tiến độ", subject_type="person",
-                          subject_id=r.promiser_person_id, evidence=evidence)
+                          subject_id=r.promiser_person_id, evidence=evidence, redis=redis)
         n += 1
     return n
 
@@ -219,9 +219,9 @@ async def early_warning_scan(ctx: dict[str, Any]) -> dict[str, int]:
         orgs = (await db.execute(text("SELECT id FROM core.organizations"))).scalars().all()
     for org in orgs:
         async with sm() as db:
-            n = (await _scan_customer_cooling(db, org)) + (await _scan_slow_response(db, org)) + \
-                (await _scan_unclaimed_opportunity(db, org)) + (await _scan_competitor(db, org)) + \
-                (await _scan_forgotten_deadline(db, org))
+            n = (await _scan_customer_cooling(db, org, redis)) + (await _scan_slow_response(db, org, redis)) + \
+                (await _scan_unclaimed_opportunity(db, org, redis)) + (await _scan_competitor(db, org, redis)) + \
+                (await _scan_forgotten_deadline(db, org, redis))
             await db.commit()
         if n:
             await _notify(redis, org)

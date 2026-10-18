@@ -9,6 +9,7 @@ import { WhyButton } from '../core/Evidence';
 import { DataEmptyState } from '../DataEmptyState';
 import { TASK_STATUS_LABEL, taskPriorityTone, taskStatusTone } from './queueModel';
 import { LoadMore } from './LoadMore';
+import { PROMISES_TRACKED } from '../../lib/features';
 import { useCreateTask, useKeepPromise, usePromises, useTaskList, useUpdateTask } from './queries';
 
 const STATUS_OPTIONS: FilterOption[] = [
@@ -26,6 +27,10 @@ const PRIORITY_OPTIONS: FilterOption[] = [
 ];
 const NEXT_STATUS: Record<TaskStatus, TaskStatus> = { todo: 'doing', doing: 'done', done: 'todo', cancelled: 'todo' };
 
+const TASKS_DESC = 'Việc sinh ra từ bản nháp đã duyệt hoặc do Sếp tạo tay. Việc quá hạn tô đỏ, việc có hẹn nhắc được nhắc trước để không ai bị bỏ quên.';
+const TASKS_DESC_WITH_PROMISES =
+  'Việc sinh ra từ lời hứa trong hội thoại, từ bản nháp đã duyệt hoặc do Sếp tạo tay. Việc quá hạn tô đỏ, lời hứa sắp đến hạn được nhắc trước để không ai bị bỏ quên.';
+
 export function TasksScreen() {
   const [status, setStatus] = useUrlState<string>('status', '');
   const [priority, setPriority] = useUrlState<string>('priority', '');
@@ -42,7 +47,7 @@ export function TasksScreen() {
     <div className="screen">
       <ScreenHead
         title="Việc & Nhắc hẹn"
-        description="Việc sinh ra từ lời hứa trong hội thoại, từ bản nháp đã duyệt hoặc do Sếp tạo tay. Việc quá hạn tô đỏ, lời hứa sắp đến hạn được nhắc trước để không ai bị bỏ quên."
+        description={PROMISES_TRACKED ? TASKS_DESC_WITH_PROMISES : TASKS_DESC}
         maxWidth={700}
         actions={
           <Button variant="primary" icon="ph ph-plus" data-gen-target="tasks.new" onClick={() => setAdding(true)}>
@@ -99,7 +104,7 @@ export function TasksScreen() {
           )}
         </Panel>
 
-        <PromisesPanel />
+        {PROMISES_TRACKED ? <PromisesPanel /> : null}
       </div>
 
       {adding ? <NewTaskDialog onClose={() => setAdding(false)} /> : null}

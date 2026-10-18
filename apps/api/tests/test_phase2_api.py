@@ -197,8 +197,9 @@ def user(role: str, org: object, perms: dict[str, str]) -> service.CurrentUser:
     return u
 
 
-async def test_ws_dispatch_filters_by_permission_org_and_masks(app, redis) -> None:  # type: ignore[no-untyped-def]
+async def test_ws_dispatch_filters_by_permission_org_and_masks(app, db, redis) -> None:  # type: ignore[no-untyped-def]
     hub = Hub(redis)
+    gid = await listen(db, await org_id(db), "g1")      # nhóm thật, «Mọi thành viên» (v0.1.71: WS xét «Quyền xem»)
     owner, auditor, manager, other = FakeWs(), FakeWs(), FakeWs(), FakeWs()
     hub.clients = {owner: user("owner", "o1", {"data.read": "all", "system.manage": "all"}),  # type: ignore[dict-item]
                    auditor: user("auditor", "o1", {"data.read": "all"}),
@@ -206,7 +207,7 @@ async def test_ws_dispatch_filters_by_permission_org_and_masks(app, redis) -> No
                    other: user("owner", "o2", {"data.read": "all"})}
     # tin NHÓM (có `group`): tin 1-1 chỉ Owner nhận, xem test_tin_1_1_chi_owner_v0165
     await hub.dispatch({"type": "raw.new", "data": {"text": "STK 0123456789", "payload": {"x": 1},
-                                                    "group": {"id": "g1"}}, "at": "t", "org_id": "o1"})
+                                                    "group": {"id": str(gid)}}, "at": "t", "org_id": "o1"})
     await hub.dispatch({"type": "cli.login", "data": {"status": "waiting_code"}, "at": "t", "org_id": "o1"})
     assert len(owner.sent) == 2 and "0123456789" in owner.sent[0]
     assert len(auditor.sent) == 1 and "0123456789" not in auditor.sent[0] and "payload" not in auditor.sent[0]

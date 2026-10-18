@@ -20,6 +20,7 @@ import httpx
 import orjson
 
 from gh.auth import rbac, service
+from gh.chassis.masking import mask_for_prompt
 from gh.gen import registry
 from gh.hub_link import KHO_LABEL
 
@@ -234,6 +235,10 @@ def _build_request(tool: Tool, args: dict[str, Any]) -> tuple[str, dict[str, str
 
 GetJson = Callable[[str, dict[str, str]], Any]
 
+#: Tool trả dữ liệu tĩnh / do hệ thống tự dựng (danh mục màn, việc thiết lập, trạng thái hướng dẫn) — không có chữ của
+#: người ngoài nên không che (che sẽ làm hỏng câu hướng dẫn dài và địa chỉ).
+STATIC_TOOLS = frozenset({"screens.list", "guide.list", "coach.status"})
+
 
 class ToolRunner:
     """Chạy tool cho MỘT người trong MỘT lượt; gom id đã thấy cho validator."""
@@ -289,6 +294,10 @@ class ToolRunner:
                     return self._fail("ERROR", f"Lỗi {status}")
         except ToolError as e:
             return self._fail(e.code, str(e))
+        # v0.1.71 (P2-3): kết quả tool (Hộp thư, hồ sơ, tìm kiếm… — chữ do người ngoài viết) sang model là bản đã che
+        # OTP / mật khẩu / SĐT / số tài khoản; UUID, mã đối tượng, số tiền, ngày giờ giữ nguyên (validator id vẫn khớp).
+        if tool.name not in STATIC_TOOLS and not tool.name.startswith("hub."):    # hub.* đã che ở `hub_link` (giữ id)
+            data = mask_for_prompt(data)
         small, raw = compact(data)
         ids: set[str] = set()
         kho = tool.name.startswith("hub.kho_")

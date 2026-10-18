@@ -90,10 +90,11 @@ test.describe('v0.1.59 · Tình báo', () => {
     await page.goto('/owner');
     await expect(page.getByTestId('intel-summary')).toHaveText('Bản tin đầu tiên lúc 07:30. Dưới đây là số liệu lúc này.');
     await expect(page.getByTestId('intel-brief-history')).toHaveCount(0);
-    for (const id of ['intel-tile-hot', 'intel-tile-opps', 'intel-tile-promises']) {
+    for (const id of ['intel-tile-hot', 'intel-tile-opps']) {
       await expect(page.getByTestId(id)).toBeVisible();
       await expect(page.getByTestId(id)).toContainText(/\d/);
     }
+    await expect(page.getByTestId('intel-tile-promises')).toHaveCount(0); // v0.1.71: chưa có bộ ghi lời hứa ⇒ ẩn ô
     await expect(page.getByTestId('intel-tile-messages')).toBeVisible();
     await expect(page.locator('[data-testid=first-run-card]')).toHaveCount(0);
   });
@@ -124,7 +125,7 @@ test.describe('v0.1.59 · Tình báo', () => {
     expect(keyRow!.height).toBeGreaterThanOrEqual(44);
   });
 
-  test('dải nguồn AI không hiện khi nguồn AI đã chạy; tin quan trọng → ?tin=; lời hứa quá hạn → Việc; không có Chi phí trợ lý Gen', async ({ page }) => {
+  test('dải nguồn AI không hiện khi nguồn AI đã chạy; tin quan trọng → ?tin=; không có ô lời hứa (chưa theo dõi); không có Chi phí trợ lý Gen', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/owner');
     await expect(page.getByTestId('intel-decide-count')).toBeVisible();
@@ -134,7 +135,6 @@ test.describe('v0.1.59 · Tình báo', () => {
     await expect(first).toBeVisible();
     const href = await first.getByRole('link').getAttribute('href');
     expect(href).toMatch(/^\/owner\/thong-tin\?tin=/);
-    await page.getByTestId('intel-tile-promises').click();
-    await expect(page).toHaveURL(/\/owner\/viec$/);
+    await expect(page.getByTestId('intel-tile-promises')).toHaveCount(0);
   });
 });

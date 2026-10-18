@@ -19,6 +19,7 @@ from gh import crypto, health, realtime, retention
 from gh.audit.routes import export_rows, query_log
 from gh.auth import rbac, service
 from gh.auth.deps import require, require_owner, require_pin
+from gh.biz.core.scope import group_row_view_sql
 from gh.boss_checks import service as boss_service
 from gh.chassis import actionlog
 from gh.chassis.bus import BRIDGE_CONTROL
@@ -32,6 +33,7 @@ from gh.data.common import (
     NEW_GROUP_MODES,
     NEW_SILENT_KEY,
     direct_mode,
+    drop_channel_counter,
     iso,
     new_group_mode,
     org_settings,
@@ -344,6 +346,7 @@ async def channel_groups(type_: str, pending: int = Query(default=0, ge=0, le=1)
                          user: service.CurrentUser = Depends(READ), db: AsyncSession = DB) -> list[dict[str, Any]]:
     """Nhóm của kênh (nhóm đã rời xếp cuối, có `left: true`). `?pending=1` = chỉ nhóm mới đang CHỜ Sếp chọn."""
     only = " AND g.listen_mode = 'pending' AND g.left_at IS NULL" if pending else ""
+    only += f" AND {group_row_view_sql(user.role_code, 'g')}"      # «Quyền xem» của nhóm (v0.1.71)
     rows = (await db.execute(text(GROUP_SELECT + " WHERE c.org_id = :o AND c.type = :t" + only
                                   + " ORDER BY (g.left_at IS NOT NULL), g.name"),  # noqa: S608 — `only` là hằng
                              {"o": user.org_id, "t": type_})).all()
@@ -442,6 +445,9 @@ async def update_group(db: AsyncSession, redis: Any, user: service.CurrentUser, 
                                action="group.updated", target_type="group", target_id=cur.code, target_label=cur.name,
                                detail={"from": {k: getattr(cur, k) for k in changes}, "to": changes}, ip=user.ip)
         if "listen_mode" in changes:
+            if cur.listen_mode == "silent":
+                # Sếp đã xử lý một nhóm đang «Lắng nghe im lặng» ⇒ thẻ kênh bớt một nhóm «mới» (v0.1.71).
+                await drop_channel_counter(db, user.org_id, NEW_SILENT_KEY, cur.channel_type)
             await sync_listen_sets(db, redis, user.org_id)
             await publish_header(db, redis, user.org_id)
     r = (await db.execute(text(GROUP_SELECT + " WHERE g.id = :i"), {"i": gid})).one()
@@ -1243,7 +1249,8 @@ async def listening_groups(user: service.CurrentUser = Depends(READ), db: AsyncS
     """Nhóm đang lắng nghe (khoá cứng #1 `listen_authorized_only` — chỉ nhóm Sếp đã chọn nghe mới vào đây): chế độ thuộc
     LISTENING_MODES (không gồm off / paused / pending) và Sếp chưa rời nhóm."""
     rows = (await db.execute(text(GROUP_SELECT + " WHERE c.org_id = :o AND g.listen_mode = ANY(:m) "
-                                  "AND g.left_at IS NULL ORDER BY g.name"),
+                                  f"AND g.left_at IS NULL AND {group_row_view_sql(user.role_code, 'g')} "
+                                  "ORDER BY g.name"),
                              {"o": user.org_id, "m": list(LISTENING_MODES)})).all()
     return [_group_out(r) for r in rows]
 

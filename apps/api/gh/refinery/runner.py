@@ -502,10 +502,12 @@ class Refinery:
                                org_id=org_id)
 
     async def _rule_hits(self, db: AsyncSession, evs: list[Ev], rules: list[RuleDef]) -> None:
+        await self._count_rule_hits(db, [h.rule.id for ev in evs for h in (ev.outcome.hits if ev.outcome else [])])
+
+    async def _count_rule_hits(self, db: AsyncSession, rule_ids: list[str]) -> None:
         counts: dict[str, int] = {}
-        for ev in evs:
-            for h in ev.outcome.hits if ev.outcome else []:
-                counts[h.rule.id] = counts.get(h.rule.id, 0) + 1
+        for rid in rule_ids:
+            counts[rid] = counts.get(rid, 0) + 1
         hour = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
         for rid, n in counts.items():
             await db.execute(text("""INSERT INTO refinery.rule_hits_hourly (rule_id, hour, hits) VALUES (:r, :h, :n)
@@ -529,10 +531,12 @@ class Refinery:
                 hits = {h.rule.code: h for ev in evs for h in (ev.outcome.hits if ev.outcome else [])
                         if not h.rule.discards}
                 applied = list(hits.values())
+                model_confirmed: list[RuleHit] = []
                 for code, conf in u.rules.items():
                     r = rule_by_code.get(code)
                     if r and code not in hits and not r.discards and conf >= r.threshold:
                         applied.append(RuleHit(r, conf, ["model"]))
+                        model_confirmed.append(applied[-1])
                 out = apply_outputs(applied)
                 event_type = u.event_type
                 side = u.side or {"demand": "demand", "supply": "supply"}.get(str(out["sets"].get("side")), None)
@@ -551,6 +555,8 @@ class Refinery:
                                 ev.ref, ("", -1.0, ""))[1]:
                             best[ev.ref] = ("lowconf", u.confidence, event_type)
                     continue
+                # «Lượt/24h» của quy tắc gồm cả khớp do MODEL xác nhận (v0.1.71); khớp tất định đã đếm ở `_rule_hits`.
+                await self._count_rule_hits(db, [h.rule.id for h in model_confirmed])
                 entities = dict(u.entities)
                 set_type = out["sets"].get("person_type")
                 if set_type:
@@ -583,7 +589,7 @@ class Refinery:
                                       subject_id=person_id or group_id,
                                       evidence=[{"type": "meaning_unit", "id": str(unit_id)}] +
                                                [{"type": "raw", "id": str(e.event_id)} for e in evs],
-                                      personnel_related=kind == "hr")
+                                      personnel_related=kind == "hr", redis=self.redis)
             # Trạng thái từng tin của phần lô.
             for ref, ev in by_ref.items():
                 if ref in best:

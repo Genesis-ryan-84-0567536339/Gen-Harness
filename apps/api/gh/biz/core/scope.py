@@ -37,12 +37,49 @@ async def ensure_active_user(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.
         raise not_found("Người dùng")
 
 
+# ─── «Quyền xem» của nhóm (`core.groups.view_scope`, v0.1.71) ─────────────────────────────────────────────────────────
+# Sếp đặt cho từng nhóm chat: «Chỉ Sếp» (`owner`) · «Sếp + quản lý» (`manager`) · «Mọi thành viên»
+# (`all_members`). Trước v0.1.71 chỉ lưu và hiển thị, không API đọc nào lọc theo nó. Nay MỘT chỗ này quyết
+# định, mọi API đọc tin / đơn vị / nhóm ghép vào (`Scope.group_sql`, `Scope.group_id_sql`,
+# `direct_visible_sql`): Owner thấy hết; vai Quản lý thấy nhóm `manager` + `all_members`; mọi vai khác (Vận
+# hành, Nhân viên phụ trách, Kiểm soát) chỉ thấy nhóm `all_members`. Quyền theo ma trận vẫn áp thêm (phạm vi
+# gán, v.v.): `view_scope` chỉ THU HẸP, không mở rộng.
+
+def view_scopes_for(role_code: str) -> tuple[str, ...] | None:
+    """Các giá trị `view_scope` mà vai này được đọc; None = đọc mọi nhóm (Owner)."""
+    if role_code == rbac.OWNER:
+        return None
+    if role_code == rbac.MANAGER:
+        return ("manager", "all_members")
+    return ("all_members",)
+
+
+def group_view_sql(role_code: str, group_col: str) -> str:
+    """Điều kiện SQL «vai này được đọc nhóm có id ở cột `group_col`» (cột NULL ⇒ sai: không có nhóm để xét)."""
+    allowed = view_scopes_for(role_code)
+    if allowed is None:
+        return "TRUE"
+    lst = ", ".join(f"'{v}'" for v in allowed)       # hằng nội bộ, không nhận từ người dùng
+    # `IN (truy vấn con không tương quan)` ⇒ Postgres băm một lần rồi tra, không dò từng dòng tin (bảng tin rất lớn).
+    return f"{group_col} IN (SELECT vg.id FROM core.groups vg WHERE vg.view_scope IN ({lst}))"
+
+
+def group_row_view_sql(role_code: str, alias: str) -> str:
+    """Như `group_view_sql` nhưng trên một dòng `core.groups` có bí danh `alias` (không cần truy vấn con)."""
+    allowed = view_scopes_for(role_code)
+    if allowed is None:
+        return "TRUE"
+    lst = ", ".join(f"'{v}'" for v in allowed)
+    return f"{alias}.view_scope IN ({lst})"
+
+
 @dataclass(frozen=True)
 class Scope:
     org_id: uuid.UUID
     user_id: uuid.UUID
     level: str                                   # all | team | assigned | none
     users: tuple[uuid.UUID, ...] = field(default=())   # người dùng mà phạm vi bao phủ (mình, hoặc cả team)
+    role: str = ""                               # vai người xem (rỗng = hẹp nhất) — để xét `view_scope`
 
     @property
     def is_all(self) -> bool:
@@ -69,18 +106,22 @@ class Scope:
         return f"EXISTS (SELECT 1 FROM core.persons sp WHERE sp.id = {column} AND {where})", params
 
     def group_sql(self, alias: str = "g") -> tuple[str, dict[str, Any]]:
-        """Biểu thức boolean trên một dòng `core.groups` có bí danh `alias`."""
+        """Biểu thức boolean trên một dòng `core.groups` có bí danh `alias` (phạm vi gán VÀ «Quyền xem» của nhóm)."""
+        view = group_row_view_sql(self.role, alias)
         if self.is_all:
-            return "TRUE", {}
+            return view, {}
         if self.level == rbac.NONE:
             return "FALSE", {}
-        return (f"EXISTS (SELECT 1 FROM core.assignments sa WHERE sa.subject_type = 'group'"
+        return (f"(EXISTS (SELECT 1 FROM core.assignments sa WHERE sa.subject_type = 'group'"
                 f" AND sa.subject_id = {alias}.id AND sa.active_to IS NULL AND sa.user_id = ANY(:scope_users))"
-                ), self._params()
+                f" AND {view})"), self._params()
 
     def group_id_sql(self, column: str) -> tuple[str, dict[str, Any]]:
+        """Biểu thức trên một cột chứa id nhóm. Cột NULL (tin 1-1) chỉ qua khi phạm vi `all` — tin 1-1 có quy tắc riêng
+        ở `direct_visible_sql`."""
         if self.is_all:
-            return "TRUE", {}
+            view = group_view_sql(self.role, column)
+            return ("TRUE", {}) if view == "TRUE" else (f"({column} IS NULL OR {view})", {})
         where, params = self.group_sql("sg")
         return f"EXISTS (SELECT 1 FROM core.groups sg WHERE sg.id = {column} AND {where})", params
 
@@ -95,7 +136,8 @@ class Scope:
     def subject_sql(self, type_col: str, id_col: str) -> tuple[str, dict[str, Any]]:
         """Biểu thức trên cặp cột (subject_type, subject_id) kiểu person | group | khác (khác → chỉ `all`)."""
         if self.is_all:
-            return "TRUE", {}
+            view = group_view_sql(self.role, id_col)       # đối tượng là nhóm ⇒ theo «Quyền xem» của nhóm
+            return ("TRUE", {}) if view == "TRUE" else (f"({type_col} IS DISTINCT FROM 'group' OR {view})", {})
         pw, pp = self.person_id_sql(id_col)
         gw, gp = self.group_id_sql(id_col)
         return f"(({type_col} = 'person' AND {pw}) OR ({type_col} = 'group' AND {gw}))", {**pp, **gp}
@@ -119,18 +161,31 @@ def direct_visible_sql(user: service.CurrentUser, group_col: str, person_col: st
     """Điều kiện SQL "dòng này người xem được phép đọc nguyên văn" trên cặp cột (nhóm, người) của một tin/đơn vị."""
     if user.role_code == rbac.OWNER:
         return "TRUE", {}
-    return f"({group_col} IS NOT NULL OR {_DM_PERSON_SQL.format(person=person_col)})", {"dm_user": user.id}
+    # Dòng thuộc nhóm: theo «Quyền xem» của nhóm (v0.1.71); dòng 1-1: chỉ người phụ trách đúng người đó.
+    return (f"(({group_col} IS NOT NULL AND {group_view_sql(user.role_code, group_col)})"
+            f" OR ({group_col} IS NULL AND {_DM_PERSON_SQL.format(person=person_col)}))"), {"dm_user": user.id}
 
 
 async def direct_visible(db: AsyncSession, user: service.CurrentUser, group_id: Any, person_id: Any) -> bool:
     """Bản một dòng của `direct_visible_sql` (đã biết `group_id`, `person_id` của dòng)."""
-    if group_id is not None or user.role_code == rbac.OWNER:
+    if user.role_code == rbac.OWNER:
         return True
+    if group_id is not None:
+        return await group_visible(db, user, group_id)
     if person_id is None:
         return False
     where, params = direct_visible_sql(user, "CAST(:dm_g AS uuid)", ":dm_p")
     return bool((await db.execute(text(f"SELECT {where}"),  # noqa: S608 — biểu thức nội bộ
                                   {"dm_g": None, "dm_p": uuid.UUID(str(person_id)), **params})).scalar())
+
+
+async def group_visible(db: AsyncSession, user: service.CurrentUser, group_id: Any) -> bool:
+    """«Quyền xem» của nhóm có cho vai của người xem đọc nội dung nhóm này không (Owner luôn được)."""
+    if user.role_code == rbac.OWNER:
+        return True
+    where = group_view_sql(user.role_code, "CAST(:vg AS uuid)")
+    return bool((await db.execute(text(f"SELECT {where}"),  # noqa: S608 — biểu thức nội bộ
+                                  {"vg": uuid.UUID(str(group_id))})).scalar())
 
 
 async def team_users(db: AsyncSession, team_id: uuid.UUID) -> tuple[uuid.UUID, ...]:
@@ -151,7 +206,7 @@ async def scope_for(db: AsyncSession, user: service.CurrentUser, permission: str
     if level == rbac.TEAM:
         members = await team_users(db, user.team_id) if user.team_id else ()
         users = tuple(dict.fromkeys((user.id, *members)))
-    return Scope(org_id=user.org_id, user_id=user.id, level=level, users=users)
+    return Scope(org_id=user.org_id, user_id=user.id, level=level, users=users, role=user.role_code)
 
 
 async def ensure_person(db: AsyncSession, sc: Scope, person_id: uuid.UUID) -> None:

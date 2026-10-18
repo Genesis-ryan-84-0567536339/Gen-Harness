@@ -54,6 +54,12 @@ function stub(overview: Overview, update: unknown = { ...UPDATE, latest: 'v0.1.4
   return calls;
 }
 
+const ME_OWNER = {
+  id: 'u', email: 'owner@genesis.local', display_name: 'Anh Nguyễn Văn A (Chủ)', role: { code: 'owner', name: 'Owner' },
+  org: { id: 'o', name: 'x', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
+  addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null, permissions: permissionsOf('owner'),
+};
+
 function renderOverview() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   qc.setQueryData(qk.me, {
@@ -136,6 +142,22 @@ describe('Hôm nay — hàng số chính và Sức khoẻ hệ thống', () => {
 });
 
 describe('Hôm nay — cập nhật: không có thẻ, chỉ một dòng báo', () => {
+  it('v0.1.71 (P3-9): vai không có system.manage (Vận hành, Kiểm soát…) KHÔNG gọi GET /system/update', async () => {
+    const calls = stub(mockOverview(), UPDATE);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData(qk.me, { ...ME_OWNER, role: { code: 'operator', name: 'Vận hành' }, permissions: permissionsOf('operator') });
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <UpdateNotice />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    expect(calls.some((u) => u.includes('/system/update'))).toBe(false);
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it('có bản mới → dòng "Có bản mới v0.1.42 — cập nhật ở Cài đặt" dẫn tới /system?tab=storage; không có thẻ cập nhật', async () => {
     stub(mockOverview(), UPDATE);
     renderOverview();
@@ -159,6 +181,7 @@ describe('Hôm nay — cập nhật: không có thẻ, chỉ một dòng báo', 
     const failed = { ...UPDATE, state: 'failed', message: 'lỗi (GH-E945)', to: 'v0.1.42', finished_at: new Date().toISOString() };
     stub(mockOverview(), failed);
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData(qk.me, ME_OWNER);
     const shown = render(
       <QueryClientProvider client={qc}>
         <MemoryRouter>
@@ -168,8 +191,10 @@ describe('Hôm nay — cập nhật: không có thẻ, chỉ một dòng báo', 
     );
     expect(await screen.findByTestId('update-notice')).toHaveTextContent('Cập nhật lên v0.1.42 chưa thành công — xem ở Cài đặt');
     shown.unmount();
+    const qc2 = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc2.setQueryData(qk.me, ME_OWNER);
     const hidden = render(
-      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <QueryClientProvider client={qc2}>
         <MemoryRouter>
           <UpdateNotice hideFailed />
         </MemoryRouter>

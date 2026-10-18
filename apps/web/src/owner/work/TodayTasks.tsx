@@ -19,6 +19,7 @@ import { api } from '../../lib/api';
 import { errorDetail, errorText } from '../../lib/errorText';
 import { DEFAULT_TZ, fmtDM, fmtHM } from '../../lib/format';
 import { InlineError } from '../../screens/common';
+import { PROMISES_TRACKED } from '../../lib/features';
 import { usePromises, useTasks } from '../../screens/queue/queries';
 import { invalidateAfterWrite, useCreateReminder, useTaskDone, useTaskPostpone, tomorrowMorning } from '../actions/useOwnerActions';
 import { ASK_GEN_PROMPTS, OWNER_PATHS, asText, moneyText, safeLink } from '../ownerModel';
@@ -159,7 +160,7 @@ export function useTodayData(tz: string = DEFAULT_TZ): TodayData {
   const dueBefore = tomorrowStartIso(Date.now(), tz); // cùng một giá trị cả ngày ⇒ khoá truy vấn ổn định; qua nửa đêm thì tự tải lại
   const todo = useTasks({ status: 'todo', due_before: dueBefore, limit: TODAY_TASKS_LIMIT });
   const doing = useTasks({ status: 'doing', due_before: dueBefore, limit: TODAY_TASKS_LIMIT });
-  const promises = usePromises('overdue');
+  const promises = usePromises('overdue', PROMISES_TRACKED);
   const taskRows = [...(Array.isArray(todo.data?.items) ? todo.data.items : []), ...(Array.isArray(doing.data?.items) ? doing.data.items : [])];
   const promiseRows = Array.isArray(promises.data?.items) ? promises.data.items : [];
   const shown = (q: typeof todo) => (Array.isArray(q.data?.items) ? q.data.items.length : 0);
@@ -177,7 +178,7 @@ export function useTodayData(tz: string = DEFAULT_TZ): TodayData {
     refetch: () => {
       void todo.refetch();
       void doing.refetch();
-      void promises.refetch();
+      if (PROMISES_TRACKED) void promises.refetch();
     },
   };
 }

@@ -155,14 +155,12 @@ def _event_where(user: service.CurrentUser, sc: Scope, f: Filters,
     params: dict[str, Any] = {"o": user.org_id}
     # Sự kiện của cả kênh: chỉ phạm vi ALL; sự kiện nhóm: theo phạm vi nhóm; "người mới nhắn riêng": quy tắc 1-1.
     parts = []
+    gw, gp = sc.group_id_sql("v.group_id")      # phạm vi gán + «Quyền xem» của nhóm (v0.1.71); `all` + Owner ⇒ TRUE
     if sc.is_all:
         parts.append("v.kind = ANY(:ch_kinds)")
         params["ch_kinds"] = list(lev.CHANNEL_KINDS)
-        parts.append("(v.kind = ANY(:grp_kinds))")
-    else:
-        gw, gp = sc.group_id_sql("v.group_id")
-        parts.append(f"(v.kind = ANY(:grp_kinds) AND {gw})")
-        params.update(gp)
+    parts.append(f"(v.kind = ANY(:grp_kinds) AND {gw})")
+    params.update(gp)
     params["grp_kinds"] = list(lev.GROUP_KINDS)
     dm_sql, dm_params = direct_visible_sql(user, "CAST(NULL AS uuid)", "v.person_id")
     parts.append(f"(v.kind = 'direct_new' AND {dm_sql})")

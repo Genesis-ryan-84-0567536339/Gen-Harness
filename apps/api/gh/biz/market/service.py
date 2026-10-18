@@ -12,7 +12,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from gh.biz.core.scope import Scope
+from gh.biz.core.scope import Scope, group_view_sql
 
 # Cùng ngưỡng chip cao/trung bình/thấp của docs/api/phase-3.md ("confidence của đơn vị/điểm là số 0–1").
 CONF_HIGH, CONF_MED = 0.8, 0.6
@@ -67,14 +67,33 @@ def person_or_group_scope_sql(sc: Scope, person_col: str, group_col: str) -> tup
     """Biểu thức phạm vi cho một dòng có thể gắn với người **hoặc** nhóm (một trong hai cột có thể NULL) —
     `biz.market_signals`, `clean.meaning_units` (Kho hội thoại). Thấy được khi người **hoặc** nhóm nằm trong
     phạm vi; cột NULL tự động không khớp (EXISTS trên NULL không có dòng nào)."""
+    view = group_view_sql(sc.role, group_col)       # «Quyền xem» của nhóm (v0.1.71): nhóm «Chỉ Sếp» ẩn với vai khác
+    gate = "TRUE" if view == "TRUE" else f"({group_col} IS NULL OR {view})"
     if sc.is_all:
-        return "TRUE", {}
+        return gate, {}
     pw, pp = sc.person_id_sql(person_col)
     gw, gp = sc.group_id_sql(group_col)
-    return f"(({person_col} IS NOT NULL AND {pw}) OR ({group_col} IS NOT NULL AND {gw}))", {**pp, **gp}
+    return f"((({person_col} IS NOT NULL AND {pw}) OR ({group_col} IS NOT NULL AND {gw})) AND {gate})", {**pp, **gp}
 
 
 _DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})")
+
+
+def supply_line(item: str, quantity: Any, unit: Any, value_vnd: Any, location: Any) -> str:
+    """Một dòng mô tả nguồn cung cho bản nháp «Giới thiệu nguồn cung»: tên hàng + số lượng + giá + khu vực CÓ trong tín
+    hiệu (thiếu thì bỏ, không bịa). Ví dụ «Thép cuộn — 4 container, 1.100.000.000 đồng, tại Hà Nội»."""
+    parts: list[str] = []
+    q = num_or_none(quantity)
+    if q is not None and q > 0:
+        qty = f"{int(q)}" if q == int(q) else f"{q:g}".replace(".", ",")
+        parts.append(f"{qty} {str(unit).strip()}".strip() if unit else qty)
+    v = num_or_none(value_vnd)
+    if v is not None and v > 0:
+        parts.append(f"{int(v):,}".replace(",", ".") + " đồng")
+    loc = str(location).strip() if location else ""
+    if loc:
+        parts.append(f"tại {loc}")
+    return f"{item} — {', '.join(parts)}" if parts else str(item)
 
 
 def parse_needed_by(value: Any) -> date | None:

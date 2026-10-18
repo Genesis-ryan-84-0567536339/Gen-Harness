@@ -16,6 +16,7 @@ import type { InfiniteData, UseInfiniteQueryResult, UseQueryResult } from '@tans
 import { Link } from 'react-router-dom';
 import type { FeedItem, InsightKey, InsightMetric, OwnerFeed, OwnerInsights, OwnerRelationRow, OwnerRelations, OwnerToday } from '@gen-harness/contracts';
 import { Badge, Card, EmptyState, ListRow, StatTile, useMediaQuery } from '@gen-harness/ui';
+import { PROMISES_TRACKED } from '../../lib/features';
 import { DEFAULT_TZ, fmtHM, sameDay, fmtDM } from '../../lib/format';
 import { useOrgTimezone } from '../../lib/permissions';
 import { useDrafts } from '../../screens/core/queries';
@@ -93,7 +94,7 @@ function KpiTiles({ q }: { q: UseQueryResult<OwnerToday> }) {
   if (q.isPending) {
     return (
       <>
-        {['Khách nóng', 'Cơ hội đang mở', 'Lời hứa quá hạn'].map((t) => (
+        {['Khách nóng', 'Cơ hội đang mở', ...(PROMISES_TRACKED ? ['Lời hứa quá hạn'] : [])].map((t) => (
           <Card key={t} title={t} state="loading" className={CELL} data-testid="intel-tile-loading" />
         ))}
       </>
@@ -101,7 +102,7 @@ function KpiTiles({ q }: { q: UseQueryResult<OwnerToday> }) {
   }
   if (q.isError) {
     return (
-      <Card title="Khách nóng, cơ hội, lời hứa" state="error" className="intel-span9" data-testid="intel-tiles-error">
+      <Card title={PROMISES_TRACKED ? 'Khách nóng, cơ hội, lời hứa' : 'Khách nóng, cơ hội'} state="error" className="intel-span9" data-testid="intel-tiles-error">
         <OwnerError error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} />
       </Card>
     );
@@ -109,7 +110,7 @@ function KpiTiles({ q }: { q: UseQueryResult<OwnerToday> }) {
   const k = q.data.kpis ?? ({} as Partial<OwnerToday['kpis']>);
   const hot = num(k.hot);
   const opps = num(k.open_opps);
-  const late = num(k.overdue_promises);
+  const late = PROMISES_TRACKED ? num(k.overdue_promises) : 0;
   return (
     <>
       <StatTile
@@ -128,14 +129,16 @@ function KpiTiles({ q }: { q: UseQueryResult<OwnerToday> }) {
         to={OWNER_PATHS.analytics}
         data-testid="intel-tile-opps"
       />
-      <StatTile
-        className={CELL}
-        label="Lời hứa quá hạn"
-        value={late}
-        note={late > 0 ? 'Xem ở Việc' : 'Không có lời hứa nào quá hạn'}
-        to={OWNER_PATHS.work}
-        data-testid="intel-tile-promises"
-      />
+      {PROMISES_TRACKED ? (
+        <StatTile
+          className={CELL}
+          label="Lời hứa quá hạn"
+          value={late}
+          note={late > 0 ? 'Xem ở Việc' : 'Không có lời hứa nào quá hạn'}
+          to={OWNER_PATHS.work}
+          data-testid="intel-tile-promises"
+        />
+      ) : null}
     </>
   );
 }

@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.biz.core.explain import DIMENSION_LABELS
 from gh.biz.relations.service import persons_of_agent
+from gh.chassis.masking import mask_for_prompt
 from gh.data.common import DIRECT_MODE_SQL
 from gh.memory.notebook import SECTIONS
 
@@ -53,7 +54,10 @@ class Item:
     data: dict[str, Any]              # phần model thấy
 
     def line(self) -> str:
-        return f"{self.handle} {orjson.dumps({'kind': self.kind, **self.data}, default=str).decode()}"
+        # v0.1.71 (P2-3): phần model thấy là bản đã che OTP / mật khẩu / token / SĐT (giữ 3 số cuối) / số tài khoản;
+        # số tiền, ngày giờ, mã đối tượng giữ nguyên. `ref`/`label` (hiện ở «Dữ liệu agent đã dùng») không đổi.
+        shown = mask_for_prompt(orjson.loads(orjson.dumps({'kind': self.kind, **self.data}, default=str)))
+        return f"{self.handle} {orjson.dumps(shown).decode()}"
 
 
 @dataclass

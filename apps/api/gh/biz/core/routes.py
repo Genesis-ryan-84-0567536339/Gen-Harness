@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gh.auth import rbac, service
 from gh.auth.deps import current_user, require, require_pin
 from gh.biz.core import drafts, explain
-from gh.biz.core.scope import Scope, ensure_group, ensure_person, not_found, scope_for
+from gh.biz.core.scope import Scope, ensure_group, ensure_person, group_view_sql, not_found, scope_for
 from gh.biz.queue import service as qsvc
 from gh.chassis import actionlog
 from gh.data.common import has_masked_number, iso, mask_text, parse_cursor
@@ -99,11 +99,15 @@ async def _drafts_scope(db: AsyncSession, user: service.CurrentUser) -> Scope:
 
 
 def _scope_where(sc: Scope) -> tuple[str, dict[str, Any]]:
+    # «Quyền xem» của nhóm (v0.1.71): nháp gắn với nhóm «Chỉ Sếp» (đối tượng hoặc nhóm đích) ẩn với vai khác.
+    gv = group_view_sql(sc.role, "d.group_id")
+    gate = "TRUE" if gv == "TRUE" else f"(d.group_id IS NULL OR {gv})"
     if sc.is_all:
-        return "TRUE", {}
+        sw, sp = sc.subject_sql("d.subject_type", "d.subject_id")
+        return f"({sw} AND {gate})", sp
     sw, sp = sc.subject_sql("d.subject_type", "d.subject_id")
     uw, up = sc.user_sql("d.created_by")
-    return f"({sw} OR {uw})", {**sp, **up}
+    return f"(({sw} OR {uw}) AND {gate})", {**sp, **up}
 
 
 async def _visible(db: AsyncSession, user: service.CurrentUser, draft_id: uuid.UUID) -> Any:
@@ -476,6 +480,10 @@ async def agent_decisions(agent_id: uuid.UUID | None = None, decision: str | Non
             user.permissions.get("action.approve", rbac.NONE) == rbac.NONE:
         raise forbidden("system.read")
     conds = ["d.org_id = :o"]
+    gv = group_view_sql(user.role_code, "tu.group_id")
+    if gv != "TRUE":       # «Quyền xem» của nhóm (v0.1.71): quyết định về tin nhóm «Chỉ Sếp» ẩn với vai khác
+        conds.append("NOT EXISTS (SELECT 1 FROM clean.meaning_units tu WHERE tu.id = d.trigger_unit_id "
+                     f"AND tu.group_id IS NOT NULL AND NOT {gv})")
     if agent_id:
         conds.append("d.agent_id = :a")
     if decision:

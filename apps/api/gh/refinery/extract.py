@@ -11,6 +11,7 @@ from typing import Any
 
 import orjson
 
+from gh.chassis.masking import mask_for_prompt
 from gh.providers.clients import Message, parse_json_block
 from gh.refinery.rules import RuleDef
 
@@ -96,8 +97,11 @@ def build_messages(events: list[EventIn], rules: list[RuleDef], event_types: lis
         conds = "; ".join(c.get("hint") or c.get("label") or c.get("type", "") for c in r.conditions)
         rule_lines.append(f"- {r.code} {r.name} (ngưỡng {r.threshold:.2f}): {conds}"
                           + (f". Gợi ý: {r.prompt_hint}" if r.prompt_hint else ""))
-    lines = [orjson.dumps({"ref": e.ref, "group": e.group, "sender": e.sender, "time": e.time, "kind": e.kind,
-                           "text": (e.text or "")[:2000], **({"rule_hints": e.hints} if e.hints else {})}).decode()
+    # v0.1.71 (P2-3): tin nhắn của người ngoài vào prompt là bản đã che — OTP, mật khẩu, token, SĐT (giữ 3 số cuối), số
+    # tài khoản / thẻ, email; số tiền, ngày giờ, mã đối tượng giữ nguyên để model còn trích `value_vnd`.
+    lines = [orjson.dumps({"ref": e.ref, "group": mask_for_prompt(e.group), "sender": mask_for_prompt(e.sender),
+                           "time": e.time, "kind": e.kind, "text": mask_for_prompt((e.text or "")[:2000]),
+                           **({"rule_hints": e.hints} if e.hints else {})}).decode()
              for e in events]
     user = ("Quy tắc của tổ chức:\n" + ("\n".join(rule_lines) or "(không có)") +
             "\n\nTin nhắn (mỗi dòng một JSON):\n" + "\n".join(lines))

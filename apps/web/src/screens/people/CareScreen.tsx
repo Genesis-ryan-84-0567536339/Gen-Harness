@@ -5,8 +5,13 @@ import { EmptyState, Icon, Segmented } from '@gen-harness/ui';
 import { fmtDMClock, fmtDec, fmtInt } from '../../lib/format';
 import { useUrlState } from '../../lib/uiStore';
 import { CardError, Panel, ScreenHead, SkeletonLines, StateChip } from '../common';
+import { PROMISES_TRACKED } from '../../lib/features';
 import { BAD, ISSUE_KIND_LABEL, OK, SCENARIO_LABEL, STAFF_HOWTO, WARN, fmtVnd, minuteBandTone } from './peopleModel';
 import { useCareIssues, useCareResponseTimes, useCareScenarios } from './queries';
+
+const CARE_DESC = 'Hệ thống không chỉ biết đã nhắn hay chưa, mà biết cách nhắn: follow quá sớm hay quá muộn, quên khách sau báo giá, và kịch bản nào đang chuyển thành deal.';
+const CARE_DESC_WITH_PROMISES =
+  'Hệ thống không chỉ biết đã nhắn hay chưa, mà biết cách nhắn: follow quá sớm hay quá muộn, hứa rồi quên, quên khách sau báo giá, và kịch bản nào đang chuyển thành deal.';
 
 export function CareScreen() {
   const response = useCareResponseTimes({});
@@ -30,7 +35,7 @@ export function CareScreen() {
     if (issues.data) {
       const brokenCount = issues.data.items.filter((i) => i.kind === 'broken_promise').reduce((s, i) => s + i.count, 0);
       const abandonedCount = issues.data.items.filter((i) => i.kind === 'abandoned_customer').length;
-      rows.push({ label: 'Hứa rồi quên', value: fmtInt(brokenCount), unit: 'lần', sub: 'Cộng dồn theo người, 30 ngày', tone: brokenCount === 0 ? OK : BAD });
+      if (PROMISES_TRACKED) rows.push({ label: 'Hứa rồi quên', value: fmtInt(brokenCount), unit: 'lần', sub: 'Cộng dồn theo người, 30 ngày', tone: brokenCount === 0 ? OK : BAD });
       rows.push({ label: 'Khách bị bỏ rơi', value: fmtInt(abandonedCount), unit: 'khách', sub: 'Không ai chạm liên tục', tone: abandonedCount === 0 ? OK : WARN });
     }
     return rows;
@@ -41,13 +46,13 @@ export function CareScreen() {
     <div className="screen">
       <ScreenHead
         title="Chất lượng chăm sóc"
-        description="Hệ thống không chỉ biết đã nhắn hay chưa, mà biết cách nhắn: follow quá sớm hay quá muộn, hứa rồi quên, quên khách sau báo giá, và kịch bản nào đang chuyển thành deal."
+        description={PROMISES_TRACKED ? CARE_DESC_WITH_PROMISES : CARE_DESC}
         maxWidth={700}
       />
 
       <div className="care-kpis">
         {kpisLoading
-          ? Array.from({ length: 5 }, (_, i) => <div key={i} className="gh-card care-kpi"><SkeletonLines rows={1} padding="0" /></div>)
+          ? Array.from({ length: PROMISES_TRACKED ? 5 : 4 }, (_, i) => <div key={i} className="gh-card care-kpi"><SkeletonLines rows={1} padding="0" /></div>)
           : kpis.map((k) => (
               <div key={k.label} className="gh-card care-kpi">
                 <span className="care-kpi__label">{k.label}</span>
@@ -124,12 +129,12 @@ export function CareScreen() {
               <>
                 <div className="care-scn-summary">
                   <span>
-                    Thắng: {scenarios.data.summary.won.count} ca · phản hồi nhanh TB {fmtDec(scenarios.data.summary.won.avg_fast_pct, 1)}% · hứa vỡ TB{' '}
-                    {fmtDec(scenarios.data.summary.won.avg_broken_promises, 1)}
+                    Thắng: {scenarios.data.summary.won.count} ca · phản hồi nhanh TB {fmtDec(scenarios.data.summary.won.avg_fast_pct, 1)}%
+                    {PROMISES_TRACKED ? ` · hứa vỡ TB ${fmtDec(scenarios.data.summary.won.avg_broken_promises, 1)}` : ''}
                   </span>
                   <span>
-                    Mất: {scenarios.data.summary.lost.count} ca · phản hồi nhanh TB {fmtDec(scenarios.data.summary.lost.avg_fast_pct, 1)}% · hứa vỡ TB{' '}
-                    {fmtDec(scenarios.data.summary.lost.avg_broken_promises, 1)}
+                    Mất: {scenarios.data.summary.lost.count} ca · phản hồi nhanh TB {fmtDec(scenarios.data.summary.lost.avg_fast_pct, 1)}%
+                    {PROMISES_TRACKED ? ` · hứa vỡ TB ${fmtDec(scenarios.data.summary.lost.avg_broken_promises, 1)}` : ''}
                   </span>
                 </div>
                 {scenarios.data.items.map((s) => (
@@ -206,7 +211,7 @@ function ScenarioRow({ s }: { s: CareScenarioItem }) {
         <div className="care-scn-row__note">{s.note}</div>
         {s.response ? (
           <div className="care-scn-row__stats">
-            phản hồi nhanh {fmtDec(s.response.fast_pct, 1)}% · TB {fmtDec(s.response.avg_minutes, 1)} phút · {s.broken_promises} lời hứa bị vỡ
+            phản hồi nhanh {fmtDec(s.response.fast_pct, 1)}% · TB {fmtDec(s.response.avg_minutes, 1)} phút{PROMISES_TRACKED ? ` · ${s.broken_promises} lời hứa bị vỡ` : ''}
           </div>
         ) : null}
       </div>

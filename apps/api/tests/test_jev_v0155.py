@@ -24,6 +24,7 @@ from sqlalchemy import text
 
 from gh import crypto
 from gh.chassis import actionlog
+from gh.chassis.masking import mask_for_prompt
 from gh.db import sessionmaker
 from gh.gen import decider as decmod
 from gh.gen import jev, jev_bench
@@ -412,7 +413,8 @@ async def test_jev_error_keeps_old_flow_and_loses_nothing(app: Any, db: Any, red
         spam_c = f"{SPAM} container {fail} {PHONE}"             # quy tắc chấm rác nhưng Jev lỗi ⇒ KHÔNG bỏ
         await put(sm, org, msg(spam_c), msg(LONG_BUY + fail, sender="u2"), msg(LONG_BUY + fail, sender="u2"))
         st = await Refinery(sm, redis, router_taking(seen), jev_transport=spy.transport).run(org, "manual")  # type: ignore[arg-type]
-        assert spam_c in seen and seen.count(LONG_BUY + fail) == 1       # chỉ trùng hẳn mới bị bỏ
+        # prompt gửi model là bản đã che SĐT (v0.1.71, P2-3) nên so với bản đã che
+        assert mask_for_prompt(spam_c) in seen and seen.count(LONG_BUY + fail) == 1       # chỉ trùng hẳn mới bị bỏ
         assert st.prefilter_skipped == 1 and st.status == "done"
         assert (await states_detail(db))[spam_c]["state"] == "clean"
         assert_clean(spy.wire)

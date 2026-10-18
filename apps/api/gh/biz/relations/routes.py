@@ -794,8 +794,8 @@ def _principals(user: service.CurrentUser) -> list[str]:
 
 def _doc_default_scope_sql(sc: Scope) -> tuple[str, dict[str, Any]]:
     """Phạm vi mặc định (không có dòng ACL nào cho tài liệu): theo người/nhóm sở hữu, như mọi đối tượng khác."""
-    if sc.is_all:
-        return "TRUE", {}
+    if sc.is_all:       # vẫn theo «Quyền xem» của nhóm sở hữu (v0.1.71)
+        return sc.group_id_sql("d.owner_group_id")
     pw, pp = sc.person_id_sql("d.owner_person_id")
     gw, gp = sc.group_id_sql("d.owner_group_id")
     return f"(({pw}) OR ({gw}) OR (d.owner_person_id IS NULL AND d.owner_group_id IS NULL))", {**pp, **gp}
@@ -806,7 +806,7 @@ def _doc_visible_sql(sc: Scope, user: service.CurrentUser, *, need_write: bool =
     tiết: trong phạm vi mặc định (người/nhóm sở hữu) **hoặc** có dòng ACL cấp quyền cho vai trò/cá nhân/team của
     người gọi (xem chú thích ACL ở trên — cấp thêm, không phải chặn bớt)."""
     if sc.is_all:
-        return "TRUE", {}
+        return _doc_default_scope_sql(sc)
     flag = "a.can_write" if need_write else "(a.can_read OR a.can_write)"
     acl_grant = (f"EXISTS (SELECT 1 FROM biz.document_acl a WHERE a.document_id = d.id "
                 f"AND a.principal = ANY(:doc_principals) AND {flag})")
