@@ -113,7 +113,7 @@ test('owner.pair: chỉ khi có khoá gh:bridge:pairing + thân khớp; chỉ ch
   const e = await waitFor(() => inb(bus, 'owner.pair')[0]);
   assert.deepEqual(e.payload, {
     channel: 'zalo', session_id: 's1', sender_external_id: '777', sender_alt_id: null, sender_name: 'Anh Ba',
-    occurred_at: new Date(1758600000000).toISOString(), code: '987654',
+    occurred_at: new Date(1758600000000).toISOString(), code: '987654', external_msg_id: '52',
   });
   await waitFor(() => inb(bus, 'message').length === 2);
   await tick(5);

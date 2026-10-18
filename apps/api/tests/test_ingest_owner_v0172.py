@@ -362,6 +362,7 @@ async def test_owner_pair_forwarded_only_with_live_code(app, db, redis) -> None:
     await db.commit()
     ev = await run(p)
     assert [t for t, _ in ev] == ["pair"] and ev[0][1]["code"] == "123456" and ev[0][1]["sender_external_id"] == OWNER_ZALO
+    assert ev[0][1]["external_msg_id"] == "p1"                      # bridge gửi kèm ⇒ lời đáp «Đã ghép» có tin kích hoạt
     assert await run({**p, "code": "12345"}) == [] and await run({**p, "code": "12a456"}) == []
     assert await run({**p, "forwarded": True}) == []
     await db.execute(text("UPDATE ops.owner_channels SET pair_expires_at = now() - interval '1 second'"))

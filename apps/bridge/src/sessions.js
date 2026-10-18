@@ -309,6 +309,7 @@ export class SessionManager {
       await this.bus.publish(STREAMS.inbound, 'owner.pair', {
         channel: s.channel, session_id: s.sessionId, sender_external_id: payload.sender_external_id,
         sender_alt_id: meta.sender_alt_id ?? null, sender_name: payload.sender_name || '', occurred_at: payload.occurred_at, code,
+        external_msg_id: payload.external_msg_id,
       }, opts);
       this.log.info('nhận mã ghép kênh quản trị', { channel: s.channel, session_id: s.sessionId });
       return true;
