@@ -91,9 +91,14 @@ export class Keyring {
   }
 }
 
+/** Ba căn cứ tự gửi duy nhất (v0.1.72, khớp `Basis` ở lõi `owner_channel/autosend.py`). */
+export const PERMIT_BASES = Object.freeze(['owner_dm', 'owner_tag', 'support']);
+
 /**
- * Kiểm đầy đủ một lệnh message.send trừ bước nonce (cần Redis).
- * Thứ tự: chữ ký → exp → khớp channel/thread_id/thread_type → khớp sha256(text).
+ * Kiểm đầy đủ một lệnh message.send trừ bước nonce và lớp 2 `basis` (cần Redis — xem `checkPermitBasis`).
+ * Thứ tự: chữ ký → exp → khớp channel/thread_id/thread_type → khớp sha256(text) → dạng claims:
+ * không có `basis` = permit bản nháp (đã qua Xác nhận + mã PIN) ⇒ bắt buộc `draft_id`; có `basis` ⇒ phải là một trong
+ * `PERMIT_BASES`, lạ ⇒ PERMIT_MISMATCH.
  */
 export function checkPermit(keyring, cmd, nowSec = Date.now() / 1000) {
   const sig = keyring.verifyPermitSignature(cmd.permit);
@@ -109,5 +114,40 @@ export function checkPermit(keyring, cmd, nowSec = Date.now() / 1000) {
   if (typeof cmd.text !== 'string' || String(c.body_sha256 || '').toLowerCase() !== sha256Hex(cmd.text)) {
     return { ok: false, error: PERMIT_ERRORS.mismatch, claims: c };
   }
+  if (c.basis === undefined || c.basis === null) {
+    const d = c.draft_id;
+    if (!((typeof d === 'string' && d) || (typeof d === 'number' && Number.isFinite(d)))) {
+      return { ok: false, error: PERMIT_ERRORS.invalid, claims: c };
+    }
+  } else if (!PERMIT_BASES.includes(c.basis)) {
+    return { ok: false, error: PERMIT_ERRORS.mismatch, claims: c };
+  }
   return { ok: true, claims: c };
+}
+
+/**
+ * Lớp 2 của permit tự gửi (thiết kế v0.1.71 §4.1): lõi đã kiểm trong DB, bridge kiểm lại theo khoá Redis lõi ghi.
+ * Chỉ gọi sau `checkPermit` ok. Claims không `basis` (permit bản nháp) ⇒ cho qua, không đổi hành vi cũ.
+ * - phiên `account_kind ≠ bot` ⇒ từ chối mọi `basis`;
+ * - `owner_dm`  ⇒ `thread_type='user'`  và `thread_id ∈ gh:bridge:owner_thread:<kênh>`;
+ * - `owner_tag` ⇒ `thread_type='group'` và `thread_id ∈ gh:bridge:listen:<kênh>`;
+ * - `support`   ⇒ `thread_type='group'` và `thread_id ∈ gh:bridge:support:<kênh>`;
+ * - `basis` lạ  ⇒ PERMIT_MISMATCH.
+ * @param {object} lookup  { accountKind(): Promise<string|null>, ownerThread(id), listening(id), support(id): Promise<boolean> }
+ * @returns {Promise<{ok: true} | {ok: false, error: string}>}
+ */
+export async function checkPermitBasis(claims, cmd, lookup) {
+  const basis = claims?.basis;
+  if (basis === undefined || basis === null) return { ok: true };
+  const deny = { ok: false, error: PERMIT_ERRORS.mismatch };
+  if (!PERMIT_BASES.includes(basis)) return deny;
+  if ((await lookup.accountKind()) !== 'bot') return deny;
+  const threadId = String(cmd?.thread_id ?? '');
+  if (!threadId) return deny;
+  if (basis === 'owner_dm') {
+    return cmd.thread_type === 'user' && (await lookup.ownerThread(threadId)) ? { ok: true } : deny;
+  }
+  if (cmd.thread_type !== 'group') return deny;
+  const inSet = basis === 'owner_tag' ? await lookup.listening(threadId) : await lookup.support(threadId);
+  return inSet ? { ok: true } : deny;
 }

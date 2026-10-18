@@ -114,3 +114,25 @@ test('decodeEntry: payload JSON, schema_version số', () => {
   const e = decodeEntry('s', '1-0', envelope('x', { k: 'v' }));
   assert.deepEqual([e.type, e.payload, e.schema_version, e.correlation_id === e.event_id], ['x', { k: 'v' }, 1, true]);
 });
+
+test('v0.1.72: khoá kênh quản trị đọc đúng tên (owner, owner_thread, pairing, support, account_kind)', async () => {
+  const redis = fakeRedis();
+  const bus = new RedisBus({ redis });
+  assert.equal(await bus.accountKind('zalo', 's1'), null);
+  redis.kv.set('gh:bridge:account_kind:zalo:s1', 'bot');
+  assert.equal(await bus.accountKind('zalo', 's1'), 'bot');
+  assert.equal(await bus.accountKind('zalo', 's2'), null);
+  redis.sets.set('gh:bridge:owner:whatsapp', new Set(['84905555555@s.whatsapp.net']));
+  assert.equal(await bus.isOwner('whatsapp', ['6666@lid', '84905555555@s.whatsapp.net']), true); // khớp theo alt
+  assert.equal(await bus.isOwner('whatsapp', ['6666@lid', undefined]), false);
+  assert.equal(await bus.isOwner('zalo', '84905555555@s.whatsapp.net'), false);
+  redis.sets.set('gh:bridge:owner_thread:zalo', new Set(['555']));
+  assert.equal(await bus.isOwnerThread('zalo', ['555']), true);
+  assert.equal(await bus.isOwnerThread('zalo', ['111']), false);
+  assert.equal(await bus.pairingOpen('zalo'), false);
+  redis.kv.set('gh:bridge:pairing:zalo', '1');
+  assert.equal(await bus.pairingOpen('zalo'), true);
+  redis.sets.set('gh:bridge:support:zalo', new Set(['G2']));
+  assert.equal(await bus.isSupportGroup('zalo', 'G2'), true);
+  assert.equal(await bus.isSupportGroup('zalo', 'G1'), false);
+});

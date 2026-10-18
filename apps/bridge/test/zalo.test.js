@@ -17,7 +17,7 @@ test('chuẩn hoá: tin văn bản trong nhóm', () => {
   assert.deepEqual({ ...p, payload: undefined }, {
     channel: 'zalo', session_id: 's1', external_msg_id: '5001', external_group_id: 'G1', group_name: 'Nhóm bán hàng',
     sender_external_id: '111', sender_name: 'Lan', occurred_at: new Date(1758600000000).toISOString(),
-    kind: 'text', body_text: 'xin chào', direction: 'inbound', mentions_self: true, payload: undefined,
+    kind: 'text', body_text: 'xin chào', direction: 'inbound', mentions_self: true, replies_to_self: false, payload: undefined,
   });
   assert.equal(p.payload.data.content, 'xin chào');
   assert.equal(p.payload.threadId, 'G1');

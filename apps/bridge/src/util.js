@@ -45,3 +45,14 @@ export class RecentIds {
 export function errorCode(err) {
   return err?.code || err?.name || 'ERROR';
 }
+
+/**
+ * Thông tin phụ adapter gắn vào tin đã chuẩn hoá cho SessionManager (thread 1-1, ID phụ của người gửi, cờ chuyển tiếp).
+ * Thuộc tính symbol KHÔNG đếm được ⇒ không bao giờ vào JSON (envelope, `first_message`), chỉ sống trong RAM.
+ */
+export const META = Symbol('gh.bridge.meta');
+
+export function withMeta(obj, meta) {
+  Object.defineProperty(obj, META, { value: meta, enumerable: false });
+  return obj;
+}
