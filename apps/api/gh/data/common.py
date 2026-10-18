@@ -163,6 +163,15 @@ async def set_channel_setting(db: AsyncSession, org_id: uuid.UUID, key: str, cha
         {"k": key, "t": channel_type, "v": json.dumps(value), "o": org_id})
 
 
+async def drop_channel_counter(db: AsyncSession, org_id: uuid.UUID, key: str, channel_type: str) -> None:
+    """Giảm `settings.<key>.<kênh>` đi 1, không xuống dưới 0 (thiếu = 0 ⇒ không đổi). Chỉ gọi với `key` là hằng."""
+    await db.execute(text("""
+        UPDATE core.organizations SET settings = jsonb_set(settings, ARRAY[CAST(:k AS text), CAST(:t AS text)],
+          to_jsonb(GREATEST((settings #>> ARRAY[CAST(:k AS text), CAST(:t AS text)])::int - 1, 0)))
+        WHERE id = :o AND jsonb_typeof(settings #> ARRAY[CAST(:k AS text), CAST(:t AS text)]) = 'number'"""),
+        {"k": key, "t": channel_type, "o": org_id})
+
+
 async def bump_channel_counter(db: AsyncSession, org_id: uuid.UUID, key: str, channel_type: str) -> None:
     """Tăng nguyên tử `settings.<key>.<kênh>` (số nguyên, thiếu = 0) thêm 1. Chỉ gọi với `key` là hằng."""
     await db.execute(text("""

@@ -33,6 +33,7 @@ from gh.data.common import (
     NEW_GROUP_MODES,
     NEW_SILENT_KEY,
     direct_mode,
+    drop_channel_counter,
     iso,
     new_group_mode,
     org_settings,
@@ -444,6 +445,9 @@ async def update_group(db: AsyncSession, redis: Any, user: service.CurrentUser, 
                                action="group.updated", target_type="group", target_id=cur.code, target_label=cur.name,
                                detail={"from": {k: getattr(cur, k) for k in changes}, "to": changes}, ip=user.ip)
         if "listen_mode" in changes:
+            if cur.listen_mode == "silent":
+                # Sếp đã xử lý một nhóm đang «Lắng nghe im lặng» ⇒ thẻ kênh bớt một nhóm «mới» (v0.1.71).
+                await drop_channel_counter(db, user.org_id, NEW_SILENT_KEY, cur.channel_type)
             await sync_listen_sets(db, redis, user.org_id)
             await publish_header(db, redis, user.org_id)
     r = (await db.execute(text(GROUP_SELECT + " WHERE g.id = :i"), {"i": gid})).one()

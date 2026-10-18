@@ -232,6 +232,33 @@ async def test_introduce_draft_names_quantity_price_and_area(world, owner_api, d
     assert "4 container" in text_body and "1.100.000.000 đồng" in text_body and "Hà Nội" in text_body, text_body
 
 
+# ─── P3-14 — «N nhóm mới đã vào Lắng nghe im lặng» giảm khi Sếp đổi chế độ nhóm ───────────────────────────────────────
+
+async def test_new_silent_counter_drops_when_boss_changes_a_group_mode(app, db, redis, owner_api) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    await put(sessionmaker(), org, msg("a", group="g1"), msg("b", group="g2"), msg("c", group="g3"))
+
+    async def count() -> int:
+        cards = (await owner_api.get("/channels")).json()
+        return int(next(c for c in cards if c["type"] == "zalo")["new_groups_silent"])
+
+    gid = {r.external_id: r.id for r in (await db.execute(text("SELECT id, external_id FROM core.groups"))).all()}
+    assert await count() == 3
+    r = await owner_api.send("PATCH", f"/groups/{gid['g1']}", {"listen_mode": "tagged_only"})
+    assert r.status_code == 200, r.text
+    assert await count() == 2                                   # Sếp đã xử lý một nhóm ⇒ không còn «mới»
+    await owner_api.send("PATCH", f"/groups/{gid['g1']}", {"listen_mode": "off"})       # nhóm không còn silent
+    assert await count() == 2
+    await owner_api.send("PATCH", f"/groups/{gid['g2']}", {"view_scope": "all_members"})   # đổi thứ khác: giữ
+    assert await count() == 2
+    await owner_api.send("PATCH", f"/groups/{gid['g2']}", {"listen_mode": "off"})
+    await owner_api.send("PATCH", f"/groups/{gid['g3']}", {"listen_mode": "off"})
+    assert await count() == 0
+    await owner_api.send("PATCH", f"/groups/{gid['g3']}", {"listen_mode": "silent"})
+    await owner_api.send("PATCH", f"/groups/{gid['g3']}", {"listen_mode": "off"})
+    assert await count() == 0                                   # không bao giờ âm
+
+
 # ─── P3-6 — «Chăm sóc khách»: tin của nhân viên không phải «tin cần trả lời» ──────────────────────────────────────────
 
 async def _care_world(db: Any) -> dict[str, Any]:
