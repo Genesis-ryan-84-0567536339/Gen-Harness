@@ -119,7 +119,8 @@ jobs:
     # vô hạn nếu test kẹt. v0.1.55 thêm ~500 ca (hồ sơ mặc định, Jev, Mặt tiền) ⇒ hai lượt NỐI TIẾP ≈ 47–50 phút, cổng
     # phát hành v0.1.55 bị huỷ ở phút 48 (run 38075952803); nâng lên 75. v0.1.57: hai lượt chạy SONG SONG trong cùng job
     # (xem bước "Test song song") ⇒ giữ nguyên tên job `api` (có thể là required check) và timeout 75 làm biên an toàn.
-    timeout-minutes: 75
+    # v0.1.66: bộ test ~3400 ca/lượt, Release v0.1.66 quá giờ bước 65' trên runner chậm (run 39072973796) ⇒ job 110', bước 100'.
+    timeout-minutes: 110
     services:
       redis:
         image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
@@ -173,8 +174,8 @@ jobs:
       # `ALTER ROLE gh_app` của migration 0014 dùng chung cả cụm. Mỗi lượt ghi log riêng; lỗi ⇒ in danh sách ca hỏng +
       # phần đuôi log của lượt đó; log đầy đủ lên artifact. Chờ CẢ HAI lượt xong (không dừng sớm) để một lần chạy lộ hết lỗi.
       - name: Test song song (superuser + role gh_app; Postgres + Redis thật)
-        # Quá 65 phút ⇒ bước tự thất bại (failure) chứ không đợi job 75' bị huỷ ⇒ bước lưu log phía dưới vẫn chạy được.
-        timeout-minutes: 65
+        # Quá 100 phút ⇒ bước tự thất bại (failure) chứ không đợi job 110' bị huỷ ⇒ bước lưu log phía dưới vẫn chạy được.
+        timeout-minutes: 100
         working-directory: apps/api
         env:
           GH_TEST_PG: postgresql://postgres:postgres@localhost:5432
