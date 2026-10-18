@@ -81,7 +81,8 @@ _MONEY = _c(
 #: chỉ chạy trên bản đã bỏ ngày tháng / «năm 2026» (số 4 chữ số thường là năm trong FAQ).
 _MONEY_NUM = _c(r"(?<![\d.,])\d{4,}(?![\d])", r"(?<![\d.,])\d{1,3}(?:[.,]\d{3})+(?![\d])")
 _DATE = re.compile(r"\b\d{1,2}\s*[/.\-]\s*\d{1,2}\s*[/.\-]\s*\d{2,4}\b|\bnam\s+\d{4}\b|\b\d{1,2}\s*[/.\-]\s*\d{4}\b")
-_CONTRACT = _c(r"\bhop dong\b", r"\bcam ket\b", r"\bbao dam\b", r"\bdam bao\b", r"\bboi thuong\b", r"\bhoan tien\b", r"\bbao hanh\b", r"\bhoan lai\b", r"\bcam doan\b",
+_CONTRACT = _c(r"\bhop dong\b", r"\bcam ket\b", r"\bbao dam\b", r"\bdam bao\b", r"\bboi thuong\b", r"\bhoan tien\b",
+               r"\bbao hanh\b", r"\bhoan lai\b", r"\bcam doan\b",
                r"\bdat coc\b", r"\bdieu khoan\b", r"\bhua\b")
 _PERSONNEL = _c(r"\bluong\b", r"\bky luat\b", r"\bsa thai\b", r"\bnghi viec\b", r"\bkpi\b", r"\bnhan su\b",
                 r"\bung vien\b", r"\bdanh gia nhan vien\b")
