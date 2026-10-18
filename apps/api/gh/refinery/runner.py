@@ -583,7 +583,7 @@ class Refinery:
                                       subject_id=person_id or group_id,
                                       evidence=[{"type": "meaning_unit", "id": str(unit_id)}] +
                                                [{"type": "raw", "id": str(e.event_id)} for e in evs],
-                                      personnel_related=kind == "hr")
+                                      personnel_related=kind == "hr", redis=self.redis)
             # Trạng thái từng tin của phần lô.
             for ref, ev in by_ref.items():
                 if ref in best:

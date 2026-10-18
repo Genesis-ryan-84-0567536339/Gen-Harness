@@ -156,6 +156,45 @@ async def test_outbound_messages_do_not_create_market_signals_or_opportunities(a
     assert sig == ["Chị Lan"] and opp == ["Chị Lan"], (sig, opp)      # chỉ khách thật, không có «Sếp»
 
 
+# ─── P3-11 — cảnh báo P1 (phàn nàn nặng) rung chuông Owner ───────────────────────────────────────────────────────────
+
+async def test_p1_complaint_alert_rings_the_owner_bell(app, db, redis, owner_api) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    await install_presets(db, org)
+    await listen(db, org, "g1")
+
+    def reply(messages: list[Message]) -> dict[str, Any]:
+        from tests.phase2 import texts_in
+
+        refs = list(texts_in(messages))
+        return {"units": [{"evidence": [refs[0]], "event_type": "Complained", "side": None,
+                           "conclusion": "Khách bực vì chưa ai trả lời", "entities": {}, "confidence": 0.95,
+                           "rules": {"R-03": 0.95}, "signals": {"churn_risk": 70}}], "noise": refs[1:]}
+
+    sm = sessionmaker()
+    await put(sm, org, msg("Không ai trả lời tôi, quá chậm, tôi chuyển sang nhà cung cấp khác 0912345678",
+                           sender="u9", name="Chị Lan"))
+    await Refinery(sm, redis, FakeRouter(reply)).run(org, "manual")  # type: ignore[arg-type]
+    alert = (await db.execute(text("SELECT priority, alert_type FROM biz.alerts"))).one()
+    assert alert.priority == "P1" and alert.alert_type == "repeated_complaint"
+    rows = (await db.execute(text("""SELECT kind, title, body, link FROM core.notifications
+                                  WHERE kind = 'alert.p1'"""))).all()
+    assert len(rows) == 1, rows
+    assert rows[0].link == "/inbox?tab=alert" and "Cảnh báo khẩn" in rows[0].title
+    assert "0912345678" not in rows[0].title + rows[0].body                # chuông không mang số của khách
+    got = (await owner_api.get("/notifications")).json()
+    assert any(n["kind"] == "alert.p1" for n in got["items"])
+
+
+async def test_p2_alert_does_not_ring_the_bell(app, db, redis, owner_api) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    from gh.providers.router import raise_alert
+
+    await raise_alert(db, org, alert_type="competitor", priority="P2", title="Đối thủ", summary="x")
+    await db.commit()
+    assert (await db.execute(text("SELECT count(*) FROM core.notifications WHERE kind = 'alert.p1'"))).scalar_one() == 0
+
+
 # ─── P3-6 — «Chăm sóc khách»: tin của nhân viên không phải «tin cần trả lời» ──────────────────────────────────────────
 
 async def _care_world(db: Any) -> dict[str, Any]:

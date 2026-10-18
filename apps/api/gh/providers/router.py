@@ -375,8 +375,13 @@ async def owner_user_id(db: AsyncSession, org_id: uuid.UUID) -> uuid.UUID | None
 async def raise_alert(db: AsyncSession, org_id: uuid.UUID, *, alert_type: str, priority: str, title: str,
                       summary: str, suggested: str | None = None, subject_type: str | None = None,
                       subject_id: Any = None, evidence: list[dict[str, Any]] | None = None,
-                      personnel_related: bool = False) -> None:
+                      personnel_related: bool = False, redis: Any = None) -> None:
+    """Ghi `biz.alerts`. Cảnh báo P1 (phàn nàn nặng, cơ hội nóng chưa ai nhận, hết chuỗi model…) còn rung CHUÔNG của mọi
+    Owner (v0.1.71): trước đây P1 chỉ nằm trong Hộp thư nên Sếp không ở màn đó sẽ không biết. Chuông chỉ mang tiêu đề
+    và việc cần làm, không mang nội dung tin của khách; `redis` có thì đẩy WebSocket ngay sau khi commit."""
     import orjson
+
+    from gh import notifications
 
     code = (await db.execute(text("SELECT core.next_code('ALR')"))).scalar_one()
     await db.execute(text("""
@@ -386,6 +391,11 @@ async def raise_alert(db: AsyncSession, org_id: uuid.UUID, *, alert_type: str, p
         {"o": org_id, "c": code, "t": alert_type, "p": priority, "u": await owner_user_id(db, org_id),
          "st": subject_type, "si": subject_id, "ti": title, "su": summary, "sa": suggested,
          "ev": orjson.dumps(evidence or []).decode(), "pr": personnel_related})
+    if priority == "P1":
+        await notifications.notify(db, org_id, await notifications.owner_ids(db, org_id), kind="alert.p1",
+                                   title=f"Cảnh báo khẩn: {title}",
+                                   body=(suggested or "Mở Hộp thư để xem và xử lý.")[:200],
+                                   link="/inbox?tab=alert", redis=redis)
 
 
 class ModelRouter:
