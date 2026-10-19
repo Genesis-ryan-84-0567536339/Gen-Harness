@@ -74,7 +74,7 @@ test.describe('v0.1.43 · DataEmptyState (F-29)', () => {
     await fakeHeader(page, 0, 0);
     await emptyLists(page);
     await page.goto('/tasks');
-    await expect(page.getByRole('heading', { name: 'Việc & Nhắc hẹn' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Việc & Nhắc hẹn', level: 2 })).toBeVisible();
     await expect(page.locator('.tk-promises')).toHaveCount(0);
   });
 
