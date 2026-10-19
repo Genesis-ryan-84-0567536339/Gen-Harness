@@ -73,6 +73,8 @@ export const ACTION_LABEL: Record<string, string> = {
   'gen.propose': 'Gen soạn một đề xuất',
   'gen.answer': 'Gen trả lời',
   'gen.proposal_confirmed': 'Xác nhận một đề xuất của Gen',
+  'gen.proposal_chat_confirmed': 'Sếp trả lời OK trong chat — xác nhận một đề xuất',
+  'gen.proposal_chat_cancelled': 'Sếp huỷ một đề xuất trong chat',
   'gen.proposal_cancelled': 'Huỷ một đề xuất của Gen',
   'gen.memory_saved': 'Ghi nhớ một điều cho Gen',
   'gen.memory_updated': 'Sửa một điều Gen nhớ',
@@ -87,6 +89,7 @@ export const ACTION_LABEL: Record<string, string> = {
   // Agent
   'agent.created': 'Tạo agent',
   'agent.cloned': 'Nhân bản agent',
+  'agent.diplomat_set': 'Đổi agent ngoại giao',
   'agent.updated': 'Sửa agent',
   'agent.enabled': 'Bật agent',
   'agent.disabled': 'Tắt agent',

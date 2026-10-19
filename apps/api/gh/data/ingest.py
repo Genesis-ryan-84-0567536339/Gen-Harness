@@ -562,6 +562,23 @@ async def _reset_new_group_mode_if_account_changed(db: AsyncSession, redis: Redi
             link="/connections", redis=redis)
 
 
+async def _on_send_result(db: AsyncSession, redis: Redis, org_id: uuid.UUID, p: dict[str, Any]) -> None:
+    if p.get("auto_send_id"):
+        # v0.1.72: kết quả của tin TỰ GỬI (cửa `send_auto`) — cập nhật sổ `ops.auto_sends`, không phải bản nháp.
+        from gh.owner_channel import autosend
+
+        await autosend.on_send_result(db, org_id, p)
+        return
+    await actionlog.record(db, org_id=org_id, actor_type="system", actor_id=f"bridge:{p.get('channel') or 'bridge'}",
+                           action="message.sent" if p.get("ok") else "message.send_failed",
+                           target_type="draft", target_id=str(p.get("draft_id") or ""),
+                           result="ok" if p.get("ok") else "failed",
+                           detail={"error": p.get("error"), "external_msg_id": p.get("external_msg_id")})
+    from gh.biz.core import drafts  # bản nháp của Bàn làm việc: sent / failed
+
+    await drafts.on_send_result(db, org_id, p, redis)
+
+
 async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: uuid.UUID, type: str,
                         p: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
     """Xử lý một sự kiện gh.bridge.status. Trả các sự kiện WebSocket cần phát sau commit."""
@@ -585,6 +602,11 @@ async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: u
             {"o": org_id})).all()
         for r in rows:
             await publish_resume(bus, org_id, r.type, r.id, r.credential_enc)
+        return out
+    if type == "send.result":
+        # v0.1.73: kết quả gửi KHÔNG mang `session_id` (giao thức bridge) ⇒ xử lý
+        # TRƯỚC bước tra phiên; trước đây thoát sớm ở đó nên `ops.auto_sends` kẹt «issued» và bản nháp kẹt «approved».
+        await _on_send_result(db, redis, org_id, p)
         return out
     s = await _session(db, p.get("session_id"))
     if s is None or s.org_id != org_id:
@@ -717,20 +739,6 @@ async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: u
         key = f"gh:uptime:{s.type}:{now:%Y%m%d}"
         await redis.setbit(key, now.hour * 60 + now.minute, 1)
         await redis.expire(key, 3 * 86400)
-    elif type == "send.result" and p.get("auto_send_id"):
-        # v0.1.72: kết quả của tin TỰ GỬI (cửa `send_auto`) — cập nhật sổ `ops.auto_sends`, không phải bản nháp.
-        from gh.owner_channel import autosend
-
-        await autosend.on_send_result(db, org_id, p)
-    elif type == "send.result":
-        await actionlog.record(db, org_id=org_id, actor_type="system", actor_id=f"bridge:{s.type}",
-                               action="message.sent" if p.get("ok") else "message.send_failed",
-                               target_type="draft", target_id=str(p.get("draft_id") or ""),
-                               result="ok" if p.get("ok") else "failed",
-                               detail={"error": p.get("error"), "external_msg_id": p.get("external_msg_id")})
-        from gh.biz.core import drafts  # bản nháp của Bàn làm việc: sent / failed
-
-        await drafts.on_send_result(db, org_id, p, redis)
     return out
 
 

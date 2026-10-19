@@ -627,6 +627,19 @@ export class WhatsAppAdapter extends EventEmitter {
       // Lõi ghi tập Owner ở dạng chuẩn hoá (bỏ hậu tố thiết bị) ⇒ so thêm dạng đó.
       sender_ids: fromMe ? [] : [sender, senderAlt].map(bareJid).filter(Boolean),
       forwarded,
+      read_ref: isGroup || fromMe ? null : { remoteJid: remote, id: String(key.id || ''), fromMe: false },
     });
+  }
+
+  /** v0.1.73: đánh dấu «đã xem» tin 1-1 (CHỈ kênh quản trị với Sếp — SessionManager quyết định gọi). */
+  async markSeen(ref) {
+    if (this.state !== 'active' || !this.sock || !ref) return;
+    await this.sock.readMessages([ref]);
+  }
+
+  /** v0.1.73: «đang nhập…» (composing) / tắt (paused) trong thread 1-1. */
+  async setTyping(threadId, on) {
+    if (this.state !== 'active' || !this.sock) return;
+    await this.sock.sendPresenceUpdate(on ? 'composing' : 'paused', String(threadId));
   }
 }

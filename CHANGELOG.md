@@ -7,6 +7,11 @@ Ngày = ngày Release trên GitHub theo giờ Việt Nam; tiêu đề trong `doc
 (v0.1.32–v0.1.34, v0.1.40, v0.1.46) hoặc vài ngày (v0.1.47, v0.1.48: làm 03/10, phát hành 09/10).
 Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) ghi ở [ROADMAP › Bản phản ứng](docs/ROADMAP.md).
 
+## v0.1.73 — Xác nhận ngay trong chat, bot xưng bằng Agent ngoại giao, «đã xem / đang nhập», sửa sổ tin tự gửi (19/10/2026)
+- **Bản tính năng trên v0.1.72, không migration.** Kênh quản trị Zalo/WhatsApp: Gen soạn đề xuất thì bot hỏi «Trả lời OK để em làm (mã #X), hoặc HUỶ» — Sếp nhắn OK là làm đúng đường Xác nhận của Console, không cần mở máy tính hay nhập PIN (luật cứng Sếp duyệt 19/10); tin gửi người ngoài vẫn OK riêng từng tin kèm mã, nêu người nhận + nguyên văn. Telegram giữ nguyên.
+- **Phân vai nội bộ / ngoại giao**: Gen chỉ nói trong Console; mọi kênh ngoài (Zalo/WhatsApp quản trị, Telegram, nhóm, Chế độ hỗ trợ) nói bằng «Agent ngoại giao» Sếp chọn ở màn Agent (tên + giọng; luật an toàn và bộ lọc không đổi). Chưa chọn ⇒ bot xưng «trợ lý».
+- Bridge: «đã xem» + «đang nhập…» CHỈ trong kênh quản trị 1-1 (nhóm im lặng tuyệt đối). Sửa lỗi sổ `ops.auto_sends` kẹt «issued» (và nháp kẹt «approved»): kết quả gửi của bridge không mang `session_id` nên bị bỏ. Chi tiết: [docs/releases/v0.1.73.md](docs/releases/v0.1.73.md).
+
 ## v0.1.72 — Bot quản trị 1-1: tài khoản riêng của bot, kênh quản trị, Sếp gọi bot ở nhóm, Chế độ hỗ trợ (18/10/2026)
 - **Bản tính năng trên v0.1.71, migration `0042`.** Ngoại lệ hẹp của luật cứng (Sếp duyệt 18/10): khi kênh Zalo/WhatsApp chạy bằng **tài khoản riêng của bot**, bot được tự gửi, không qua PIN, trong ĐÚNG ba trường hợp qua một cửa `send_auto`: trả lời/báo Sếp ở kênh quản trị 1-1 (ghép bằng mã 6 số), trả lời tại chỗ khi chính Sếp tag bot ở nhóm, trả lời thành viên nhóm đã bật Chế độ hỗ trợ (sau bộ lọc an toàn, model chạy trong hộp agy).
 - Bot chỉ nhắn Sếp khi có sự kiện đặc biệt (không báo cáo định kỳ). Có sổ `ops.auto_sends` (không lưu nội dung tin), thẻ «Kênh quản trị», công tắc hỗ trợ + cột «Ai thêm bot» trên Console; test AST chứng minh không có đường gửi thứ tư.

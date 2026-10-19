@@ -37,6 +37,7 @@ from gh.data.common import iso
 from gh.db import DB
 from gh.defaults import profiles
 from gh.errors import field_errors, not_found, pin_required
+from gh.gen import diplomat
 from gh.gen.coach import cache as coach_cache
 from gh.providers import agy_policy, catalog
 
@@ -475,6 +476,33 @@ async def _full(db: AsyncSession, org_id: uuid.UUID, agent_id: uuid.UUID) -> dic
     out["binding"] = await _binding_of(db, org_id, agent_id)
     await _attach_model_and_spoke(db, org_id, [out])
     return out
+
+
+class DiplomatIn(BaseModel):
+    agent_id: uuid.UUID | None = None
+
+
+@router.get("/diplomat")
+async def get_diplomat(user: service.CurrentUser = Depends(READ), db: AsyncSession = DB) -> dict[str, Any]:
+    """v0.1.73 — «Agent ngoại giao»: agent nói thay Gen ở MỌI kênh ngoài Console (kênh quản trị Zalo/WhatsApp,
+    Telegram, trả lời trong nhóm, Chế độ hỗ trợ). Chưa chọn ⇒ `agent_id` null và bot xưng «trợ lý»."""
+    p = await diplomat.load(db, user.org_id)
+    return {**diplomat.public(p), "neutral_name": diplomat.NEUTRAL}
+
+
+@router.put("/diplomat")
+async def put_diplomat(body: DiplomatIn, user: service.CurrentUser = Depends(MANAGE),
+                       _pin: Any = Depends(require_pin("agent.manage")), db: AsyncSession = DB) -> dict[str, Any]:
+    """Đặt / bỏ agent ngoại giao (Owner + mã PIN như đổi cấu hình agent). Chỉ nhận agent đang bật, chưa lưu trữ."""
+    if body.agent_id is not None and not await diplomat.valid_agent(db, user.org_id, body.agent_id):
+        raise field_errors({"agent_id": "Agent không tồn tại, đã tắt hoặc đã lưu trữ"})
+    await diplomat.save(db, user.org_id, body.agent_id)
+    p = await diplomat.load(db, user.org_id)
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action="agent.diplomat_set",
+                           target_type="agent", target_id=str(body.agent_id) if body.agent_id else None,
+                           target_label=p.name if p.configured else None, ip=user.ip)
+    return {**diplomat.public(p), "neutral_name": diplomat.NEUTRAL}
 
 
 @router.get("")

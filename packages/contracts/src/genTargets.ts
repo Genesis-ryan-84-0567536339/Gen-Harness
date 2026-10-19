@@ -163,6 +163,7 @@ export const GEN_TARGETS: GenTarget[] = [
   { id: 'agents.add', screen: 'agents', label: 'Nút "Tạo agent mới"', description: 'Tạo danh tính agent mới' },
   { id: 'agents.clone', screen: 'agents', label: 'Nút "Nhân bản"', description: 'Nhân bản một agent có sẵn' },
   { id: 'agents.list', screen: 'agents', label: 'Danh sách agent', description: 'Các agent đang có, mức tự trị, kênh' },
+  { id: 'agents.diplomat', screen: 'agents', label: 'Ô "Agent ngoại giao"', description: 'Chọn agent nói thay Gen ở mọi kênh ngoài Console' },
   { id: 'agents.decisions', screen: 'agents', label: 'Agent đã nói gì', description: 'Nhật ký quyết định của agent' },
   { id: 'agents.templates', screen: 'agents', label: 'Mẫu có sẵn', description: 'Mẫu agent tạo nhanh' },
 ];

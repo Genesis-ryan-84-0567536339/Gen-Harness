@@ -101,6 +101,13 @@ export interface AgentCloneBody {
   copy_channel_scopes?: boolean;
 }
 
+/** v0.1.73: «Agent ngoại giao» — agent nói thay Gen ở mọi kênh ngoài Console. `agent_id` null = chưa chọn (bot xưng «trợ lý»). */
+export interface DiplomatAgent {
+  agent_id: string | null;
+  name: string | null;
+  neutral_name: string;
+}
+
 const enc = encodeURIComponent;
 
 /** `GET/POST /agents`, `/agents/{id}`, `/{id}/clone`, `/{id}/disable`, `/{id}/archive`, `/agents/templates`. */
@@ -117,6 +124,9 @@ export function agentsEndpoints(r: ApiClient['request']) {
         r<AgentIdentity>(`/agents/${enc(id)}/disable`, { method: 'PATCH', body: { enabled } }),
       /** v0.1.67 (F085): Lưu trữ — tắt hẳn + ẩn khỏi danh sách, giữ lịch sử quyết định. Cần PIN `agent.manage`. */
       archive: (id: string) => r<AgentIdentity>(`/agents/${enc(id)}/archive`, { method: 'POST', body: {} }),
+      /** v0.1.73: Agent ngoại giao của tổ chức (đổi cần Owner + mã PIN). */
+      diplomat: (signal?: AbortSignal) => r<DiplomatAgent>('/agents/diplomat', { signal }),
+      setDiplomat: (agentId: string | null) => r<DiplomatAgent>('/agents/diplomat', { method: 'PUT', body: { agent_id: agentId } }),
     },
   };
 }

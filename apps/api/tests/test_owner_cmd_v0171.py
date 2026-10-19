@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 """v0.1.71 (G5 `loi-lenh`) — lõi lệnh dùng chung `gh.owner_cmd` (Telegram + kênh quản trị Zalo/WhatsApp).
 
 Lõi chỉ ĐỌC hoặc ĐỀ XUẤT và chỉ TRẢ chữ: không có đường gửi tin, ghi Kho, kiểm PIN. Test này kiểm lõi gọi trực tiếp với
@@ -188,7 +189,7 @@ def test_purpose_and_action_names() -> None:
 async def test_help_has_no_links_and_never_asks_pin(owner_api: Api, redis: Any, via: str, kind: str) -> None:
     ctx = await ctx_for(owner_api, redis)
     reply = await core.handle(ocmd(kind, via=via), ctx)
-    assert reply == Reply(core.HELP) and reply.links == []
+    assert reply == Reply(core.HELP_CHAT) and reply.links == []   # v0.1.73: Zalo/WhatsApp xác nhận ngay trong chat
     for c in ("/hom_nay", "/viec", "/suc_khoe", "/nhap"):
         assert c in reply.text
     assert "không bao giờ gõ ở đây" in reply.text
@@ -273,7 +274,7 @@ async def test_overrides_replace_only_the_named_read_command(owner_api: Api, red
         return Reply("của kênh gọi")
 
     assert await core.handle(ocmd("viec"), ctx, overrides={"viec": mine}) == Reply("của kênh gọi")
-    assert (await core.handle(ocmd("start"), ctx, overrides={"viec": mine})).text == core.HELP
+    assert (await core.handle(ocmd("start"), ctx, overrides={"viec": mine})).text == core.HELP_CHAT
 
     async def boom(c: Context) -> Reply:
         raise RuntimeError("hỏng")
@@ -336,34 +337,25 @@ async def test_free_question_model_unavailable_and_gen_off_are_friendly(owner_ap
 
 
 @pytest.mark.parametrize("via,label", [("zalo", "Zalo"), ("whatsapp", "WhatsApp")])
-async def test_nhap_only_proposes_with_a_console_link_and_no_send_path(
+async def test_nhap_only_proposes_and_asks_in_chat_with_no_send_path(
     owner_api: Api, redis: Any, via: str, label: str
 ) -> None:
+    """v0.1.73: Zalo/WhatsApp hỏi «Trả lời OK để em làm (mã #X), hoặc HUỶ» ngay trong chat (không bảo mở Console); lõi vẫn
+    chỉ đề xuất — chưa việc / nháp / tin / ghi Kho nào cho tới khi Sếp trả lời OK (`gh.owner_channel.chat_confirm`)."""
     router = Router(_reminder())
     ctx = await ctx_for(owner_api, redis, router)
     before = await counts()
     reply = await core.handle(ocmd("nhap", "nhắc tôi gọi anh Nam sau 1 tiếng", via=via, ref="wamid.ABC"), ctx)
-    assert reply.text.startswith("Đã soạn đề xuất #") and "Gọi anh Nam" in reply.text and "CHƯA làm gì" in reply.text
-    assert "nhập mã PIN nếu được hỏi" in reply.text
-    assert len(reply.links) == 1 and reply.links[0][0] == core.CONSOLE_BUTTON
-    assert reply.links[0][1].startswith(f"{otext.public_url()}/overview?gen=")
-    assert reply.plain().endswith(f"{core.CONSOLE_BUTTON}: {reply.links[0][1]}")  # kênh không nút: link ở cuối tin
+    assert reply.text.startswith("Đề xuất #") and "Gọi anh Nam" in reply.text
+    assert "Trả lời OK để em làm (mã #" in reply.text and "hoặc HUỶ." in reply.text
+    assert "Mở Console" not in reply.plain() and "CHƯA làm gì" not in reply.text and reply.links == []
     [call] = router.calls
     assert call["purpose"] == f"gen.{via}" and call["json_mode"] is True
     system = call["messages"][0].content
     assert f"KÊNH {label.upper()} (/nhap): Sếp đang nhắn qua {label}" in system and "KÊNH TELEGRAM" not in system
-    cid = uuid.UUID(reply.links[0][1].rsplit("=", 1)[1])
     async with admin_sessionmaker()() as s:
-        title = (
-            await s.execute(text("SELECT title FROM agent.gen_conversations WHERE id = :c"), {"c": cid})
-        ).scalar_one()
-        first = (
-            await s.execute(
-                text("""SELECT content FROM agent.gen_messages WHERE conversation_id = :c AND role = 'user'"""),
-                {"c": cid},
-            )
-        ).scalar_one()
-    assert title.startswith(f"{label} · ") and first["via"] == via
+        title = (await s.execute(text("SELECT title FROM agent.gen_conversations ORDER BY created_at DESC LIMIT 1"))).scalar_one()
+    assert title.startswith(f"{label} · ")
     assert await counts() == before  # đề xuất chỉ nằm trong Redis: không việc, không nháp, không tự gửi, không ghi Kho
 
 

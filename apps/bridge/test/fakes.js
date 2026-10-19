@@ -80,10 +80,22 @@ class FakeListener extends EventEmitter {
   stop() { this.stopped += 1; }
 }
 
-export function makeZaloApi({ ownId = '900', groups } = {}) {
+export function makeZaloApi({ ownId = '900', groups, failSeen = false, failTyping = false } = {}) {
   const sent = [];
   const api = {
     sent,
+    seen: [], // sendSeenEvent(messages, type) — v0.1.73
+    typing: [], // sendTypingEvent(threadId, type)
+    sendSeenEvent: async (messages, type) => {
+      api.seen.push({ messages, type });
+      if (failSeen) throw new Error('seen down');
+      return { status: 0 };
+    },
+    sendTypingEvent: async (threadId, type) => {
+      api.typing.push({ threadId, type });
+      if (failTyping) throw new Error('typing down');
+      return { status: 0 };
+    },
     listener: new FakeListener(),
     getOwnId: () => ownId,
     fetchAccountInfo: async () => ({ profile: { displayName: 'Cửa hàng A', zaloName: 'cuahanga', phoneNumber: '84900000000' } }),
@@ -202,6 +214,10 @@ export function makeBaileysLib() {
       ws: new EventEmitter(), // websocket thô của Baileys (CB:notification,…)
       user: undefined,
       sent: [],
+      reads: [], // readMessages(keys) — v0.1.73
+      presence: [], // sendPresenceUpdate(type, jid)
+      readMessages: async (keys) => { sock.reads.push(keys); if (sock.failRead) throw new Error('read down'); },
+      sendPresenceUpdate: async (type, jid) => { sock.presence.push({ type, jid }); if (sock.failPresence) throw new Error('presence down'); },
       ended: 0,
       loggedOut: 0,
       sendMessage: async (jid, content) => {

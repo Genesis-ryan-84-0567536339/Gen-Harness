@@ -192,6 +192,10 @@ export function createMock(opts: P4Options) {
     const { method: m, path: p, url, body, reply, problem } = ctx;
     const seg = p.split('/').filter(Boolean);
 
+    if (p === '/agents/diplomat' && m === 'GET') {
+      if (!has(ctx, 'system.read')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
+      return reply(200, { agent_id: null, name: null, neutral_name: 'trợ lý' });
+    }
     if (p === '/agents/decisions' && m === 'GET') {
       if (!has(ctx, 'system.read') && !has(ctx, 'action.approve')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
       const agentId = url.searchParams.get('agent_id');
