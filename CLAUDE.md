@@ -30,7 +30,7 @@ Tiến độ và việc dở ghi ở `docs/ROADMAP.md` và `docs/reports/HANDOFF
 - Ghi mỗi bản: `CHANGELOG.md` (3–5 dòng, mới nhất trên cùng) + `docs/releases/vX.Y.Z.md` (chi tiết, có mục "Boss phải làm").
   `docs/reports/HANDOFF-v0.1.1.md` CHỈ giữ hiện trạng + việc dở, ≤ 200 dòng. Tiến độ + mục Nợ: `docs/ROADMAP.md`.
   Trước khi commit tài liệu: `python3 .github/scripts/check_doc_links.py` (link chết) và `python3 -m unittest discover -s .github/scripts`.
-- Sửa CLAUDE.md cần Boss duyệt (bản 09/10/2026 đã duyệt — QD-18; bổ sung 16/10/2026 theo chỉ đạo Sếp: tạm ngưng Gen-hub/Brain, dùng kỹ năng chính hãng; bổ sung 18/10/2026 Sếp duyệt: ngoại lệ bot tự gửi ba trường hợp ở Luật cứng).
+- Sửa CLAUDE.md cần Boss duyệt (bản 09/10/2026 đã duyệt — QD-18; bổ sung 16/10/2026 theo chỉ đạo Sếp: tạm ngưng Gen-hub/Brain, dùng kỹ năng chính hãng; bổ sung 18/10/2026 Sếp duyệt: ngoại lệ bot tự gửi ba trường hợp ở Luật cứng; bổ sung 19/10/2026 Sếp duyệt: xác nhận trong chat kênh quản trị).
 
 ## Luật cứng
 - Gen chỉ ĐỀ XUẤT. Không ghi Kho/Gen-hub khi chưa có Xác nhận + mã PIN của Sếp (QD-18: chỉ Kho — Phiên, Việc; kanban, warroom,
@@ -42,6 +42,9 @@ Tiến độ và việc dở ghi ở `docs/ROADMAP.md` và `docs/reports/HANDOFF
   (3) trả lời thành viên trong nhóm Sếp đã bật Chế độ hỗ trợ, sau bộ lọc an toàn (không giá/tiền/hợp đồng, không thông tin người khác,
   không nhân sự, có giới hạn tin/giờ, câu khó chuyển Sếp), model chạy trong hộp riêng agy. Cả ba đi qua một cửa `send_auto`,
   ghi `ops.auto_sends` và Nhật ký; thêm đường gửi thứ tư phải được Sếp duyệt và có test chứng minh.
+- Xác nhận trong chat (Sếp duyệt 19/10/2026, v0.1.73): trong kênh quản trị 1-1 đã ghép bằng mã (nhận diện Sếp theo ID tài khoản),
+  Sếp trả lời «OK» cho một đề xuất cụ thể = Xác nhận thay cho Console + PIN với việc nội bộ (ghi nhớ, việc, nhắc hẹn, ghi Kho).
+  Gửi tin cho khách/người ngoài vẫn phải «OK» riêng từng tin, nêu rõ người nhận và nội dung. Mỗi xác nhận ghi Nhật ký; đề xuất có hạn.
 - Token/khoá/bí mật không vào log, Action Log, kết quả, thân lỗi hay repo. Không tạo tài khoản giả, không né chống bot.
 - Không skip/quarantine test để xanh. Mọi thay đổi hành vi có test; migration chạy lại an toàn.
 - Lỗi hiển thị cho người dùng = chuỗi thân thiện + "Chi tiết kỹ thuật"; không bao giờ render object vào JSX.
