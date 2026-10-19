@@ -27,6 +27,8 @@ import {
   useArchiveAgent,
   useCloneAgent,
   useCreateAgent,
+  useDiplomat,
+  useSetDiplomat,
   useSetAgentEnabled,
   useUpdateAgent,
 } from './queries';
@@ -81,6 +83,8 @@ export function AgentsScreen() {
           ))
         )}
       </div>
+
+      <DiplomatPanel agents={agents.data ?? []} canManage={canManage} />
 
       <div className="ag-panels">
         <DecisionsPanel />
@@ -458,5 +462,49 @@ function ArchiveAgentDialog({ agent, onClose }: { agent: AgentIdentity; onClose:
         {archive.isError ? <InlineError>{errorText(archive.error)}</InlineError> : null}
       </div>
     </Dialog>
+  );
+}
+
+const DIPLOMAT_PIN_TEXT = 'Đổi Agent ngoại giao cần mã PIN';
+const DIPLOMAT_NONE = '';
+
+/** v0.1.73: Gen chỉ nói trong Console; mọi kênh ngoài (Zalo/WhatsApp quản trị, Telegram, nhóm, Chế độ hỗ trợ) nói bằng agent này. */
+export function DiplomatPanel({ agents, canManage }: { agents: AgentIdentity[]; canManage: boolean }) {
+  const cur = useDiplomat();
+  const save = useSetDiplomat();
+  const [pick, setPick] = useState<string | null>(null);
+  const value = pick ?? cur.data?.agent_id ?? DIPLOMAT_NONE;
+  const options = [
+    { value: DIPLOMAT_NONE, label: 'Chưa chọn — bot xưng “trợ lý”' },
+    ...agents.filter((a) => a.is_enabled).map((a) => ({ value: a.id, label: a.name })),
+  ];
+  const dirty = value !== (cur.data?.agent_id ?? DIPLOMAT_NONE);
+  return (
+    <div style={{ marginTop: 14 }}>
+      <Panel genTarget="agents.diplomat" title="Agent ngoại giao" kicker="Gen chỉ trả lời trong Console. Zalo/WhatsApp quản trị, Telegram, trả lời trong nhóm và Chế độ hỗ trợ nói bằng agent này (tên, giọng, vai); luật an toàn và bộ lọc không đổi.">
+        {cur.isError ? (
+          <CardError error={cur.error} onRetry={() => void cur.refetch()} retrying={cur.isFetching} />
+        ) : (
+          <div className="dlg-fields">
+            <SelectField
+              label="Agent ngoại giao"
+              value={value}
+              options={options}
+              disabled={!canManage || cur.isPending}
+              onChange={(e) => setPick(e.target.value)}
+            />
+            {canManage ? (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <Button variant="primary" className="btn-30" disabled={!dirty} loading={save.isPending} onClick={() => save.mutate(value || null, { onSuccess: () => setPick(null) })}>
+                  Lưu
+                </Button>
+                <PinHint text={DIPLOMAT_PIN_TEXT} title={DIPLOMAT_PIN_TEXT} />
+              </div>
+            ) : null}
+            {save.isError ? <InlineError>{errorText(save.error)}</InlineError> : null}
+          </div>
+        )}
+      </Panel>
+    </div>
   );
 }

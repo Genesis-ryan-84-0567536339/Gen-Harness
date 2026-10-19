@@ -6,6 +6,7 @@ import { qk } from '../../lib/queries';
 export const qkAgents = {
   list: ['agents', 'list'] as const,
   templates: ['agents', 'templates'] as const,
+  diplomat: ['agents', 'diplomat'] as const,
   decisions: (agentId?: string, decision?: string) => ['agents', 'decisions', agentId ?? '', decision ?? ''] as const,
 };
 
@@ -19,6 +20,18 @@ export const useAgentDecisions = (agentId?: string, decision?: string, limit = 8
     queryKey: [...qkAgents.decisions(agentId, decision), limit],
     queryFn: ({ signal }) => api.agentDecisions({ agent_id: agentId, decision, limit }, signal),
   });
+
+export const useDiplomat = () =>
+  useQuery({ queryKey: qkAgents.diplomat, queryFn: ({ signal }) => api.agents.diplomat(signal) });
+
+/** v0.1.73: chọn / bỏ Agent ngoại giao (PIN `agent.manage`: hộp PIN tự mở khi máy chủ trả 423). */
+export const useSetDiplomat = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (agentId: string | null) => api.agents.setDiplomat(agentId),
+    onSuccess: (data) => qc.setQueryData(qkAgents.diplomat, data),
+  });
+};
 
 function invalidateAgents(qc: ReturnType<typeof useQueryClient>) {
   void qc.invalidateQueries({ queryKey: qkAgents.list });
