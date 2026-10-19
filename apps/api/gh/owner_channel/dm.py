@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 """Tin 1-1 của Sếp tới bot (kênh quản trị). Lõi lệnh dùng chung với Telegram (`gh.owner_cmd`: chỉ đọc + ĐỀ
 XUẤT), thêm lệnh
 nhóm (`group_cmds`: đổi cấu hình). Lời đáp đi qua cửa `send_auto(owner_dm)` — mọi kiểm tra Owner làm LẠI ở đó."""
@@ -13,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from gh.chassis.bus import EventBus
 from gh.gen import chat_pending
-from gh.owner_channel import chat_confirm, group_cmds
+from gh.owner_channel import chat_confirm, gen_chat, group_cmds
 from gh.owner_channel.autosend import send_auto
 from gh.owner_channel.basis import Basis, Trigger
 from gh.owner_channel.identity import owner_ids
@@ -46,7 +47,9 @@ async def build_reply(sm: async_sessionmaker[AsyncSession], redis: Redis, router
         return out
     cmd = owner_core.OwnerCommand(via=oi.channel, kind=kind, text=args, message_ref=str(p.get("external_msg_id") or ""),
                                   received_at=datetime.now(UTC))
-    ctx = owner_core.Context(sm=sm, redis=redis, router=router, org_id=org_id, owner_user_id=oi.owner_user_id)
+    # v0.1.74: câu hỏi tự do ở kênh quản trị chạy bằng động cơ Gen đầy đủ (công cụ đọc + trí nhớ hội thoại + đề xuất vào sổ chờ OK)
+    ctx = owner_core.Context(sm=sm, redis=redis, router=router, org_id=org_id, owner_user_id=oi.owner_user_id, app=app,
+                             hoi_fn=gen_chat.hoi)
     reply = await owner_core.handle(cmd, ctx)
     text_ = reply.plain()
     if kind in ("start", "tro_giup", "help"):

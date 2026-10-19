@@ -4,6 +4,8 @@ Model trả MỘT khối JSON `{"steps": [GenStep, …]}`. Sai schema (`extra="f
 "Gen chưa hiểu" và không thực thi gì.
 """
 
+import json
+import re
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
@@ -20,13 +22,16 @@ DATA_TOOL_NAMES = ("overview.summary", "queue.list", "draft.list", "draft.get", 
                    "document.list", "document.get", "deal.list", "deal.get", "case.list", "case.get", "hub.calendar",
                    "hub.tasks", "hub.mail_search", "hub.mail_read", "hub.drive_search",
                    # v0.1.54 (g1-api): Gen hướng dẫn — việc vận hành Sếp cần làm, tiến độ x/N, bài học (chỉ Owner)
-                   "coach.status")
+                   "coach.status",
+                   # v0.1.74: danh bạ nhóm / người + tin nhóm gần đây (chỉ đọc, theo «Quyền xem»)
+                   "group.list", "group.recent", "person.list")
 DataToolName = Literal["overview.summary", "queue.list", "draft.list", "draft.get", "profile.search", "profile.get",
                        "opportunity.list", "people.care", "audit.list", "system.health", "guide.list", "screens.list",
                        "task.list", "staff.list", "refinery.summary", "hub.kho_summary", "hub.kho_search",
                        "hub.kho_get", "social.accounts", "social.read", "document.list", "document.get", "deal.list",
                        "deal.get", "case.list", "case.get", "hub.calendar", "hub.tasks", "hub.mail_search",
-                       "hub.mail_read", "hub.drive_search", "coach.status"]
+                       "hub.mail_read", "hub.drive_search", "coach.status", "group.list", "group.recent",
+                       "person.list"]
 
 
 class _M(BaseModel):
@@ -223,12 +228,52 @@ def _strip_fence(text: str) -> str:
     return t.strip()
 
 
+_FENCE = re.compile(r"```(?:json)?\s*\n(.*?)\n?```", re.S)
+EMBED_SCAN_MAX = 20000
+EMBED_MIN_SHARE = 0.5
+
+
+def _embedded_json(text: str) -> Any:
+    """JSON envelope lẫn trong văn bản (Antigravity CLI hay kèm lời dẫn). Chỉ nhận khi (a) nằm trong một khối ```…```,
+    hoặc (b) là PHẦN CHÍNH của văn bản (≥ 50% độ dài) — review bảo mật v0.1.74 P3-1: không nhặt một payload
+    `{"steps": …}` model chép lại từ tin nhóm nằm giữa đoạn văn xuôi. Không có ⇒ None."""
+    for m in _FENCE.finditer(text[:EMBED_SCAN_MAX]):
+        try:
+            obj = json.loads(m.group(1))
+        except ValueError:
+            continue
+        if _is_env(obj):
+            return obj
+    body = text.strip()[:EMBED_SCAN_MAX]
+    dec = json.JSONDecoder()
+    for i, ch in enumerate(body):
+        if ch not in "{[":
+            continue
+        try:
+            obj, end = dec.raw_decode(body, i)
+        except ValueError:
+            continue
+        if _is_env(obj) and (end - i) >= EMBED_MIN_SHARE * len(body):
+            return obj
+        if i > (1 - EMBED_MIN_SHARE) * len(body):
+            break                      # khối bắt đầu muộn hơn thế thì không thể chiếm ≥ 50% — dừng sớm (tránh O(n²))
+    return None
+
+
+def _is_env(obj: Any) -> bool:
+    if isinstance(obj, dict):
+        return "steps" in obj or "kind" in obj
+    return isinstance(obj, list) and bool(obj) and all(isinstance(x, dict) and "kind" in x for x in obj)
+
+
 def parse(text: str) -> Envelope:
     """Đọc envelope; chấp nhận `{"steps": […]}`, một bước lẻ `{"kind": …}` hoặc mảng bước."""
     try:
         data = orjson.loads(_strip_fence(text))
     except orjson.JSONDecodeError as e:
-        raise EnvelopeError(f"không phải JSON: {e}") from e
+        data = _embedded_json(text)      # v0.1.74: JSON nằm lẫn trong văn xuôi (Antigravity CLI hay kèm lời dẫn)
+        if data is None:
+            raise EnvelopeError(f"không phải JSON: {e}") from e
     if isinstance(data, list):
         data = {"steps": data}
     elif isinstance(data, dict) and "kind" in data:

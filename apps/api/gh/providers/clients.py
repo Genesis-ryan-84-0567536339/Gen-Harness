@@ -699,6 +699,12 @@ def cli_env(cli_home: str, home: str | Path | None = None) -> dict[str, str]:
 AGY_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$")
 
 
+AGY_TEXT_ONLY = ("[hệ thống CLI] Chỉ trả lời bằng CHỮ trong một lượt. KHÔNG dùng công cụ, KHÔNG đọc/ghi tệp, "
+                 "KHÔNG chạy lệnh, KHÔNG duyệt web — mọi dữ liệu cần thiết đã có trong lời nhắc dưới đây.")
+AGY_TEXT_ONLY_RETRY = ("[hệ thống CLI] Lượt trước em không trả lời gì. Hãy trả lời NGAY bằng chữ, "
+                       "không dùng công cụ nào.")
+
+
 class AgyClient:
     """Gọi Antigravity CLI (`agy`, chế độ in/headless chính thức) với tệp phiên của hồ sơ đang hoạt động.
 
@@ -870,17 +876,26 @@ class AgyClient:
             raise AuthFailed("CLI chưa đăng nhập")
         margs = self.model_args(model, effort)    # BadRequest trước khi khởi chạy tiến trình
         started = time.monotonic()
-        try:
-            # F-22: prompt CHỈ qua stdin (stdin là ống, không -p → print mode của agy 1.2.9).
-            code, out, err = await self._run("--output-format", "json", "--disable-slash-commands", *margs,
-                                             stdin=prompt.encode())
-        except TimeoutError as e:
-            raise ProviderError(f"CLI quá {self.timeout:.0f}s") from e
-        text = out.decode(errors="replace").strip()
-        try:
-            env = orjson.loads(text)
-        except orjson.JSONDecodeError:
-            env = None
+        for attempt in range(2):
+            try:
+                # F-22: prompt CHỈ qua stdin (stdin là ống, không -p → print mode của agy 1.2.9).
+                code, out, err = await self._run("--output-format", "json", "--disable-slash-commands", *margs,
+                                                 stdin=prompt.encode())
+            except TimeoutError as e:
+                raise ProviderError(f"CLI quá {self.timeout:.0f}s") from e
+            text = out.decode(errors="replace").strip()
+            try:
+                env = orjson.loads(text)
+            except orjson.JSONDecodeError:
+                env = None
+            # v0.1.74 (bản thật 19/10): agy là CLI tác tử — đôi khi tự gọi công cụ, bị chặn (`denied_actions`) rồi
+            # kết thúc với `response` RỖNG dù thoát 0 (~1/4 lượt có dữ liệu dài) ⇒ hỏi lại MỘT lần, dặn chỉ trả lời bằng
+            # chữ; vẫn rỗng thì router xử như lỗi nguồn (thử nguồn kế).
+            if (attempt == 0 and code == 0 and isinstance(env, dict) and not env.get("error")
+                    and not str(env.get("response") or "").strip()):
+                prompt = AGY_TEXT_ONLY_RETRY + "\n" + AGY_TEXT_ONLY + "\n\n" + prompt
+                continue
+            break
         if code != 0 or not isinstance(env, dict) or env.get("error"):
             stderr = err.decode(errors="replace")
             msg = (str(env.get("error")) if isinstance(env, dict) and env.get("error") else "") or \

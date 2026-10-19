@@ -17,6 +17,7 @@ from gh.hub_link import KHO_LABEL
 #: Hộp PIN và Tài khoản của tôi dùng đúng câu này khi người dùng (vd Quản lý được mời) chưa đặt mã PIN.
 PIN_NOT_SET = "Tài khoản chưa có mã PIN — đặt ở Tài khoản của tôi"
 
+CHAT_SESSION_PREFIXES = ("chat_ok:", "chat_gen:")  # phiên tạm kênh chat — không gia hạn (load_session)
 SESSION_COOKIE = "gh_session"
 CSRF_COOKIE = "gh_csrf"
 
@@ -149,7 +150,8 @@ async def load_session(db: AsyncSession, token: str, *, renew: bool = True,
     cờ này CHỈ cho lời gọi ghi do người bấm (POST/PUT/PATCH/DELETE, xem deps.optional_user). Mặc định tắt: các
     GET tự làm mới của giao diện (thanh đầu trang 60 giây, chuông 120 giây…) và WS không được giữ PIN sống mãi."""
     row = (await db.execute(text("""
-        SELECT s.id AS sid, s.pin_verified_until, s.expires_at, s.created_at, u.id, u.org_id, u.email, u.display_name,
+        SELECT s.id AS sid, s.pin_verified_until, s.expires_at, s.created_at, s.user_agent, u.id, u.org_id, u.email,
+               u.display_name,
                u.addressing,
                u.must_change_password,
                r.id AS role_id, r.code AS role_code, r.name AS role_name, ur.team_id
@@ -172,6 +174,10 @@ async def load_session(db: AsyncSession, token: str, *, renew: bool = True,
     # v0.1.46: trượt nhưng không quá session_absolute_days kể từ created_at (hết hạn tuyệt đối).
     ttl = timedelta(hours=get_settings().session_ttl_hours)
     expires_at, renewed = row.expires_at, False
+    # v0.1.74 (review bảo mật P2-1): phiên tạm kênh chat (`chat_ok:*`, `chat_gen:*` — owner_channel/chat_confirm.py)
+    # sống đúng hạn lúc tạo (≤ 5 phút) — KHÔNG trượt; trước đây lời GET đầu tiên đẩy hạn lên đủ một TTL (7 ngày).
+    if (row.user_agent or "").startswith(CHAT_SESSION_PREFIXES):
+        renew = False
     if renew and expires_at - now() < ttl / 2:
         new_exp = min(now() + ttl, row.created_at + timedelta(days=get_settings().session_absolute_days))
         if new_exp > expires_at:

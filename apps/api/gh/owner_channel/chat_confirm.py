@@ -106,7 +106,7 @@ async def _set_org(db: AsyncSession, org_id: uuid.UUID) -> None:
 
 
 async def _mint(sm: async_sessionmaker[AsyncSession], org_id: uuid.UUID, user_id: uuid.UUID, via: str, *,
-                pin: bool) -> _Session:
+                pin: bool, agent: str = "chat_ok") -> _Session:
     """Phiên Console ngắn hạn cho Owner đã ghép (cơ sở «chat_ok»). Chỉ sống trong tiến trình này."""
     token, csrf = new_token(), new_token(16)
     now = datetime.now(UTC)
@@ -116,7 +116,7 @@ async def _mint(sm: async_sessionmaker[AsyncSession], org_id: uuid.UUID, user_id
             INSERT INTO core.sessions (user_id, token_hash, csrf_hash, ip, user_agent, expires_at, last_seen_at,
                                        pin_verified_until)
             VALUES (:u, :th, :ch, NULL, :ua, :exp, now(), :pin) RETURNING id"""),
-            {"u": user_id, "th": token_digest(token), "ch": token_digest(csrf), "ua": f"chat_ok:{via}",
+            {"u": user_id, "th": token_digest(token), "ch": token_digest(csrf), "ua": f"{agent}:{via}",
              "exp": now + SESSION_TTL, "pin": now + PIN_WINDOW if pin else None})).scalar_one()
         await db.commit()
     return _Session(sid, {service.SESSION_COOKIE: token, service.CSRF_COOKIE: csrf}, csrf)

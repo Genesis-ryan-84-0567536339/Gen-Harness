@@ -44,7 +44,10 @@ export type DataToolName =
   /** v0.1.41 (F-8): bước đầu của Bản tin Gen — đánh dấu nội dung ngoài (việc, khách, nháp, sự cố…). */
   | 'briefing.sources'
   /** v0.1.54: tool chỉ-đọc của Gen hướng dẫn — việc cần làm & bài học hôm nay của Sếp (chỉ Owner). */
-  | 'coach.status';
+  | 'coach.status'
+  | 'group.list'
+  | 'group.recent'
+  | 'person.list';
 
 export type UiAction =
   | { type: 'navigate'; screen: string; params?: Record<string, string> }

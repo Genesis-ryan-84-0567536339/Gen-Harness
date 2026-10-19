@@ -42,6 +42,10 @@ export const TOOL_LABEL: Record<DataToolName, string> = {
   'briefing.sources': 'việc, khách, nháp, sự cố…',
   // v0.1.54: Gen hướng dẫn — việc cần làm & bài học hôm nay của Sếp.
   'coach.status': 'Việc cần làm & bài học',
+  // v0.1.74: danh bạ nhóm / người + tin nhóm gần đây (chỉ đọc).
+  'group.list': 'danh bạ nhóm',
+  'group.recent': 'tin nhóm gần đây',
+  'person.list': 'danh bạ người',
 };
 
 /**
