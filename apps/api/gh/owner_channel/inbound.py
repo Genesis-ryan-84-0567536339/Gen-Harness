@@ -69,6 +69,8 @@ async def handle_owner_dm(db: AsyncSession, redis: Redis, org_id: uuid.UUID, p: 
     oi = await owner_ids(db, org_id, ch)
     msg_id = str(p.get("external_msg_id") or "")
     body = p.get("body_text")
+    if p.get("external_group_id") or p.get("group_id") or p.get("thread_type") == "group":
+        return False   # v0.1.73: tin trong NHÓM không bao giờ là lệnh / xác nhận của Sếp (bridge cũng không phát)
     if (not oi.enabled or not msg_id or p.get("forwarded") or str(p.get("session_id") or "") != str(oi.session_id)
             or not is_owner(oi, str(p.get("sender_external_id") or ""), p.get("sender_alt_id"))
             or p.get("kind", "text") != "text" or not isinstance(body, str) or not body.strip()):

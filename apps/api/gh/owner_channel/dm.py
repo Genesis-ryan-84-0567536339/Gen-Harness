@@ -11,7 +11,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from gh.chassis.bus import EventBus
-from gh.owner_channel import group_cmds
+from gh.owner_channel import chat_confirm, group_cmds
 from gh.owner_channel.autosend import send_auto
 from gh.owner_channel.basis import Basis, Trigger
 from gh.owner_channel.identity import owner_ids
@@ -32,7 +32,10 @@ GROUP_HELP = (
 
 
 async def build_reply(sm: async_sessionmaker[AsyncSession], redis: Redis, router: Any, org_id: uuid.UUID, oi: Any,
-                      p: dict[str, Any]) -> str:
+                      p: dict[str, Any], app: Any = None) -> str:
+    decision = chat_confirm.parse_decision(str(p.get("text") or ""))
+    if decision is not None:        # v0.1.73: «OK» / «HUỶ» trả lời đề xuất Gen vừa hỏi trong chính kênh này
+        return await chat_confirm.handle(sm, redis, app, org_id, oi, decision, str(p.get("external_msg_id") or ""))
     kind, args = owner_parse.parse_text(str(p.get("text") or ""))
     if kind in group_cmds.KINDS:
         async with sm() as db:
@@ -50,7 +53,7 @@ async def build_reply(sm: async_sessionmaker[AsyncSession], redis: Redis, router
 
 
 async def handle_dm(sm: async_sessionmaker[AsyncSession], redis: Redis, bus: EventBus, router: Any,
-                    org_id: uuid.UUID, p: dict[str, Any]) -> str:
+                    org_id: uuid.UUID, p: dict[str, Any], app: Any = None) -> str:
     """Consumer `dm`. Trả nhãn kết quả ('replied' | 'rate' | 'ignored:<lý do>' | 'refused:<mã>'). Không ném."""
     ch, msg_id = str(p.get("channel") or ""), str(p.get("external_msg_id") or "")
     try:
@@ -66,7 +69,7 @@ async def handle_dm(sm: async_sessionmaker[AsyncSession], redis: Redis, bus: Eve
                     await send_auto(db, bus, redis, org_id=org_id, channel=ch, basis=Basis.OWNER_DM, trigger=trigger,
                                     text=RATE_TEXT)
             return "rate"
-        body = (await build_reply(sm, redis, router, org_id, oi, p))[:REPLY_MAX]
+        body = (await build_reply(sm, redis, router, org_id, oi, p, app))[:REPLY_MAX]
         async with sm() as db:
             r = await send_auto(db, bus, redis, org_id=org_id, channel=ch, basis=Basis.OWNER_DM, trigger=trigger,
                                 text=body)

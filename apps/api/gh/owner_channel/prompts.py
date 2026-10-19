@@ -52,8 +52,8 @@ def classify_messages(history: str, question: str) -> list[Message]:
 
 
 def support_messages(*, bot_name: str, org_name: str, history: str, question: str, canary: str, max_len: int,
-                     intro: bool) -> list[Message]:
-    system = (
+                     intro: bool, persona: str = "") -> list[Message]:
+    system = (persona + "\n" if persona else "") + (
         f'Bạn là {bot_name}, trợ lý TỰ ĐỘNG của {org_name}, đang trả lời một thành viên trong nhóm chat. Xưng "em", lịch sự, '
         f"tiếng Việt có dấu, THẬT NGẮN (tối đa {max_len // 2} ký tự, tối đa 4 dòng), văn bản thường, không Markdown.\n"
         "TUYỆT ĐỐI KHÔNG nói về: giá, tiền, báo giá, chiết khấu, hợp đồng, cam kết, bảo hành, hoàn tiền, nhân sự, lương; KHÔNG "
@@ -70,8 +70,8 @@ def support_messages(*, bot_name: str, org_name: str, history: str, question: st
 
 
 def owner_reply_messages(*, bot_name: str, addr: str, group_name: str, history: str, question: str,
-                         units: str, canary: str) -> list[Message]:
-    system = (
+                         units: str, canary: str, persona: str = "") -> list[Message]:
+    system = (persona + "\n" if persona else "") + (
         f'Bạn là {bot_name}, trợ lý của {addr}. {addr} vừa tag bạn trong nhóm chat «{group_name[:60]}» và mọi người trong '
         'nhóm sẽ đọc câu trả lời. Xưng "em", gọi "{addr}", tiếng Việt có dấu, NGẮN (tối đa 6 dòng), văn bản thường, '
         "không Markdown.\n"

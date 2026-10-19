@@ -26,6 +26,7 @@ from gh.chassis.bus import EventBus
 from gh.chassis.masking import mask_for_model
 from gh.data import listen_events as lev
 from gh.data.ingest import sync_listen_sets
+from gh.gen import diplomat
 from gh.owner_channel import inbound as oin
 from gh.owner_channel import prompts, reports
 from gh.owner_channel.autosend import send_auto, support_limits
@@ -94,12 +95,19 @@ async def _units(db: AsyncSession, group_id: uuid.UUID, limit: int = 8) -> str:
 
 
 async def _bot_name(db: AsyncSession, org_id: uuid.UUID, agent_id: uuid.UUID | None) -> tuple[str, str]:
+    """(tên bot, tên tổ chức). v0.1.73: có agent ngoại giao do Sếp chọn thì LUÔN dùng tên đó; chưa chọn ⇒ như cũ (agent được
+    giao nhóm, hoặc «Trợ lý»). Giọng nói lấy riêng ở `_persona_block`."""
+    dip = await diplomat.load(db, org_id)
     org = (await db.execute(text("SELECT name FROM core.organizations WHERE id = :o"), {"o": org_id})).scalar_one()
     name = None
     if agent_id is not None:
         name = (await db.execute(text("SELECT name FROM agent.identities WHERE id = :a AND org_id = :o"),
                                  {"a": agent_id, "o": org_id})).scalar_one_or_none()
-    return str(name or "Trợ lý"), str(org)
+    return (dip.name if dip.configured else str(name or "Trợ lý")), str(org)
+
+
+async def _persona_block(db: AsyncSession, org_id: uuid.UUID) -> str:
+    return (await diplomat.load(db, org_id)).block()
 
 
 def _clean(answer: str) -> str:
@@ -128,6 +136,7 @@ async def handle_owner_call(sm: async_sessionmaker[AsyncSession], redis: Redis, 
             gid = ev.group_id
             level = await group_level(db, org_id, gid)
             bot, _org_name = await _bot_name(db, org_id, ev.assigned_agent_id)
+            persona = await _persona_block(db, org_id)
             hist = await _history(db, gid, ev.received_at, prompts.MAX_OWNER_CONTEXT_MESSAGES, oi.ids)
             units = await _units(db, gid)
             await db.rollback()
@@ -139,7 +148,7 @@ async def handle_owner_call(sm: async_sessionmaker[AsyncSession], redis: Redis, 
         canary = prompts.new_canary()
         msgs = prompts.owner_reply_messages(
             bot_name=bot, addr="Sếp", group_name=str(ev.group_name or ""), canary=canary,
-            history=prompts.render_history(hist, "tin_nhom"), units=units, question=str(ev.body_text or ""))
+            history=prompts.render_history(hist, "tin_nhom"), units=units, question=str(ev.body_text or ""), persona=persona)
         try:
             routed = await router.generate(org_id, agent_key=ROLE_OWNER_REPLY, purpose="owner_reply", messages=msgs,
                                            json_mode=False)
@@ -278,6 +287,7 @@ async def handle_support(sm: async_sessionmaker[AsyncSession], redis: Redis, bus
                                       "s": ev.sender_identity_id})).first() is None
             oi = await owner_ids(db, org_id, ch)
             bot, org_name = await _bot_name(db, org_id, ev.assigned_agent_id)
+            persona = await _persona_block(db, org_id)
             hist = await _history(db, ev.group_id, ev.received_at, prompts.MAX_CONTEXT_MESSAGES, oi.ids)
             await db.rollback()
         # Nghi bot: một người gửi > 10 tin/phút ⇒ không trả lời (không tốn model).
@@ -309,7 +319,7 @@ async def handle_support(sm: async_sessionmaker[AsyncSession], redis: Redis, bus
             routed = await router.generate(org_id, agent_key=ROLE_SUPPORT, purpose="support_reply", json_mode=False,
                                            messages=prompts.support_messages(
                                                bot_name=bot, org_name=org_name, history=history, canary=canary,
-                                               question=str(ev.body_text or ""), max_len=lim["max_len"], intro=first))
+                                               question=str(ev.body_text or ""), max_len=lim["max_len"], intro=first, persona=persona))
         except ModelUnavailable:
             await _hold_notice(sm, redis, bus, org_id, ch)
             return "model_down"
