@@ -7,6 +7,11 @@ Ngày = ngày Release trên GitHub theo giờ Việt Nam; tiêu đề trong `doc
 (v0.1.32–v0.1.34, v0.1.40, v0.1.46) hoặc vài ngày (v0.1.47, v0.1.48: làm 03/10, phát hành 09/10).
 Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) ghi ở [ROADMAP › Bản phản ứng](docs/ROADMAP.md).
 
+## v0.1.74 — Bot quản trị Zalo/WhatsApp dùng chung bộ não Gen đầy đủ, nói bằng Agent ngoại giao (19/10/2026)
+- **Bản tính năng trên v0.1.73, không migration.** Sếp hỏi bot trên Zalo/WhatsApp (kênh quản trị 1-1) giờ chạy ĐÚNG động cơ Gen của Console: có **trí nhớ hội thoại** (một hội thoại riêng mỗi kênh), **công cụ đọc dữ liệu** áp quyền Owner, nói bằng **Agent ngoại giao** (không xưng Gen), văn bản thường; không còn giới hạn 6 dòng (quá dài thì tóm + mời hỏi tiếp).
+- Câu tự nhiên «nhắc tôi 3h chiều gọi anh Tuấn», «ghi nhớ…», «soạn tin cho nhóm X…» không cần `/nhap`: Gen tự ĐỀ XUẤT, đề xuất vào sổ chờ để Sếp «OK» (mọi luật v0.1.73 giữ nguyên). Tool mới `group.list`, `person.list`, `group.recent` (nhóm nào có tin mới; theo «Quyền xem») — đóng Nợ #68.
+- Bền hơn khi model lỗi định dạng: chữ rỗng ⇒ router thử model/nguồn kế tiếp; văn xuôi ⇒ làm một bước `say`; JSON lẫn trong chữ ⇒ được trích ra (cả Console lẫn kênh chat). Chi tiết: [docs/releases/v0.1.74.md](docs/releases/v0.1.74.md).
+
 ## v0.1.73 — Xác nhận ngay trong chat, bot xưng bằng Agent ngoại giao, «đã xem / đang nhập», sửa sổ tin tự gửi (19/10/2026)
 - **Bản tính năng trên v0.1.72, không migration.** Kênh quản trị Zalo/WhatsApp: Gen soạn đề xuất thì bot hỏi «Trả lời OK để em làm (mã #X), hoặc HUỶ» — Sếp nhắn OK là làm đúng đường Xác nhận của Console, không cần mở máy tính hay nhập PIN (luật cứng Sếp duyệt 19/10); tin gửi người ngoài vẫn OK riêng từng tin kèm mã, nêu người nhận + nguyên văn. Telegram giữ nguyên.
 - **Phân vai nội bộ / ngoại giao**: Gen chỉ nói trong Console; mọi kênh ngoài (Zalo/WhatsApp quản trị, Telegram, nhóm, Chế độ hỗ trợ) nói bằng «Agent ngoại giao» Sếp chọn ở màn Agent (tên + giọng; luật an toàn và bộ lọc không đổi). Chưa chọn ⇒ bot xưng «trợ lý».
