@@ -604,7 +604,7 @@ async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: u
             await publish_resume(bus, org_id, r.type, r.id, r.credential_enc)
         return out
     if type == "send.result":
-        # v0.1.73: kết quả gửi KHÔNG mang `session_id` (giao thức bridge: nonce, draft_id, auto_send_id?, channel, ok…) ⇒ xử lý
+        # v0.1.73: kết quả gửi KHÔNG mang `session_id` (giao thức bridge) ⇒ xử lý
         # TRƯỚC bước tra phiên; trước đây thoát sớm ở đó nên `ops.auto_sends` kẹt «issued» và bản nháp kẹt «approved».
         await _on_send_result(db, redis, org_id, p)
         return out
