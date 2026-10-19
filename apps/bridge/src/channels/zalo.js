@@ -479,6 +479,22 @@ export class ZaloAdapter extends EventEmitter {
       out.group_name = this.groupNames.get(threadId);
     }
     // zca-js 2.2.0 không có cờ «chuyển tiếp» ⇒ forwarded=false; thread 1-1 = threadId (UID người kia, cả khi mình gửi).
-    return withMeta(out, { thread_ids: isGroup ? [] : [threadId], sender_alt_id: null, forwarded: false });
+    // `read_ref`: đủ trường để đánh dấu «đã xem» tin 1-1 của người khác (chỉ RAM, không vào JSON). Nhóm / tin mình gửi ⇒ null.
+    const readRef = isGroup || isReaction || msg.isSelf ? null : {
+      msgId: d.msgId, cliMsgId: d.cliMsgId, uidFrom: d.uidFrom, idTo: d.idTo, msgType: d.msgType, st: d.st, at: d.at, cmd: d.cmd, ts: d.ts,
+    };
+    return withMeta(out, { thread_ids: isGroup ? [] : [threadId], sender_alt_id: null, forwarded: false, read_ref: readRef });
+  }
+
+  /** v0.1.73: đánh dấu «đã xem» một tin 1-1 (CHỈ kênh quản trị với Sếp — SessionManager quyết định gọi). */
+  async markSeen(ref) {
+    if (this.state !== 'active' || !this.api || !ref) return;
+    await this.api.sendSeenEvent(ref, this.lib.ThreadType.User);
+  }
+
+  /** v0.1.73: «đang nhập…» trong thread 1-1. Zalo không có lệnh tắt — chỉ hiệu lực vài giây nên SessionManager gửi lại định kỳ. */
+  async setTyping(threadId, on) {
+    if (!on || this.state !== 'active' || !this.api) return;
+    await this.api.sendTypingEvent(String(threadId), this.lib.ThreadType.User);
   }
 }

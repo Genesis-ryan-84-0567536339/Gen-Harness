@@ -9,7 +9,7 @@ import { pairingCode } from '../src/sessions.js';
 import { WhatsAppAdapter, memoryAuthState } from '../src/channels/whatsapp.js';
 import { ZaloAdapter } from '../src/channels/zalo.js';
 import {
-  KEY_B64, ThreadType, ctl, makeBaileysLib, setup, tick, waitFor, waMessage, zaloMessage,
+  KEY_B64, ThreadType, ctl, makeBaileysLib, makeZaloApi, makeZaloLib, setup, tick, waitFor, waMessage, zaloMessage,
 } from './fakes.js';
 
 const OWNER = '555'; // ID Zalo của Sếp
@@ -335,5 +335,123 @@ test('message.send có basis: SessionManager kiểm lớp 2 trước khi gửi, 
   // claims không basis, không draft_id ⇒ từ chối
   assert.equal((await send({ nonce: 'a8', basis: undefined, auto_send_id: undefined })).error, 'PERMIT_INVALID');
   assert.equal(api.sent.length, 3);
+  mgr.shutdown();
+});
+
+// ─── v0.1.73: «đã xem» + «đang nhập…» CHỈ trong kênh quản trị 1-1 ─────────────────────────────────────────────────────
+
+async function zaloWith(api, opts = {}) {
+  const zalo = makeZaloLib({ api });
+  const env = await setup({ zalo, ...opts });
+  const blob = env.keyring.encryptTransport(JSON.stringify({ imei: 'i', cookie: [], userAgent: 'u' }), 'zalo:s1');
+  await env.mgr.handleControl(ctl('session.login', { channel: 'zalo', session_id: 's1', credential: blob }));
+  await waitFor(() => env.bus.of(STREAMS.status, 'session.active')[0]);
+  env.api = api;
+  env.bus.accountKinds['zalo:s1'] = 'bot';
+  env.bus.owners.zalo = new Set([OWNER]);
+  env.bus.ownerThreads.zalo = new Set([OWNER]);
+  return env;
+}
+
+test('Zalo: tin 1-1 của Sếp ⇒ đã xem + đang nhập (gửi lại định kỳ); trả lời ⇒ dừng', async () => {
+  const env = await zaloWith(makeZaloApi({ ownId: '900' }), { typingRefreshMs: 15, typingMaxMs: 5000 });
+  const { bus, mgr, api, keyring } = env;
+  api.listener.emit('message', zaloMessage({ group: false, threadId: OWNER, uidFrom: OWNER, msgId: '71', content: 'chào' }));
+  await waitFor(() => inb(bus, 'owner.dm')[0]);
+  await waitFor(() => api.seen.length === 1 && api.typing.length >= 3);
+  assert.equal(api.seen[0].type, ThreadType.User);
+  assert.equal(api.seen[0].messages.msgId, '71');
+  assert.equal(api.seen[0].messages.uidFrom, OWNER);
+  assert.equal(api.typing[0].threadId, OWNER);
+  // trả lời đúng permit owner_dm ⇒ dừng gửi «đang nhập»
+  const text = 'Dạ Sếp';
+  const claims = { nonce: 'n-r1', auto_send_id: 'as-9', basis: 'owner_dm', channel: 'zalo', thread_id: OWNER, thread_type: 'user',
+    body_sha256: sha256Hex(text), exp: Math.floor(Date.now() / 1000) + 60 };
+  await mgr.handleOutbound({ type: 'message.send', org_id: 'org-1', payload: { channel: 'zalo', session_id: 's1', thread_id: OWNER,
+    thread_type: 'user', text, permit: keyring.signPermit(claims) } });
+  assert.equal(api.sent.length, 1);
+  const n = api.typing.length;
+  await tick(80);
+  assert.equal(api.typing.length, n);
+  mgr.shutdown();
+});
+
+test('Zalo: sendSeenEvent / sendTypingEvent lỗi chỉ ghi log — owner.dm vẫn đi tiếp', async () => {
+  const env = await zaloWith(makeZaloApi({ failSeen: true, failTyping: true }), { typingRefreshMs: 10, typingMaxMs: 100 });
+  env.api.listener.emit('message', zaloMessage({ group: false, threadId: OWNER, uidFrom: OWNER, msgId: '72' }));
+  await waitFor(() => inb(env.bus, 'owner.dm')[0]);
+  await waitFor(() => env.api.seen.length === 1 && env.api.typing.length >= 1);
+  assert.equal(inb(env.bus, 'owner.dm').length, 1);
+  env.mgr.shutdown();
+});
+
+test('Zalo: nhóm im lặng tuyệt đối — kể cả Sếp tag bot trong nhóm nghe / không nghe', async () => {
+  const env = await zaloWith(makeZaloApi({ ownId: '900' }), { typingRefreshMs: 10 });
+  const { bus, mgr, api } = env;
+  bus.listen.zalo = new Set(['G1']);
+  api.listener.emit('message', zaloMessage({ group: true, threadId: 'G1', uidFrom: OWNER, msgId: '73', content: '@bot ơi', mentions: [{ uid: '900' }] }));
+  api.listener.emit('message', zaloMessage({ group: true, threadId: 'G9', uidFrom: OWNER, msgId: '74', content: '@bot ơi', mentions: [{ uid: '900' }] }));
+  await tick(60);
+  assert.equal(api.seen.length, 0);
+  assert.equal(api.typing.length, 0);
+  assert.equal(inb(bus, 'owner.dm').length, 0);
+  mgr.shutdown();
+});
+
+test('Zalo: người lạ nhắn 1-1, hoặc phiên không phải bot ⇒ không đã xem / đang nhập', async () => {
+  const env = await zaloWith(makeZaloApi(), { typingRefreshMs: 10 });
+  const { bus, mgr, api } = env;
+  api.listener.emit('message', zaloMessage({ group: false, threadId: '111', uidFrom: '111', msgId: '75' }));
+  await tick(40);
+  assert.equal(api.seen.length + api.typing.length, 0);
+  bus.accountKinds['zalo:s1'] = 'owner_self';
+  api.listener.emit('message', zaloMessage({ group: false, threadId: OWNER, uidFrom: OWNER, msgId: '76' }));
+  await tick(40);
+  assert.equal(api.seen.length + api.typing.length, 0);
+  mgr.shutdown();
+});
+
+test('WhatsApp: tin 1-1 của Sếp ⇒ readMessages + composing; chuyển tiếp chỉ đã xem; nhóm im lặng', async () => {
+  const { bus, mgr, sock } = await activeWa({ typingRefreshMs: 1000, typingMaxMs: 5000 });
+  upsert(sock, waMessage({ remoteJid: OWNER_PN, id: 'S1', pushName: 'Sếp', message: { conversation: 'tình hình?' } }));
+  await waitFor(() => inb(bus, 'owner.dm')[0]);
+  await waitFor(() => sock.reads.length === 1 && sock.presence.length === 1);
+  assert.deepEqual(sock.reads[0], [{ remoteJid: OWNER_PN, id: 'S1', fromMe: false }]);
+  assert.deepEqual(sock.presence[0], { type: 'composing', jid: OWNER_PN });
+  upsert(sock, waMessage({ remoteJid: OWNER_PN, id: 'S2', message: { extendedTextMessage: { text: 'fw', contextInfo: { isForwarded: true } } } }));
+  await waitFor(() => sock.reads.length === 2);
+  assert.equal(sock.presence.filter((x) => x.type === 'composing').length, 1);
+  bus.listen.whatsapp = new Set(['120363@g.us']);
+  upsert(sock, waMessage({ remoteJid: '120363@g.us', participant: OWNER_PN, id: 'G1', message: { conversation: 'chào nhóm' } }));
+  upsert(sock, waMessage({ remoteJid: '120999@g.us', participant: OWNER_PN, id: 'G2', message: { conversation: 'nhóm lạ' } }));
+  await tick(40);
+  assert.equal(sock.reads.length, 2);
+  assert.equal(sock.presence.length, 1);
+  mgr.shutdown();
+});
+
+test('WhatsApp: tự chuyển composing → paused sau typingMaxMs; lỗi API không làm hỏng luồng', async () => {
+  const { bus, mgr, sock } = await activeWa({ typingRefreshMs: 1000, typingMaxMs: 60 });
+  sock.failRead = true;
+  sock.failPresence = true;
+  upsert(sock, waMessage({ remoteJid: OWNER_PN, id: 'S3', message: { conversation: 'alo' } }));
+  await waitFor(() => inb(bus, 'owner.dm')[0]);
+  await waitFor(() => sock.presence.some((x) => x.type === 'paused'));
+  assert.deepEqual(sock.presence.map((x) => x.type), ['composing', 'paused']);
+  mgr.shutdown();
+});
+
+test('WhatsApp: trả lời Sếp ⇒ paused ngay, không chờ hết giờ', async () => {
+  const { bus, mgr, sock, keyring } = await activeWa({ typingRefreshMs: 1000, typingMaxMs: 60000 });
+  upsert(sock, waMessage({ remoteJid: OWNER_PN, id: 'S4', message: { conversation: 'alo' } }));
+  await waitFor(() => inb(bus, 'owner.dm')[0]);
+  await waitFor(() => sock.presence.length === 1);
+  const text = 'Dạ Sếp';
+  const claims = { nonce: 'n-r2', auto_send_id: 'as-10', basis: 'owner_dm', channel: 'whatsapp', thread_id: OWNER_PN,
+    thread_type: 'user', body_sha256: sha256Hex(text), exp: Math.floor(Date.now() / 1000) + 60 };
+  await mgr.handleOutbound({ type: 'message.send', org_id: 'org-1', payload: { channel: 'whatsapp', session_id: 'w1',
+    thread_id: OWNER_PN, thread_type: 'user', text, permit: keyring.signPermit(claims) } });
+  assert.equal(sock.sent.length, 1);
+  assert.deepEqual(sock.presence.map((x) => x.type), ['composing', 'paused']);
   mgr.shutdown();
 });

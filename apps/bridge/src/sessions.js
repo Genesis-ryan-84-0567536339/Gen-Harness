@@ -19,6 +19,10 @@ export const DISCOVER_MIN_GAP_MS = 10 * 60 * 1000;
 export const DIRECTORY_MANUAL_GAP_MS = 5 * 60 * 1000;
 // Lượt quét lỗi/thiếu (nền tảng từ chối, có thể là hãm tốc) ⇒ lùi lịch gấp đôi chu kỳ mỗi lần liên tiếp, tối đa 8 giờ.
 export const DIRECTORY_MAX_BACKOFF_MS = 8 * 60 * 60 * 1000;
+// v0.1.73 — «đã xem» + «đang nhập…» CHỈ trong kênh quản trị 1-1 với Sếp: bật khi nhận owner.dm, tắt khi gửi trả lời hoặc
+// sau TYPING_MAX_MS; gửi lại mỗi TYPING_REFRESH_MS vì nền tảng tự tắt chỉ báo sau vài giây.
+export const TYPING_MAX_MS = 60 * 1000;
+export const TYPING_REFRESH_MS = 5 * 1000;
 
 const keyOf = (channel, sessionId) => `${channel}:${sessionId}`;
 
@@ -44,11 +48,11 @@ export class SessionManager {
     heartbeatMs = 15000, directoryMs = DIRECTORY_MS, qrMax = QR_MAX,
     credentialCoalesceMs = CREDENTIAL_COALESCE_MS, now = Date.now,
     discoverDelayMs = DISCOVER_DELAY_MS, discoverMinGapMs = DISCOVER_MIN_GAP_MS,
-    manualMinGapMs = DIRECTORY_MANUAL_GAP_MS,
+    manualMinGapMs = DIRECTORY_MANUAL_GAP_MS, typingMaxMs = TYPING_MAX_MS, typingRefreshMs = TYPING_REFRESH_MS,
   }) {
     Object.assign(this, {
       bus, keyring, createAdapter, channels, log: logger, orgId, heartbeatMs, directoryMs, qrMax, credentialCoalesceMs, now,
-      discoverDelayMs, discoverMinGapMs, manualMinGapMs,
+      discoverDelayMs, discoverMinGapMs, manualMinGapMs, typingMaxMs, typingRefreshMs,
     });
     this.sessions = new Map();
     this.controlChains = new Map();
@@ -92,6 +96,8 @@ export class SessionManager {
     s.dirTimer = null;
     s.credTimer = null;
     s.discoverTimer = null;
+    for (const t of [...(s.typing?.values() || [])]) { clearInterval(t.refresh); clearTimeout(t.stop); }
+    s.typing?.clear();
     s.adapter.removeAllListeners();
     if (this.sessions.get(s.key) === s) this.sessions.delete(s.key);
   }
@@ -159,7 +165,7 @@ export class SessionManager {
       key, channel, sessionId, adapter, state: 'starting', orgId: ctx.orgId, correlationId: ctx.correlationId,
       queued: 0, lastCredAt: 0, credTimer: null, dirTimer: null, inbound: 0, dropped: 0,
       knownGroups: new Set(), discoverTimer: null, pendingDiscover: false, syncing: null, lastSyncAt: 0,
-      syncFailures: 0, nextSyncDelayMs: this.directoryMs, dirComplete: false,
+      syncFailures: 0, nextSyncDelayMs: this.directoryMs, dirComplete: false, typing: new Map(),
     };
     this.sessions.set(key, s);
     this.#wire(s);
@@ -322,9 +328,57 @@ export class SessionManager {
         occurred_at: payload.occurred_at, kind: payload.kind, body_text: payload.body_text ?? null,
         forwarded: Boolean(meta.forwarded),
       }, opts);
+      this.#ackOwner(s, payload, meta);
       return true;
     }
     return false;
+  }
+
+  /**
+   * v0.1.73 — chỉ gọi từ nhánh `owner.dm` (tin 1-1 của Sếp tới tài khoản bot; nhóm KHÔNG bao giờ tới đây): đánh dấu «đã
+   * xem» ngay, và bật «đang nhập…» cho tin chữ không phải chuyển tiếp (lõi sẽ trả lời). Lỗi chỉ ghi log — không làm hỏng luồng.
+   */
+  #ackOwner(s, payload, meta) {
+    const a = s.adapter;
+    if (typeof a.markSeen === 'function' && meta.read_ref) {
+      Promise.resolve().then(() => a.markSeen(meta.read_ref)).catch((err) => {
+        this.log.warn('không đánh dấu đã xem', { channel: s.channel, session_id: s.sessionId, error: errorCode(err) });
+      });
+    }
+    const thread = Array.isArray(meta.thread_ids) ? meta.thread_ids[0] : null;
+    if (thread && payload.kind === 'text' && !meta.forwarded) this.#typingOn(s, String(thread));
+  }
+
+  #typingCall(s, thread, on) {
+    const a = s.adapter;
+    if (typeof a.setTyping !== 'function') return;
+    Promise.resolve().then(() => a.setTyping(thread, on)).catch((err) => {
+      this.log.warn('không gửi trạng thái đang nhập', { channel: s.channel, session_id: s.sessionId, error: errorCode(err) });
+    });
+  }
+
+  #typingOn(s, thread) {
+    if (s.state === 'ended') return;
+    this.#typingOff(s, thread, false);
+    const refresh = setInterval(() => { if (s.state === 'active') this.#typingCall(s, thread, true); }, this.typingRefreshMs);
+    const stop = setTimeout(() => this.#typingOff(s, thread, true), this.typingMaxMs);
+    refresh.unref?.();
+    stop.unref?.();
+    s.typing.set(thread, { refresh, stop });
+    this.#typingCall(s, thread, true);
+  }
+
+  #typingOffAll(s) {
+    for (const thread of [...s.typing.keys()]) this.#typingOff(s, thread, true);
+  }
+
+  #typingOff(s, thread, notify) {
+    const t = s.typing.get(thread);
+    if (!t) return;
+    clearInterval(t.refresh);
+    clearTimeout(t.stop);
+    s.typing.delete(thread);
+    if (notify && s.state === 'active') this.#typingCall(s, thread, false);
   }
 
   /**
@@ -565,12 +619,14 @@ export class SessionManager {
     if (!fresh) return finish({ error: PERMIT_ERRORS.reused });
     try {
       const id = await s.adapter.send(p.thread_id, p.thread_type, p.text);
+      if (p.thread_type === 'user') this.#typingOffAll(s); // đã trả lời ⇒ tắt «đang nhập…» (id thread có thể khác dạng LID/PN)
       const extra = { ok: true };
       if (id) extra.external_msg_id = id;
       this.log.info('đã gửi tin', { channel: s.channel, session_id: s.sessionId });
       return finish(extra);
     } catch (err) {
       this.log.warn('nền tảng từ chối gửi', { channel: s.channel, session_id: s.sessionId, error: errorCode(err) });
+      if (p.thread_type === 'user') this.#typingOffAll(s);
       return finish({ error: 'SEND_FAILED' });
     }
   }
