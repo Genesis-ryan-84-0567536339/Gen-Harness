@@ -592,14 +592,26 @@ async def _chat_reply(
     thì kèm link. Đề xuất hỏi được ghi vào sổ chờ (`chat_pending`) — chỉ những đề xuất này «OK» trong chat mới xác nhận được."""
     lines: list[str] = []
     console = False
+    used = 0
+    budget = chat_pending.REPLY_MAX - chat_pending.REPLY_TAIL_RESERVE
+    registered = 0
     for p in made:
-        lines.append(chat_pending.question(p))
-        if chat_pending.kind_of(p) == "console":
+        kind = chat_pending.kind_of(p)
+        q = chat_pending.question(p, cmd.via)
+        if kind == "outbound" and used + len(q) + 2 > budget:
+            q = chat_pending.question_console(p, cmd.via)   # không nằm trọn trong tin Sếp thấy ⇒ không ghi sổ chờ, chuyển Console
+            kind = "console"
+        lines.append(q)
+        used += len(q) + 2
+        if kind == "console":
             console = True
         else:
             await chat_pending.register(ctx.redis, ctx.org_id, cmd.via, p["id"])
+            registered += 1
+    if registered != 1:
+        await chat_pending.mark_last(ctx.redis, ctx.org_id, cmd.via, None)   # «OK» trần chỉ hợp lệ khi đúng MỘT câu hỏi
     if says:
-        lines.append(otext.defang(" ".join(says)))
+        lines.append(otext.defang(" ".join(says))[:500])
     if len(made) > 1:
         lines.append(
             "Có nhiều đề xuất — Sếp trả lời OK kèm mã của từng cái (ví dụ OK "

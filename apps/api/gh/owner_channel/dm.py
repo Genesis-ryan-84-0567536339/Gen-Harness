@@ -3,6 +3,7 @@ XUẤT), thêm lệnh
 nhóm (`group_cmds`: đổi cấu hình). Lời đáp đi qua cửa `send_auto(owner_dm)` — mọi kiểm tra Owner làm LẠI ở đó."""
 
 import logging
+import time
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -11,6 +12,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from gh.chassis.bus import EventBus
+from gh.gen import chat_pending
 from gh.owner_channel import chat_confirm, group_cmds
 from gh.owner_channel.autosend import send_auto
 from gh.owner_channel.basis import Basis, Trigger
@@ -20,7 +22,7 @@ from gh.owner_cmd import parse as owner_parse
 
 log = logging.getLogger("gh.owner_channel.dm")
 
-REPLY_MAX = 3800
+REPLY_MAX = chat_pending.REPLY_MAX
 RATE_TEXT = "Sếp nhắn nhanh quá, em chờ một chút rồi mới trả lời tiếp được ạ."
 GROUP_HELP = (
     "\nLệnh nhóm (chỉ ở kênh này):\n"
@@ -56,6 +58,7 @@ async def handle_dm(sm: async_sessionmaker[AsyncSession], redis: Redis, bus: Eve
                     org_id: uuid.UUID, p: dict[str, Any], app: Any = None) -> str:
     """Consumer `dm`. Trả nhãn kết quả ('replied' | 'rate' | 'ignored:<lý do>' | 'refused:<mã>'). Không ném."""
     ch, msg_id = str(p.get("channel") or ""), str(p.get("external_msg_id") or "")
+    t0 = time.time()
     try:
         async with sm() as db:
             oi = await owner_ids(db, org_id, ch)
@@ -69,12 +72,25 @@ async def handle_dm(sm: async_sessionmaker[AsyncSession], redis: Redis, bus: Eve
                     await send_auto(db, bus, redis, org_id=org_id, channel=ch, basis=Basis.OWNER_DM, trigger=trigger,
                                     text=RATE_TEXT)
             return "rate"
-        body = (await build_reply(sm, redis, router, org_id, oi, p, app))[:REPLY_MAX]
+        full = await build_reply(sm, redis, router, org_id, oi, p, app)
+        body = full[:REPLY_MAX]
+        if len(full) > REPLY_MAX:       # phòng hờ: bị cắt ⇒ không giữ trong sổ chờ
+            await chat_pending.forget_since(redis, org_id, ch, t0)
         async with sm() as db:
             r = await send_auto(db, bus, redis, org_id=org_id, channel=ch, basis=Basis.OWNER_DM, trigger=trigger,
                                 text=body)
+        if not r.ok:                    # guard chặn / gửi lỗi ⇒ Sếp không thấy câu hỏi
+            await chat_pending.forget_since(redis, org_id, ch, t0)
+        else:                           # tin khác ⇒ câu hỏi cũ hết là «câu hỏi cuối»
+            last = await chat_pending.last_ask(redis, org_id, ch)
+            if last is not None and last[1] < t0:
+                await chat_pending.mark_last(redis, org_id, ch, None)
         return "replied" if r.ok else f"refused:{r.code}"
     except Exception:  # noqa: BLE001 — một tin hỏng không được chặn các tin sau
         log.exception("kênh quản trị: xử lý tin 1-1 lỗi")
+        try:
+            await chat_pending.forget_since(redis, org_id, ch, t0)
+        except Exception:  # noqa: BLE001
+            log.warning("kênh quản trị: không gỡ được sổ chờ sau lỗi", exc_info=True)
         return "error"
 

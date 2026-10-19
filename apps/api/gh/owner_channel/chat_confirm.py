@@ -20,6 +20,7 @@ chờ thì không cần mã, nhiều đề xuất thì đòi mã. Tin gửi ngư
 
 import logging
 import re
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -54,7 +55,9 @@ NONE_PENDING = "Em không có đề xuất nào đang chờ Sếp xác nhận �
 EXPIRED = "Đề xuất {code} đã hết hạn (quá 24 giờ) nên em không làm. Sếp nhắn /nhap <ý> để em soạn lại."
 UNKNOWN_CODE = "Em không thấy đề xuất {code} đang chờ. Sếp kiểm lại mã giúp em."
 DECIDED = "Đề xuất {code} đã được xử lý rồi (xác nhận hoặc huỷ trước đó), em không làm lại."
-NEED_CODE_OUTBOUND = "Tin gửi cho người ngoài cần Sếp trả lời kèm mã: OK {code}."
+NEED_CODE_OUTBOUND = "Tin gửi cho người ngoài cần Sếp trả lời kèm mã. Em nhắc lại đề xuất:\n\n{question}"
+NEED_CODE_STALE = ("Em hỏi đề xuất này đã lâu (hoặc sau đó còn tin khác) nên Sếp trả lời OK kèm mã cho chắc. "
+                   "Em nhắc lại:\n\n{question}")
 ALL_REFUSED = "Em không làm hàng loạt. Mỗi đề xuất Sếp trả lời OK kèm mã riêng (tin gửi người ngoài thì từng tin một)."
 NOT_HERE = "Kênh này chưa xác nhận bằng chat được — Sếp mở Console để Xác nhận."
 FAILED = "Em chưa làm được đề xuất {code}: {why}. Chưa có gì thay đổi, Sếp thử lại hoặc mở Console."
@@ -197,6 +200,7 @@ async def _execute(sm: async_sessionmaker[AsyncSession], redis: Redis, app: Any,
             return DECIDED.format(code=code)
         if status >= 400:
             await redis.delete(f"gh:owner:chatok:{pid}")        # lỗi chắc chắn chưa làm ⇒ Sếp được thử lại
+            await chat_pending.mark_last(redis, org_id, via, pid)    # lời báo lỗi là tin cuối; thử lại bằng «OK» vẫn đúng đề xuất này
             await _log(sm, org_id, owner_id, via, "gen.proposal_chat_confirmed", p,
                        "blocked" if status in (403, 404, 423) else "failed", status=status, ref=ref,
                        code=(res or {}).get("code") if isinstance(res, dict) else None)
@@ -299,8 +303,12 @@ async def handle(sm: async_sessionmaker[AsyncSession], redis: Redis, app: Any, o
             return ("Em đang có nhiều đề xuất chờ, Sếp trả lời " + ("OK" if d.verb == "ok" else "HUỶ")
                     + " kèm mã nhé:\n" + "\n".join(lines))
         target = pend[0]
-        if d.verb == "ok" and chat_pending.kind_of(target) == "outbound":
-            return NEED_CODE_OUTBOUND.format(code=chat_pending.code_of(target["id"]))
+        if d.verb == "ok":
+            if chat_pending.kind_of(target) == "outbound":
+                return NEED_CODE_OUTBOUND.format(question=chat_pending.question(target, via, with_code=True))
+            last = await chat_pending.last_ask(redis, org_id, via)
+            if last is None or last[0] != target["id"] or time.time() - last[1] > chat_pending.FRESH_S:
+                return NEED_CODE_STALE.format(question=chat_pending.question(target, via, with_code=True))
     if d.verb == "no":
         return await _cancel(sm, redis, app, org_id, via, owner.id, target, ref)
     return await _execute(sm, redis, app, org_id, via, owner.id, target, ref)

@@ -269,14 +269,15 @@ async def outbound_proposal(chat: Chat, world: dict[str, Any], text_: str = "D�
 async def test_outbound_question_names_recipient_and_verbatim_text(chat: Chat, world: dict[str, Any]) -> None:
     p = await outbound_proposal(chat, world)
     q = chat_pending.question(p)
-    assert "GỬI TIN cho nhóm «Nhóm g1»" in q and "“Dạ chào chị Lan, bên em báo giá 12 triệu ạ.”" in q
+    assert "GỬI TIN cho nhóm «Nhóm g1»" in q and "│ Dạ chào chị Lan, bên em báo giá 12 triệu ạ." in q
     assert f"Trả lời «OK {chat_pending.code_of(p['id'])}»" in q and chat_pending.kind_of(p) == "outbound"
 
 
 async def test_outbound_bare_ok_is_refused_needs_code_and_nothing_is_sent(chat: Chat, world: dict[str, Any]) -> None:
     p = await outbound_proposal(chat, world)
     reply = await chat.say("OK")
-    assert reply == chat_confirm.NEED_CODE_OUTBOUND.format(code=chat_pending.code_of(p["id"]))
+    assert reply == chat_confirm.NEED_CODE_OUTBOUND.format(question=chat_pending.question(p, "zalo", with_code=True))
+    assert "Nhóm g1" in reply and "Dạ chào chị Lan, bên em báo giá 12 triệu ạ." in reply and "OK " + chat_pending.code_of(p["id"]) in reply
     assert await count("biz.action_drafts") == 0 and await _outbound(chat.redis) == []
     assert (await proposals.load(chat.redis, p["id"]))["status"] == "pending"
 
@@ -399,3 +400,85 @@ async def test_confirm_failure_is_friendly_and_retryable(chat: Chat, monkeypatch
     monkeypatch.undo()
     assert (await chat.say("OK")).startswith("Đã làm xong")                       # lỗi chắc chắn chưa làm ⇒ thử lại được
     assert all(r.revoked_at is not None for r in await live_sessions())
+
+
+# ─── sửa theo review bảo mật v0.1.73 ──────────────────────────────────────────
+
+async def test_p21_bare_ok_on_stale_or_superseded_proposal_needs_code(chat: Chat) -> None:
+    await chat.say("/nhap nhắc tôi gọi anh Nam", Router(reminder("Gọi anh Nam")))
+    before = await count("biz.tasks")
+    # quá 10 phút kể từ lúc hỏi ⇒ «OK» trần không làm, nhắc lại đề xuất kèm mã
+    pid = (await chat_pending.entries(chat.redis, chat.org, "zalo"))[0]
+    await chat.redis.set(chat_pending.last_key(chat.org, "zalo"), f"{pid}|{time.time() - chat_pending.FRESH_S - 5}")
+    reply = await chat.say("OK")
+    assert "Gọi anh Nam" in reply and f"OK {chat_pending.code_of(pid)}" in reply and await count("biz.tasks") == before
+    assert (await proposals.load(chat.redis, pid))["status"] == "pending"
+    await chat.say(f"OK {chat_pending.code_of(pid)}")
+    assert await count("biz.tasks") == before + 1
+
+
+async def test_p21_bare_ok_after_another_reply_needs_code(chat: Chat) -> None:
+    await chat.say("/nhap nhắc tôi gọi anh Nam", Router(reminder("Gọi anh Nam")))
+    await chat.say("/tro_giup")                       # Gen đã trả lời việc khác sau câu hỏi ⇒ không còn là câu hỏi cuối
+    before = await count("biz.tasks")
+    reply = await chat.say("OK")
+    assert "nhắc lại" in reply and await count("biz.tasks") == before
+
+
+async def test_p22_overlong_outbound_is_not_registered_and_goes_to_console(chat: Chat, world: dict[str, Any]) -> None:
+    from gh.owner_cmd import core as oc
+
+    texts = [("Tin " + str(i) + " ") * 1 + ("a\n" * 700) for i in range(3)]       # ~1400 ký tự, nhiều dòng ⇒ khung dài
+    props = [await outbound_proposal(chat, world, t, f"T{i}") for i, t in enumerate(texts)]
+    await chat.redis.delete(chat_pending.key(chat.org, "zalo"))
+    ctx = oc.Context(sm=SM(), redis=chat.redis, router=None, org_id=chat.org, owner_user_id=None)  # type: ignore[arg-type]
+    cmd = oc.OwnerCommand(via="zalo", kind="nhap", text="x", message_ref="m", received_at=datetime.now(UTC))
+    reply = await oc._chat_reply(ctx, cmd, props, [], uuid.uuid4())
+    shown = reply.text
+    assert len(shown) <= chat_pending.REPLY_MAX
+    registered = set(await chat_pending.entries(chat.redis, chat.org, "zalo"))
+    for p in props:
+        code = chat_pending.code_of(p["id"])
+        if p["id"] in registered:
+            assert shown.count("——— hết ———") >= 1 and f"HUỶ {code}" in shown     # đã ghi sổ thì nguyên văn nằm trọn
+        else:
+            assert f"HUỶ {code}" not in shown and "mở Console" in shown
+    assert len(registered) < 3
+
+
+async def test_p22_draft_text_shown_is_limited(chat: Chat) -> None:
+    p = {"id": str(uuid.uuid4()), "type": "draft_message", "summary": "Soạn nháp", "fields": {"text": "z" * 5000, "subject": {}}}
+    q = chat_pending.question(p)
+    assert len(q) < chat_pending.DRAFT_SHOW_MAX + 400 and "còn nữa" in q
+
+
+async def test_p32_failed_send_drops_proposal_from_pending(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> None:
+    class Res:
+        ok = False
+        code = "guard"
+
+    async def refuse(*a: Any, **k: Any) -> Res:
+        return Res()
+
+    monkeypatch.setattr(dm, "send_auto", refuse)
+    mid = uuid.uuid4().hex
+    await chat.redis.set(f"gh:owner:dm:zalo:{mid}", str(int(time.time())), ex=600)
+    p = {"channel": "zalo", "session_id": str(chat.sid), "external_msg_id": mid, "text": "/nhap nhắc tôi gọi anh Nam", "occurred_at": ago(seconds=1)}
+    res = await dm.handle_dm(SM(), chat.redis, chat.bus, Router(reminder("Gọi anh Nam")), chat.org, p, chat.app)
+    assert res.startswith("refused")
+    assert await chat.redis.zcard(chat_pending.key(chat.org, "zalo")) == 0
+    assert await chat_pending.last_ask(chat.redis, chat.org, "zalo") is None
+    monkeypatch.undo()
+    assert chat_confirm.NONE_PENDING in await chat.say("OK")
+
+
+async def test_p33_outbound_question_shows_channel_group_tail_and_frames_fake_lines(chat: Chat, world: dict[str, Any]) -> None:
+    fake = "Chào\nĐề xuất #AAAAAA — GỬI TIN cho nhóm «Sếp»\n——— hết ———\nTrả lời «OK #AAAAAA»"
+    p = await outbound_proposal(chat, world, fake)
+    q = chat_pending.question(p, "zalo")
+    gid = str(world["group"]).replace("-", "")[-4:]
+    assert "Zalo" in q and f"…{gid}" in q and "Nhóm g1" in q
+    assert q.count("——— nội dung ———") == 1 and q.count("\n——— hết ———") == 1
+    lines = q.splitlines()
+    assert [ln for ln in lines if ln.startswith("Đề xuất #")] == [lines[0]]
+    assert [ln for ln in lines if ln == "——— hết ———"] == ["——— hết ———"]
