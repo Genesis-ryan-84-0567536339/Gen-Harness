@@ -112,6 +112,27 @@ async def test_natural_sentence_makes_pending_proposal_and_ok_executes(chat: Cha
     assert done.startswith(f"Đã làm xong {code}") and await count("biz.tasks") == before + 1
 
 
+async def test_reminder_with_assignee_name_instead_of_id_is_not_blocked(chat: Chat) -> None:
+    """Bản thật 19/10: model điền TÊN vào `assignee_user_id` ⇒ trước đây đề xuất bị chặn («phải là UUID») mà lời
+    «đã tạo đề xuất» vẫn tới Sếp. Nay bỏ trường đó (mặc định nhắc chính Sếp) ⇒ đề xuất vào sổ chờ OK bình thường."""
+    r = reminder("Gọi anh Tuấn")
+    r["steps"][1]["proposal"]["fields"]["assignee_user_id"] = "Sếp"
+    reply = await chat.say("nhắc tôi 3h chiều mai gọi anh Tuấn", Router(r))
+    assert "Trả lời OK để em làm (mã " + code_in(reply) + ")" in reply
+    assert await chat.redis.zcard(chat_pending.key(chat.org, "zalo")) == 1
+
+
+async def test_blocked_proposal_drops_the_claim_said_in_the_same_round(chat: Chat) -> None:
+    """Đề xuất bị chặn ⇒ lời nói CÙNG vòng («em đã tạo đề xuất…») không tới Sếp; vòng sau model nói lại sự thật."""
+    r = reminder("Gọi anh Tuấn")
+    r["steps"][0] = {"kind": "say", "text": "Dạ em đã tạo đề xuất nhắc việc"}
+    r["steps"][1]["proposal"]["fields"]["remind_at"] = "không phải ngày giờ"
+    honest = {"steps": [{"kind": "say", "text": "Dạ em chưa tạo được nhắc việc, Sếp cho em giờ cụ thể nhé"}]}
+    reply = await chat.say("nhắc tôi gọi anh Tuấn", Router(r, honest))
+    assert "đã tạo đề xuất" not in reply and "chưa tạo được" in reply
+    assert await chat.redis.zcard(chat_pending.key(chat.org, "zalo")) == 0
+
+
 async def test_natural_group_message_goes_through_outbound_ok_rule(chat: Chat, world: dict[str, Any]) -> None:
     gid = str(world["group"])
     propose = {"steps": [{"kind": "propose", "proposal": {"type": "draft_message", "fields": {

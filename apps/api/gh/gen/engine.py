@@ -704,9 +704,17 @@ async def _run(turn: Turn, *, app: Any, router: ModelRouter, session_token: str,
             continue
         observations: list[str] = []
         finished = False
+        # v0.1.74 (bản thật 19/10): ở KÊNH CHAT, lời nói của một vòng giữ lại tới cuối vòng — model hay viết «đã tạo đề
+        # xuất» CÙNG vòng với bước propose; đề xuất bị chặn thì bỏ các lời đó (không báo sai Sếp), vòng sau model nói lại.
+        # Console giữ thứ tự cũ: thẻ đề xuất hiện ngay trên màn hình nên Sếp thấy đề xuất có hay không.
+        says: list[Any] = []
+        propose_blocked = False
         for step in env.steps:
             if isinstance(step, envelope.Say):
-                await turn.emit(envelope.dump_step(step))
+                if inp.channel:
+                    says.append(step)
+                else:
+                    await turn.emit(envelope.dump_step(step))
             elif isinstance(step, envelope.ToolCall):
                 res = await runner.run(step.name, step.args)
                 await turn.log("gen.query", result="ok" if res.ok else "blocked", target_type="tool",
@@ -725,10 +733,14 @@ async def _run(turn: Turn, *, app: Any, router: ModelRouter, session_token: str,
             elif isinstance(step, envelope.Propose):
                 err = await _propose(turn, app, runner.seen_ids, tz, step)
                 if err:
-                    observations.append(f"[đề xuất bị chặn] {err}")
+                    propose_blocked = True
+                    observations.append(f"[đề xuất bị chặn — CHƯA tạo gì, đừng nói đã tạo] {err}")
             else:
                 finished = True
                 break
+        if not propose_blocked:
+            for say in says:
+                await turn.emit(envelope.dump_step(say))
         # Xong khi model báo done, hoặc vòng này không có gì cần model xem lại (không tool, không bị chặn).
         if finished or not observations:
             return

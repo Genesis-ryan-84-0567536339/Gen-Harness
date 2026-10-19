@@ -189,6 +189,11 @@ def normalize(ptype: str, fields: dict[str, Any], tz: ZoneInfo, *, confirming: b
     for k in ("assignee_user_id", "user_id", "item_id", "account_id"):
         if out.get(k) is not None:
             u = _uuid(out[k])
+            if u is None and k == "assignee_user_id":
+                # v0.1.74 (bản thật 19/10): model hay điền TÊN («Sếp», «anh Tuấn») vào người được giao ⇒ bỏ trường
+                # (mặc định là chính người hỏi) thay vì chặn cả lời nhắc của Sếp.
+                out.pop(k)
+                continue
             if u is None:
                 raise ValueError(f"{k} phải là UUID")
             out[k] = str(u)
