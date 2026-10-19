@@ -898,6 +898,14 @@
       "params": null
     },
     {
+      "id": "agents.diplomat",
+      "screen": "agents",
+      "label": "Ô \"Agent ngoại giao\"",
+      "description": "Chọn agent nói thay Gen ở mọi kênh ngoài Console",
+      "dynamic": null,
+      "params": null
+    },
+    {
       "id": "agents.decisions",
       "screen": "agents",
       "label": "Agent đã nói gì",
