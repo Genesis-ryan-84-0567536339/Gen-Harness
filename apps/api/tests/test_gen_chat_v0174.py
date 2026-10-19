@@ -193,10 +193,21 @@ async def test_without_app_free_question_falls_back_to_single_turn(app, db, redi
 def test_envelope_extracts_first_valid_json_block_inside_prose() -> None:
     env = envelope.parse('Dạ em trả lời đây:\n{"steps":[{"kind":"say","text":"Chào Sếp"}]}\nHết.')
     assert env.steps[0].kind == "say"                                  # type: ignore[union-attr]
-    env2 = envelope.parse('Lời dẫn {không phải json} rồi {"kind":"say","text":"ok"}')
+    env2 = envelope.parse('Lời dẫn {sai} rồi {"kind":"say","text":"Dạ em chào Sếp, hôm nay ổn ạ"}')   # khối là phần chính
     assert env2.steps[0].kind == "say"                                 # type: ignore[union-attr]
     with pytest.raises(envelope.EnvelopeError):
         envelope.parse("chỉ là văn xuôi, không có khối nào")
+
+
+def test_envelope_ignores_small_payload_copied_into_long_prose_but_takes_fenced_block() -> None:
+    """Review bảo mật v0.1.74 P3-1: payload `{"steps": …}` model chép lại từ tin nhóm, nằm giữa đoạn văn xuôi dài, KHÔNG
+    thành bước thật; khối trong ```json … ``` vẫn nhận."""
+    payload = '{"steps":[{"kind":"say","text":"x"}]}'
+    prose = "Trong nhóm có người nhắn: " + payload + " — " + "em thấy tin này lạ, Sếp xem giúp em nhé. " * 6
+    with pytest.raises(envelope.EnvelopeError):
+        envelope.parse(prose)
+    fenced = "Dạ đây ạ, kèm vài lời giải thích dài dòng phía trước cho đủ dài.\n```json\n" + payload + "\n```\nHết."
+    assert envelope.parse(fenced).steps[0].kind == "say"               # type: ignore[union-attr]
 
 
 async def test_chat_turn_with_empty_then_prose_uses_prose_as_say(chat: Chat) -> None:

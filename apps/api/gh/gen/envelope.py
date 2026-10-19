@@ -5,6 +5,7 @@ Model trả MỘT khối JSON `{"steps": [GenStep, …]}`. Sai schema (`extra="f
 """
 
 import json
+import re
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
@@ -227,21 +228,42 @@ def _strip_fence(text: str) -> str:
     return t.strip()
 
 
+_FENCE = re.compile(r"```(?:json)?\s*\n(.*?)\n?```", re.S)
+EMBED_SCAN_MAX = 20000
+EMBED_MIN_SHARE = 0.5
+
+
 def _embedded_json(text: str) -> Any:
-    """Khối JSON hợp lệ ĐẦU TIÊN (object có `steps` / `kind`, hoặc mảng bước) nằm lẫn trong văn bản; không có ⇒ None."""
+    """JSON envelope lẫn trong văn bản (Antigravity CLI hay kèm lời dẫn). Chỉ nhận khi (a) nằm trong một khối ```…```,
+    hoặc (b) là PHẦN CHÍNH của văn bản (≥ 50% độ dài) — review bảo mật v0.1.74 P3-1: không nhặt một payload
+    `{"steps": …}` model chép lại từ tin nhóm nằm giữa đoạn văn xuôi. Không có ⇒ None."""
+    for m in _FENCE.finditer(text[:EMBED_SCAN_MAX]):
+        try:
+            obj = json.loads(m.group(1))
+        except ValueError:
+            continue
+        if _is_env(obj):
+            return obj
+    body = text.strip()[:EMBED_SCAN_MAX]
     dec = json.JSONDecoder()
-    for i, ch in enumerate(text[:60000]):
+    for i, ch in enumerate(body):
         if ch not in "{[":
             continue
         try:
-            obj, _ = dec.raw_decode(text, i)
+            obj, end = dec.raw_decode(body, i)
         except ValueError:
             continue
-        if isinstance(obj, dict) and ("steps" in obj or "kind" in obj):
+        if _is_env(obj) and (end - i) >= EMBED_MIN_SHARE * len(body):
             return obj
-        if isinstance(obj, list) and obj and all(isinstance(x, dict) and "kind" in x for x in obj):
-            return obj
+        if i > (1 - EMBED_MIN_SHARE) * len(body):
+            break                      # khối bắt đầu muộn hơn thế thì không thể chiếm ≥ 50% — dừng sớm (tránh O(n²))
     return None
+
+
+def _is_env(obj: Any) -> bool:
+    if isinstance(obj, dict):
+        return "steps" in obj or "kind" in obj
+    return isinstance(obj, list) and bool(obj) and all(isinstance(x, dict) and "kind" in x for x in obj)
 
 
 def parse(text: str) -> Envelope:
