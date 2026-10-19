@@ -151,6 +151,10 @@ class Context:
     owner_user_id: uuid.UUID | None
     #: Agent ngoại giao của tổ chức (v0.1.73) — `handle` nạp ở đầu mỗi lệnh; chưa chọn ⇒ «trợ lý».
     persona: diplomat.Persona = diplomat.NO_PERSONA
+    #: v0.1.74: ứng dụng ASGI (để công cụ đọc của Gen gọi nội bộ) và hàm trả lời câu hỏi tự do thay thế do kênh gọi cắm vào
+    #: (Zalo/WhatsApp: động cơ Gen đầy đủ — `gh.owner_channel.gen_chat`). Không cắm ⇒ `hoi` một lượt như cũ (Telegram).
+    app: Any = None
+    hoi_fn: Callable[[OwnerCommand, "Context"], Awaitable[Reply]] | None = None
 
 
 #: Một lệnh chỉ đọc có thể được kênh gọi thay thế (điểm móc cho test/kênh riêng): `{"viec": fn, …}`.
@@ -585,7 +589,13 @@ async def nhap(cmd: OwnerCommand, ctx: Context) -> Reply:
 
 
 async def _chat_reply(
-    ctx: Context, cmd: OwnerCommand, made: list[dict[str, Any]], says: list[str], cid: uuid.UUID
+    ctx: Context,
+    cmd: OwnerCommand,
+    made: list[dict[str, Any]],
+    says: list[str],
+    cid: uuid.UUID,
+    *,
+    says_first: bool = False,
 ) -> Reply:
     """Zalo / WhatsApp (v0.1.73): hỏi lại ngay trong chat. Việc nội bộ: «Trả lời OK để em làm (mã #X), hoặc HUỶ»; tin gửi người
     ngoài: nêu người nhận + nguyên văn, cần «OK #X» riêng từng tin; việc chỉ Console làm được (đăng mạng xã hội, tin quá dài)
@@ -611,7 +621,11 @@ async def _chat_reply(
     if registered != 1:
         await chat_pending.mark_last(ctx.redis, ctx.org_id, cmd.via, None)   # «OK» trần chỉ hợp lệ khi đúng MỘT câu hỏi
     if says:
-        lines.append(otext.defang(" ".join(says))[:500])
+        said = otext.defang(" ".join(says))[:500]
+        if says_first:      # v0.1.74: lời của Gen đi TRƯỚC các câu hỏi OK
+            lines.insert(0, said)
+        else:
+            lines.append(said)
     if len(made) > 1:
         lines.append(
             "Có nhiều đề xuất — Sếp trả lời OK kèm mã của từng cái (ví dụ OK "
@@ -686,7 +700,7 @@ async def handle(cmd: OwnerCommand, ctx: Context, *, overrides: Mapping[str, Han
         if cmd.kind == "nhap":
             return await nhap(cmd, ctx)
         if cmd.kind == "hoi":
-            return await hoi(cmd, ctx)
+            return await (ctx.hoi_fn or hoi)(cmd, ctx)
         return Reply(UNKNOWN)
     except Exception:  # noqa: BLE001 — một lệnh lỗi không được làm sập vòng nhận tin
         log.exception("%s: lệnh %s lỗi", cmd.via, cmd.kind)
