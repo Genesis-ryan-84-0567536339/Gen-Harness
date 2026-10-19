@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 """/gen — khung chat Gen (docs/design/gen-v1.md §3.2). Chỉ người có Gen (cờ `gen.enabled` + vai trò) dùng được.
 
 Truyền kết quả: WS sẵn có (`gen.step`/`gen.done`, lọc `to_user`) + `GET /gen/turns/{id}` dự phòng — lý do chọn WS
@@ -29,7 +30,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.auth import rbac, service
-from gh.auth.deps import current_user, require_owner
+from gh.auth.deps import current_user, require, require_owner
 from gh.biz.market import routes as market_routes
 from gh.biz.relations import routes as relations_routes
 from gh.chassis import actionlog
@@ -721,3 +722,77 @@ async def source_cases(status: str | None = Query(None, max_length=40),
 async def source_case(case_id: uuid.UUID, user: service.CurrentUser = Depends(require_owner),
                       db: AsyncSession = DB) -> Any:
     return _for_model(await market_routes.get_case(case_id, user=user, db=db))
+
+
+# ─── v0.1.74: danh bạ nhóm / người + tin nhóm gần đây (tool group.list / person.list / group.recent) ───────────────────
+# Chỉ ĐỌC, áp đúng phạm vi `profile.read` + «Quyền xem» của nhóm (gh.biz.core.scope), che bằng `_for_model` trước khi tới model.
+
+_READ_PROFILE = require("profile.read")
+SNIPPET_MAX = 160
+
+
+@router.get("/sources/groups")
+async def source_groups(q: str | None = Query(None, max_length=100), limit: int = Query(10, ge=1, le=20),
+                        user: service.CurrentUser = Depends(_READ_PROFILE), db: AsyncSession = DB) -> Any:
+    res = await relations_routes.list_groups(channel_id=None, kind=None, listen_mode=None, q=q, cursor=None,
+                                             limit=limit, user=user, db=db)
+    items = [{"id": g["id"], "name": g["name"], "kind": g["kind"], "listen_mode": g["listen_mode"],
+              "member_count": g["member_count"], "events_24h": g["events_24h"],
+              "channel": (g.get("channel") or {}).get("type")} for g in res["items"]]
+    return _for_model({"items": items, "total": res["total"]})
+
+
+@router.get("/sources/people")
+async def source_people(q: str | None = Query(None, max_length=100), limit: int = Query(10, ge=1, le=20),
+                        user: service.CurrentUser = Depends(_READ_PROFILE), db: AsyncSession = DB) -> Any:
+    res = await relations_routes.list_people(relation=None, heat=None, value=None, priority=None, bot=None,
+                                             channel=None, q=q, cursor=None, limit=limit, user=user, db=db)
+    items = [{"id": p["id"], "name": p["name"], "relation": p.get("relation"), "channels": p.get("channels")}
+             for p in res["items"]]
+    return _for_model({"items": items, "total": res["total"]})
+
+
+@router.get("/sources/groups/recent")
+async def source_groups_recent(group_id: uuid.UUID | None = None, hours: int = Query(24, ge=1, le=168),
+                               limit: int = Query(10, ge=1, le=20),
+                               user: service.CurrentUser = Depends(_READ_PROFILE), db: AsyncSession = DB) -> Any:
+    """Nhóm nào có tin mới: mỗi nhóm (có tin trong `hours` giờ) kèm số tin, giờ tin cuối và vài đoạn trích mới nhất; có
+    `group_id` ⇒ chỉ nhóm đó với tới `limit` tin gần nhất. Chỉ nhóm người hỏi được xem (phạm vi + «Quyền xem»)."""
+    from gh.biz.core.scope import not_found as scope_not_found
+    from gh.biz.core.scope import scope_for
+    from gh.data.common import iso
+
+    sc = await scope_for(db, user, "profile.read")
+    where, params = sc.group_sql("g")
+    base: dict[str, Any] = {"o": user.org_id, "h": hours, **params}
+    gcond = ""
+    if group_id is not None:
+        gcond = " AND g.id = :gid"
+        base["gid"] = group_id
+    rows = (await db.execute(text(f"""
+        SELECT g.id, g.name, c.type AS channel, g.listen_mode, count(*) AS n, max(e.occurred_at) AS last_at
+        FROM raw.events e JOIN core.groups g ON g.id = e.group_id AND g.org_id = :o
+        JOIN core.channels c ON c.id = g.channel_id
+        WHERE e.org_id = :o AND e.occurred_at > now() - make_interval(hours => :h) AND {where}{gcond}
+        GROUP BY g.id, g.name, c.type, g.listen_mode ORDER BY max(e.occurred_at) DESC LIMIT :lim"""),  # noqa: S608
+        {**base, "lim": 1 if group_id else min(limit, 8)})).all()
+    if group_id is not None and not rows:
+        visible = (await db.execute(text(f"SELECT 1 FROM core.groups g WHERE g.org_id = :o AND g.id = :gid AND {where}"),  # noqa: S608
+                                    {"o": user.org_id, "gid": group_id, **params})).first()
+        if not visible:
+            raise scope_not_found("Nhóm")
+    out = []
+    for r in rows:
+        msgs = (await db.execute(text("""
+            SELECT e.occurred_at, e.direction, e.body_text, p.display_name AS who
+            FROM raw.events e LEFT JOIN core.person_identities pi ON pi.id = e.sender_identity_id
+            LEFT JOIN core.persons p ON p.id = pi.person_id
+            WHERE e.org_id = :o AND e.group_id = :g AND e.kind = 'text' AND COALESCE(e.body_text, '') <> ''
+              AND e.occurred_at > now() - make_interval(hours => :h)
+            ORDER BY e.occurred_at DESC LIMIT :n"""),
+                                   {"o": user.org_id, "g": r.id, "h": hours, "n": limit if group_id else 3})).all()
+        out.append({"id": str(r.id), "name": r.name, "channel": r.channel, "listen_mode": r.listen_mode,
+                    "so_tin": r.n, "tin_cuoi": iso(r.last_at),
+                    "tin_moi": [{"luc": iso(m.occurred_at), "tu": "bot" if m.direction == "outbound" else (m.who or "?"),
+                                 "noi_dung": str(m.body_text)[:SNIPPET_MAX]} for m in reversed(msgs)]})
+    return _for_model({"hours": hours, "items": out})

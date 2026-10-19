@@ -4,6 +4,7 @@ Model trả MỘT khối JSON `{"steps": [GenStep, …]}`. Sai schema (`extra="f
 "Gen chưa hiểu" và không thực thi gì.
 """
 
+import json
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
@@ -20,13 +21,16 @@ DATA_TOOL_NAMES = ("overview.summary", "queue.list", "draft.list", "draft.get", 
                    "document.list", "document.get", "deal.list", "deal.get", "case.list", "case.get", "hub.calendar",
                    "hub.tasks", "hub.mail_search", "hub.mail_read", "hub.drive_search",
                    # v0.1.54 (g1-api): Gen hướng dẫn — việc vận hành Sếp cần làm, tiến độ x/N, bài học (chỉ Owner)
-                   "coach.status")
+                   "coach.status",
+                   # v0.1.74: danh bạ nhóm / người + tin nhóm gần đây (chỉ đọc, theo «Quyền xem»)
+                   "group.list", "group.recent", "person.list")
 DataToolName = Literal["overview.summary", "queue.list", "draft.list", "draft.get", "profile.search", "profile.get",
                        "opportunity.list", "people.care", "audit.list", "system.health", "guide.list", "screens.list",
                        "task.list", "staff.list", "refinery.summary", "hub.kho_summary", "hub.kho_search",
                        "hub.kho_get", "social.accounts", "social.read", "document.list", "document.get", "deal.list",
                        "deal.get", "case.list", "case.get", "hub.calendar", "hub.tasks", "hub.mail_search",
-                       "hub.mail_read", "hub.drive_search", "coach.status"]
+                       "hub.mail_read", "hub.drive_search", "coach.status", "group.list", "group.recent",
+                       "person.list"]
 
 
 class _M(BaseModel):
@@ -223,12 +227,31 @@ def _strip_fence(text: str) -> str:
     return t.strip()
 
 
+def _embedded_json(text: str) -> Any:
+    """Khối JSON hợp lệ ĐẦU TIÊN (object có `steps` / `kind`, hoặc mảng bước) nằm lẫn trong văn bản; không có ⇒ None."""
+    dec = json.JSONDecoder()
+    for i, ch in enumerate(text[:60000]):
+        if ch not in "{[":
+            continue
+        try:
+            obj, _ = dec.raw_decode(text, i)
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and ("steps" in obj or "kind" in obj):
+            return obj
+        if isinstance(obj, list) and obj and all(isinstance(x, dict) and "kind" in x for x in obj):
+            return obj
+    return None
+
+
 def parse(text: str) -> Envelope:
     """Đọc envelope; chấp nhận `{"steps": […]}`, một bước lẻ `{"kind": …}` hoặc mảng bước."""
     try:
         data = orjson.loads(_strip_fence(text))
     except orjson.JSONDecodeError as e:
-        raise EnvelopeError(f"không phải JSON: {e}") from e
+        data = _embedded_json(text)      # v0.1.74: JSON nằm lẫn trong văn xuôi (Antigravity CLI hay kèm lời dẫn)
+        if data is None:
+            raise EnvelopeError(f"không phải JSON: {e}") from e
     if isinstance(data, list):
         data = {"steps": data}
     elif isinstance(data, dict) and "kind" in data:

@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 """Công cụ dữ liệu CHỈ ĐỌC của Gen (docs/design/gen-v1.md §3.4; v2 thêm task.list, staff.list;
 v0.1.25 thêm refinery.summary; v0.1.26 thêm hub.kho_* — đọc Kho dữ liệu qua Gen-hub, chỉ Owner, đã che trước khi vào
 model; v0.1.49 (QD-16) thêm document.*/deal.*/case.* — Tài liệu, Deal, Vụ việc nội bộ, và hub.calendar/tasks/
@@ -67,6 +68,17 @@ TOOLS: dict[str, Tool] = {t.name: t for t in (
          {"q": None}, default_query={"limit": "20"}),
     Tool("profile.get", "Hồ sơ sống của một người theo args.id", ("profile.read",), "/profile/{id}",
          path_args=("id",)),
+    # v0.1.74 (Nợ #68): danh bạ nhóm / người — để Gen tra id người nhận trước khi đề xuất draft_message (id lấy từ kết quả
+    # tool mới hợp lệ). Bọc endpoint danh bạ sẵn có nên áp đúng phạm vi `profile.read` của người hỏi.
+    Tool("group.list", "Danh bạ NHÓM chat (id, tên, kênh, số thành viên); args.q = một phần tên nhóm — dùng để lấy id nhóm "
+         "trước khi đề xuất soạn tin gửi nhóm", ("profile.read",), "/gen/sources/groups", {"q": None},
+         default_query={"limit": "10"}),
+    Tool("group.recent", "Nhóm nào có tin mới: số tin, giờ tin cuối và vài đoạn trích mới nhất mỗi nhóm; args.hours "
+         "1..168 (mặc định 24), args.group_id (tuỳ chọn, UUID từ group.list: chỉ nhóm đó, nhiều tin hơn). Chỉ nhóm Sếp "
+         "được xem", ("profile.read",), "/gen/sources/groups/recent",
+         {"hours": tuple(str(i) for i in range(1, 169)), "group_id": None}, default_query={"limit": "10"}),
+    Tool("person.list", "Danh bạ NGƯỜI (id, tên, kênh, quan hệ); args.q = một phần tên — dùng để lấy id người nhận trước khi "
+         "đề xuất soạn tin", ("profile.read",), "/gen/sources/people", {"q": None}, default_query={"limit": "10"}),
     Tool("opportunity.list", "Cơ hội; args.stage, args.confidence ∈ high|medium|low", ("opportunity.read",),
          "/opportunities", {"stage": None, "confidence": ("high", "medium", "low")}, default_query={"limit": "20"}),
     Tool("people.care", "Thời gian phản hồi khách theo từng nhân viên", ("care.read",), "/care/response-times"),

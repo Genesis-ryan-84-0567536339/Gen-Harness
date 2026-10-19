@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 """Định tuyến lượt gọi model: gán theo vai trò, xoay vòng khoá, hạn mức, ngắt mạch, chuỗi chuyển hướng.
 
 Theo `failoverRules` của thiết kế (ARCHITECTURE §11):
@@ -716,6 +717,12 @@ class ModelRouter:
                     await self._fail(p, via)
                     provider_down.add(down_id)
                     reasons.append(f"{p.name}: {str(e)[:120]}")
+                    break
+                if not str(c.text or "").strip():
+                    # v0.1.74: nguồn báo thành công nhưng chữ RỖNG (Antigravity CLI từng trả 0 ký tự dù tốn ~3000 token) ⇒ coi
+                    # là lỗi nhà cung cấp, thử model / nguồn kế tiếp trong chuỗi thay vì đưa chữ rỗng cho bên gọi.
+                    await self._record(org_id, m.id, kid, agent_key, purpose, "error", started, None)
+                    reasons.append(f"{p.name}: {m.model_name} trả về chữ rỗng")
                     break
                 await self._record(org_id, m.id, kid, agent_key, purpose, "ok", started, c)
                 await self.redis.delete(fail_key(p.id, via))
