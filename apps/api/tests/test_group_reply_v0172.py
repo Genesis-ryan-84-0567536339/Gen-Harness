@@ -222,6 +222,10 @@ async def call_world(db: Any, org: uuid.UUID, mode: str = "silent") -> tuple[uui
     await bot_world(db, org)
     gid = await listen(db, org, "g1", mode=mode)
     [eid] = await put(SM(), org, msg("@bot tóm tắt giúp mình hôm nay nhóm bàn gì", group="g1", sender=OWNER_ZALO, name="Sếp Ryan", mentions=True))
+    # Câu hỏi «ai thêm em vào nhóm» do dựng nhóm sinh ra nằm trong hàng chờ báo Sếp; `handle_owner_call` flush cả hàng chờ,
+    # nên ngoài giờ yên lặng (7h–21h VN) nó ra thêm một tin riêng ⇒ test lệch theo giờ chạy. Dọn để chỉ đếm tin của lượt gọi.
+    await db.execute(text("DELETE FROM ops.owner_outbox"))
+    await db.commit()
     return gid, str(eid)
 
 
